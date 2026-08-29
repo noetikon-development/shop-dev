@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { Heart, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -23,30 +24,24 @@ export function ProductCard({
 }) {
   const wished = useWishlist((s) => s.slugs.includes(product.slug));
   const toggleWish = useWishlist((s) => s.toggle);
-  const addLine = useCart((s) => s.addLine);
+  const add = useCart((s) => s.add);
+  const [adding, setAdding] = useState(false);
 
   const href = `/p/${product.slug}`;
   const hasVariants = product.colorSwatches.length > 0;
+  const canQuickAdd = !hasVariants && product.inStock && Boolean(product.defaultVariantId);
 
-  function quickAdd() {
-    if (hasVariants) return; // needs a choice — go to PDP
-    addLine(
-      {
-        productId: product.id,
-        slug: product.slug,
-        name: product.name,
-        variantId: `${product.id}-default`,
-        variantLabel: "",
-        optionSummary: "",
-        unitPrice: product.price,
-        compareAtPrice: product.compareAtPrice,
-        imageUrl: product.image.url,
-        maxStock: 99,
-        freeShipping: product.freeShipping,
-      },
-      1,
-    );
-    toast.success(`Added ${product.name} to your bag`);
+  async function quickAdd() {
+    if (!product.defaultVariantId || adding) return;
+    setAdding(true);
+    const res = await add({
+      productId: product.id,
+      variantId: product.defaultVariantId,
+      quantity: 1,
+    });
+    setAdding(false);
+    if (res.ok) toast.success(`Added ${product.name} to your bag`);
+    else toast.error(res.error ?? "Couldn’t add that to your bag");
   }
 
   return (
@@ -80,13 +75,14 @@ export function ProductCard({
           </button>
         </div>
 
-        {!hasVariants && product.inStock && (
+        {canQuickAdd && (
           <button
             type="button"
             onClick={quickAdd}
-            className="absolute inset-x-3 bottom-3 flex translate-y-2 items-center justify-center gap-1.5 rounded-sm bg-ink/95 py-2.5 text-xs font-medium text-paper opacity-0 backdrop-blur transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 focus-visible:translate-y-0 focus-visible:opacity-100"
+            disabled={adding}
+            className="absolute inset-x-3 bottom-3 flex translate-y-2 items-center justify-center gap-1.5 rounded-sm bg-ink/95 py-2.5 text-xs font-medium text-paper opacity-0 backdrop-blur transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 focus-visible:translate-y-0 focus-visible:opacity-100 disabled:opacity-60"
           >
-            <Plus size={14} /> Quick add
+            <Plus size={14} /> {adding ? "Adding…" : "Quick add"}
           </button>
         )}
 

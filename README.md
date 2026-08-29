@@ -212,6 +212,42 @@ built on the Step 4 UI kit and Step 3 RBAC.
   during checkout, no separate final deduction step. `reserved` is `0`
   everywhere today.
 
+## Shopping cart & persistence (Step 7)
+
+Database-backed cart. `src/lib/cart.ts` (server-only) owns all logic;
+`src/lib/cart-actions.ts` is the only browser-facing surface;
+`src/lib/cart-store.ts` (Zustand) mirrors server state and `<CartProvider>`
+(in the storefront layout) drives hydration + the guest→customer merge.
+
+- **Ownership is resolved server-side, every call.** Signed-in customer → the
+  one ACTIVE `Cart` for their `userId`. Guest → the `Cart` whose opaque
+  256-bit token matches the httpOnly `axiaro_cart` cookie. The browser never
+  sends a cart id, item id or price — only a variant id and a quantity.
+- **Every mutation re-validates**: variant exists, product + variant `ACTIVE`,
+  variant belongs to the product, inventory row exists, and quantity is capped
+  to `available = Inventory.quantity − Inventory.reserved`. Price and line
+  totals are always read live from `Variant.price`. `CartItem.priceSnapshot`
+  is a display cache, refreshed on write and never treated as authoritative.
+- **A cart is not a reservation** — cart operations never touch
+  `Inventory.reserved`. Stock reservation belongs to the future checkout step.
+- **Guest → customer merge** (`mergeGuestCartCore`, run once on the first
+  authenticated cart bootstrap, then the cookie is dropped): identical variants
+  are combined (not duplicated), quantities are re-validated against live
+  inventory and capped, and the customer is told what changed.
+- **Actions:** `getCart`, `addToCart`, `updateCartItem`, `removeCartItem`,
+  `clearCart`, `syncCart`/`mergeGuestCart`. No admin permissions — this is
+  customer/guest functionality. No `AdminAuditLog` entries for shopping.
+- **Schema (additive):** `Cart` (userId? / token? / status
+  `ACTIVE|CONVERTED|ABANDONED` / timestamps) + `CartItem`
+  (`@@unique([cartId, variantId])`, `priceSnapshot`). DB guards:
+  partial unique index `one ACTIVE cart per userId`, `CHECK` (cart has an
+  owner; `0 < quantity ≤ 99`; `priceSnapshot ≥ 0`). Concurrent adds of the
+  same variant use an atomic `INSERT … ON CONFLICT DO UPDATE SET quantity =
+  LEAST(…)`.
+- **UI:** unchanged layout. `<CartButton>` count, `<CartDrawer>` and
+  `/cart` all read the one store; unavailable / over-stock lines are flagged
+  inline and excluded from the subtotal and from checkout.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only); `src/lib/actions.ts` holds the

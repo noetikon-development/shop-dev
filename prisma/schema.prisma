@@ -43,12 +43,13 @@ model User {
   orders    Order[]
   reviews   Review[]
   wishlist  WishlistItem[]
+  carts     Cart[]
 
   // RBAC / admin
-  userRoles     UserRole[]
-  invitesSent   AdminInvite[]   @relation("AdminInviteInvitedBy")
-  invitesAccepted AdminInvite[] @relation("AdminInviteAcceptedBy")
-  auditEvents   AdminAuditLog[] @relation("AdminAuditActor")
+  userRoles            UserRole[]
+  invitesSent          AdminInvite[]         @relation("AdminInviteInvitedBy")
+  invitesAccepted      AdminInvite[]         @relation("AdminInviteAcceptedBy")
+  auditEvents          AdminAuditLog[]       @relation("AdminAuditActor")
   inventoryAdjustments InventoryAdjustment[] @relation("InventoryAdjustmentActor")
 }
 
@@ -63,13 +64,13 @@ model User {
 // ----------------------------------------------------------------------------
 
 model Role {
-  id          String  @id @default(cuid())
-  key         String  @unique // stable machine key, e.g. "SUPER_ADMIN"
-  name        String          // human label, e.g. "Super Admin"
+  id          String   @id @default(cuid())
+  key         String   @unique // stable machine key, e.g. "SUPER_ADMIN"
+  name        String // human label, e.g. "Super Admin"
   description String?
   // System roles ship with the product and cannot be deleted from the UI.
-  isSystem    Boolean @default(true)
-  sortOrder   Int     @default(0)
+  isSystem    Boolean  @default(true)
+  sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -79,11 +80,11 @@ model Role {
 }
 
 model Permission {
-  id          String  @id @default(cuid())
-  key         String  @unique // e.g. "view_products"
+  id          String   @id @default(cuid())
+  key         String   @unique // e.g. "view_products"
   description String?
-  group       String  @default("General") // UI grouping, e.g. "Products"
-  sortOrder   Int     @default(0)
+  group       String   @default("General") // UI grouping, e.g. "Products"
+  sortOrder   Int      @default(0)
   createdAt   DateTime @default(now())
 
   rolePermissions RolePermission[]
@@ -127,11 +128,11 @@ model RolePermission {
 // authenticated request.
 model AdminInvite {
   id             String    @id @default(cuid())
-  email          String    // lower-cased
+  email          String // lower-cased
   roleId         String
   invitedById    String
   status         String    @default("PENDING") // PENDING | ACCEPTED | REVOKED
-  supabaseUserId String?   // Supabase auth user id created by the invite email
+  supabaseUserId String? // Supabase auth user id created by the invite email
   acceptedById   String?
   acceptedAt     DateTime?
   createdAt      DateTime  @default(now())
@@ -152,10 +153,10 @@ model AdminInvite {
 model AdminAuditLog {
   id          String   @id @default(cuid())
   actorUserId String?
-  action      String   // e.g. "admin.login", "admin.role.assign"
-  targetType  String?  // e.g. "user", "invite"
+  action      String // e.g. "admin.login", "admin.role.assign"
+  targetType  String? // e.g. "user", "invite"
   targetId    String?
-  summary     String?  // short human-readable description
+  summary     String? // short human-readable description
   meta        String   @default("{}") // JSON-encoded detail
   createdAt   DateTime @default(now())
 
@@ -167,9 +168,9 @@ model AdminAuditLog {
 }
 
 model Address {
-  id         String  @id @default(cuid())
+  id         String   @id @default(cuid())
   userId     String
-  label      String  @default("Home")
+  label      String   @default("Home")
   recipient  String
   phone      String
   line1      String
@@ -179,10 +180,10 @@ model Address {
   province   String
   region     String?
   postalCode String
-  isDefault  Boolean @default(false)
+  isDefault  Boolean  @default(false)
   createdAt  DateTime @default(now())
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   orders Order[]
 
   @@index([userId])
@@ -193,16 +194,16 @@ model Address {
 // ----------------------------------------------------------------------------
 
 model Category {
-  id          String     @id @default(cuid())
-  name        String
-  slug        String     @unique
-  description String?
-  imageUrl    String?    // resolved public URL of `imageMedia` (kept for the storefront read path)
-  imageMediaId String?   // uploaded image in Supabase Storage (Step 5 admin)
-  heroColor   String?    // used for category tiles / headers
-  sortOrder   Int        @default(0)
-  featured    Boolean    @default(false)
-  active      Boolean    @default(true) // inactive / archived categories are hidden from the storefront
+  id           String  @id @default(cuid())
+  name         String
+  slug         String  @unique
+  description  String?
+  imageUrl     String? // resolved public URL of `imageMedia` (kept for the storefront read path)
+  imageMediaId String? // uploaded image in Supabase Storage (Step 5 admin)
+  heroColor    String? // used for category tiles / headers
+  sortOrder    Int     @default(0)
+  featured     Boolean @default(false)
+  active       Boolean @default(true) // inactive / archived categories are hidden from the storefront
 
   parentId String?
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
@@ -216,36 +217,36 @@ model Category {
 }
 
 model Product {
-  id             String   @id @default(cuid())
-  name           String
-  slug           String   @unique
-  brand          String   @default("AXIARO")
+  id               String @id @default(cuid())
+  name             String
+  slug             String @unique
+  brand            String @default("AXIARO")
   shortDescription String
-  description    String   // long-form, supports line breaks
-  categoryId     String
-  status         String   @default("ACTIVE") // ACTIVE | DRAFT | ARCHIVED
+  description      String // long-form, supports line breaks
+  categoryId       String
+  status           String @default("ACTIVE") // ACTIVE | DRAFT | ARCHIVED
 
-  price          Int      // selling price, in centavos
-  compareAtPrice Int?     // original price for showing a markdown
+  price          Int // selling price, in centavos
+  compareAtPrice Int? // original price for showing a markdown
   costPrice      Int?
 
-  ratingAvg      Float    @default(0)
-  ratingCount    Int      @default(0)
-  soldCount      Int      @default(0)
+  ratingAvg   Float @default(0)
+  ratingCount Int   @default(0)
+  soldCount   Int   @default(0)
 
-  badges         String   @default("[]") // JSON string: ["new","bestseller"]
-  highlights     String   @default("[]") // JSON string: bullet list of selling points
-  specs          String   @default("{}") // JSON string: { "Material": "Oak", ... }
-  care           String?
+  badges     String  @default("[]") // JSON string: ["new","bestseller"]
+  highlights String  @default("[]") // JSON string: bullet list of selling points
+  specs      String  @default("{}") // JSON string: { "Material": "Oak", ... }
+  care       String?
 
-  freeShipping   Boolean  @default(false)
-  featured       Boolean  @default(false) // admin-controlled; drives future "featured products" merchandising
-  weightGrams    Int      @default(500)
+  freeShipping Boolean @default(false)
+  featured     Boolean @default(false) // admin-controlled; drives future "featured products" merchandising
+  weightGrams  Int     @default(500)
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  category Category      @relation(fields: [categoryId], references: [id])
+  category Category        @relation(fields: [categoryId], references: [id])
   images   ProductImage[]
   options  ProductOption[]
   variants Variant[]
@@ -258,15 +259,15 @@ model Product {
 }
 
 model ProductImage {
-  id        String  @id @default(cuid())
-  productId String
-  url       String  // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
-  alt       String  @default("")
-  sortOrder Int     @default(0) // lowest sortOrder is the primary image
+  id            String  @id @default(cuid())
+  productId     String
+  url           String // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
+  alt           String  @default("")
+  sortOrder     Int     @default(0) // lowest sortOrder is the primary image
   // optional link to a specific option value (e.g. the "Sand" colourway)
   optionValueId String?
   // set when the image was uploaded via the admin (Supabase Storage / MediaAsset)
-  mediaAssetId String?
+  mediaAssetId  String?
 
   product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
@@ -276,10 +277,10 @@ model ProductImage {
 }
 
 model ProductOption {
-  id        String  @id @default(cuid())
+  id        String @id @default(cuid())
   productId String
-  name      String  // "Colour", "Size"
-  sortOrder Int     @default(0)
+  name      String // "Colour", "Size"
+  sortOrder Int    @default(0)
 
   product Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   values  ProductOptionValue[]
@@ -290,33 +291,34 @@ model ProductOption {
 model ProductOptionValue {
   id        String  @id @default(cuid())
   optionId  String
-  value     String  // "Sand", "Large"
+  value     String // "Sand", "Large"
   swatchHex String? // for colour options
   sortOrder Int     @default(0)
 
-  option        ProductOption          @relation(fields: [optionId], references: [id], onDelete: Cascade)
+  option        ProductOption        @relation(fields: [optionId], references: [id], onDelete: Cascade)
   variantValues VariantOptionValue[]
 
   @@index([optionId])
 }
 
 model Variant {
-  id         String  @id @default(cuid())
-  productId  String
-  sku        String  @unique
-  price      Int     // absolute price for this variant, in centavos
+  id             String  @id @default(cuid())
+  productId      String
+  sku            String  @unique
+  price          Int // absolute price for this variant, in centavos
   compareAtPrice Int?
-  status     String  @default("ACTIVE") // ACTIVE | ARCHIVED (archived = not purchasable)
+  status         String  @default("ACTIVE") // ACTIVE | ARCHIVED (archived = not purchasable)
   // Denormalised AVAILABLE stock (Inventory.quantity - Inventory.reserved). The
   // storefront reads this; every inventory mutation in src/lib/inventory.ts
   // keeps it in sync. Inventory is the source of truth.
-  stock      Int     @default(0)
-  imageUrl   String?
+  stock          Int     @default(0)
+  imageUrl       String?
 
-  product     Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product      Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues VariantOptionValue[]
-  orderItems  OrderItem[]
-  inventory   Inventory?
+  orderItems   OrderItem[]
+  cartItems    CartItem[]
+  inventory    Inventory?
 
   @@index([productId])
   @@index([status])
@@ -416,23 +418,70 @@ model WishlistItem {
 }
 
 // ----------------------------------------------------------------------------
+// Cart (Step 7)
+//
+// One row per shopping session. Ownership is EITHER a signed-in customer
+// (`userId`) OR an anonymous guest (`token`, carried in an httpOnly cookie —
+// the browser never sees a cart id). A partial unique index (see
+// supabase/migrations/20260829140100_rls_and_grants.sql §7) enforces exactly
+// one ACTIVE cart per user. `status` lifecycle: ACTIVE -> CONVERTED (order
+// placed) / ABANDONED. All cart mutations go through src/lib/cart.ts, which
+// re-validates the variant, product status, price and available inventory
+// server-side on every operation. A cart is NOT a stock reservation.
+// ----------------------------------------------------------------------------
+
+model Cart {
+  id        String   @id @default(cuid())
+  userId    String?
+  token     String?  @unique // opaque guest identifier (httpOnly cookie), null for customer carts
+  status    String   @default("ACTIVE") // ACTIVE | CONVERTED | ABANDONED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  items CartItem[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model CartItem {
+  id            String   @id @default(cuid())
+  cartId        String
+  variantId     String
+  quantity      Int
+  // Display cache only — the authoritative price is always Variant.price, read
+  // live on every getCart / mutation. Refreshed whenever the item is written.
+  priceSnapshot Int
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([cartId, variantId])
+  @@index([cartId])
+  @@index([variantId])
+}
+
+// ----------------------------------------------------------------------------
 // Promotions
 // ----------------------------------------------------------------------------
 
 model Coupon {
-  id           String   @id @default(cuid())
-  code         String   @unique
-  description  String?
-  type         String   // PERCENT | FIXED | FREESHIP
-  value        Int      @default(0) // percent (0-100) or centavos
-  minSubtotal  Int      @default(0)
-  maxDiscount  Int?
-  startsAt     DateTime?
-  expiresAt    DateTime?
-  usageLimit   Int?
-  usedCount    Int      @default(0)
-  active       Boolean  @default(true)
-  createdAt    DateTime @default(now())
+  id          String    @id @default(cuid())
+  code        String    @unique
+  description String?
+  type        String // PERCENT | FIXED | FREESHIP
+  value       Int       @default(0) // percent (0-100) or centavos
+  minSubtotal Int       @default(0)
+  maxDiscount Int?
+  startsAt    DateTime?
+  expiresAt   DateTime?
+  usageLimit  Int?
+  usedCount   Int       @default(0)
+  active      Boolean   @default(true)
+  createdAt   DateTime  @default(now())
 
   orders Order[]
 }
@@ -442,37 +491,37 @@ model Coupon {
 // ----------------------------------------------------------------------------
 
 model Order {
-  id           String   @id @default(cuid())
-  orderNumber  String   @unique
-  userId       String?
-  email        String
-  phone        String?
+  id          String  @id @default(cuid())
+  orderNumber String  @unique
+  userId      String?
+  email       String
+  phone       String?
 
-  status       String   @default("PENDING")
+  status String @default("PENDING")
   // PENDING | PAID | PROCESSING | SHIPPED | OUT_FOR_DELIVERY | DELIVERED | CANCELLED
 
-  subtotal     Int
-  shippingFee  Int      @default(0)
-  discountTotal Int     @default(0)
-  grandTotal   Int
+  subtotal      Int
+  shippingFee   Int @default(0)
+  discountTotal Int @default(0)
+  grandTotal    Int
 
-  couponId     String?
-  couponCode   String?
+  couponId   String?
+  couponCode String?
 
-  paymentMethod String  @default("COD") // COD | CARD | GCASH
-  paymentStatus String  @default("UNPAID") // UNPAID | PAID | REFUNDED
+  paymentMethod String @default("COD") // COD | CARD | GCASH
+  paymentStatus String @default("UNPAID") // UNPAID | PAID | REFUNDED
 
   addressId       String?
   shippingAddress String // JSON string snapshot at time of order
-  shippingMethod  String @default("standard")
+  shippingMethod  String  @default("standard")
 
-  note         String?
-  placedAt     DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  note      String?
+  placedAt  DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  user    User?    @relation(fields: [userId], references: [id])
-  address Address? @relation(fields: [addressId], references: [id])
-  coupon  Coupon?  @relation(fields: [couponId], references: [id])
+  user    User?        @relation(fields: [userId], references: [id])
+  address Address?     @relation(fields: [addressId], references: [id])
+  coupon  Coupon?      @relation(fields: [couponId], references: [id])
   items   OrderItem[]
   events  OrderEvent[]
 
@@ -563,7 +612,7 @@ model ContentBlock {
   id        String   @id @default(cuid())
   key       String   @unique // stable identifier, e.g. "homepage.hero"
   area      String   @default("homepage") // homepage | global | …
-  type      String   // hero | banner | collection | featured_products | richtext | …
+  type      String // hero | banner | collection | featured_products | richtext | …
   title     String?
   data      String   @default("{}") // JSON payload for this block type
   position  Int      @default(0)
@@ -580,8 +629,8 @@ model ContentBlock {
 model MediaAsset {
   id        String   @id @default(cuid())
   bucket    String   @default("media")
-  path      String   // object path within the bucket
-  url       String   // resolved public URL
+  path      String // object path within the bucket
+  url       String // resolved public URL
   filename  String
   mimeType  String
   sizeBytes Int

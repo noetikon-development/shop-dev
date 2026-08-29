@@ -52,11 +52,13 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
 
   const itemsForOrder = useMemo(
     () =>
-      lines.map((l) => ({
-        productId: l.productId,
-        variantId: l.variantId,
-        quantity: l.quantity,
-      })),
+      lines
+        .filter((l) => !l.unavailable)
+        .map((l) => ({
+          productId: l.productId,
+          variantId: l.variantId,
+          quantity: Math.min(l.quantity, l.available),
+        })),
     [lines],
   );
 
@@ -64,10 +66,14 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
     e.preventDefault();
     setError(null);
 
-    if (lines.some((l) => l.variantId.endsWith("-default"))) {
+    if (lines.some((l) => l.unavailable)) {
       setError(
-        "One or more items need a variant selected. Please remove and re-add them from the product page.",
+        "Some items in your bag are no longer available. Please remove them to continue.",
       );
+      return;
+    }
+    if (itemsForOrder.length === 0) {
+      setError("Your bag has no items available to order.");
       return;
     }
 
@@ -96,7 +102,7 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
     setSubmitting(false);
 
     if (res.ok) {
-      clear();
+      await clear();
       toast.success("Order placed");
       router.push(`/order/${res.orderNumber}`);
     } else {
@@ -271,12 +277,14 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
         <div className="card-surface p-5">
           <h2 className="text-lg">Your order</h2>
           <ul className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
-            {lines.map((l) => (
-              <li key={l.key} className="flex gap-3">
+            {lines.map((l) => {
+              const qty = Math.min(l.quantity, l.available);
+              return (
+              <li key={l.key} className={cn("flex gap-3", l.unavailable && "opacity-50")}>
                 <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
                   <ProductImage src={l.imageUrl} alt={l.name} />
                   <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-[10px] font-semibold text-paper">
-                    {l.quantity}
+                    {l.unavailable ? 0 : qty}
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
@@ -284,10 +292,16 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
                   {l.optionSummary && (
                     <p className="text-xs text-ink-faint">{l.optionSummary}</p>
                   )}
+                  {l.unavailable && (
+                    <p className="text-xs font-medium text-sale">No longer available</p>
+                  )}
                 </div>
-                <span className="text-sm tabular-nums">{formatPrice(l.unitPrice * l.quantity)}</span>
+                <span className="text-sm tabular-nums">
+                  {l.unavailable ? "—" : formatPrice(l.unitPrice * qty)}
+                </span>
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           <div className="mt-4 border-t border-line pt-4">
@@ -303,7 +317,7 @@ export function CheckoutForm({ prefill }: { prefill: Prefill }) {
 
           <button
             type="submit"
-            disabled={submitting || (hydrated && lines.length === 0)}
+            disabled={submitting || (hydrated && itemsForOrder.length === 0)}
             className="btn btn-primary mt-5 w-full"
           >
             {submitting ? <Loader2 size={15} className="animate-spin" /> : <Lock size={15} />}

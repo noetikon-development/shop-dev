@@ -41,7 +41,7 @@ const cardSelect = {
   },
   variants: {
     where: { status: "ACTIVE" },
-    select: { stock: true, inventory: { select: { reorderPoint: true } } },
+    select: { id: true, stock: true, inventory: { select: { reorderPoint: true } } },
   },
 } as const;
 
@@ -62,7 +62,7 @@ type CardRow = {
   category: { slug: string; name: string };
   images: { url: string; alt: string }[];
   options: { values: { swatchHex: string | null }[] }[];
-  variants: { stock: number; inventory: { reorderPoint: number } | null }[];
+  variants: { id: string; stock: number; inventory: { reorderPoint: number } | null }[];
 };
 
 function toCard(p: CardRow): ProductCardView {
@@ -93,6 +93,7 @@ function toCard(p: CardRow): ProductCardView {
     colorSwatches: swatches,
     inStock: p.variants.some((v) => v.stock > 0),
     stockStatus,
+    defaultVariantId: p.variants.length === 1 ? p.variants[0].id : null,
     createdAt: p.createdAt.toISOString(),
   };
 }
@@ -480,6 +481,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0),
       ),
     ),
+    defaultVariantId: activeVariants.length === 1 ? activeVariants[0].id : null,
     totalStock,
     createdAt: p.createdAt.toISOString(),
     options: p.options.map((o) => ({

@@ -14,7 +14,8 @@ import type { ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
   const openCart = useUI((s) => s.openCart);
-  const addLine = useCart((s) => s.addLine);
+  const add = useCart((s) => s.add);
+  const [adding, setAdding] = useState(false);
   const wished = useWishlist((s) => s.slugs.includes(product.slug));
   const toggleWish = useWishlist((s) => s.toggle);
 
@@ -93,12 +94,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
     return product.images;
   }, [colourName, product.images, product.name, matchedVariant]);
 
-  const optionSummary = product.options
-    .map((o) => o.values.find((v) => v.id === selected[o.id])?.value)
-    .filter(Boolean)
-    .join(" · ");
-
-  function addToBag() {
+  async function addToBag() {
     if (needsSize) {
       toast.error("Please choose a size");
       return;
@@ -107,24 +103,19 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
       toast.error("That combination is out of stock");
       return;
     }
-    addLine(
-      {
-        productId: product.id,
-        slug: product.slug,
-        name: product.name,
-        variantId: matchedVariant.id,
-        variantLabel: optionSummary,
-        optionSummary,
-        unitPrice: matchedVariant.price,
-        compareAtPrice: matchedVariant.compareAtPrice,
-        imageUrl: galleryImages[0]?.url ?? product.image.url,
-        maxStock: matchedVariant.stock,
-        freeShipping: product.freeShipping,
-      },
-      qty,
-    );
-    toast.success(`Added to your bag`);
-    openCart();
+    setAdding(true);
+    const res = await add({
+      productId: product.id,
+      variantId: matchedVariant.id,
+      quantity: qty,
+    });
+    setAdding(false);
+    if (res.ok) {
+      toast.success("Added to your bag");
+      openCart();
+    } else {
+      toast.error(res.error ?? "Couldn’t add that to your bag");
+    }
   }
 
   return (
@@ -326,11 +317,15 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
           <button
             onClick={addToBag}
-            disabled={outOfStock}
+            disabled={outOfStock || adding}
             className="btn btn-primary h-12 flex-1 !py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ShoppingBag size={16} />
-            {outOfStock ? "Out of stock" : `Add to bag · ${formatPrice(activePrice * qty)}`}
+            {outOfStock
+              ? "Out of stock"
+              : adding
+                ? "Adding…"
+                : `Add to bag · ${formatPrice(activePrice * qty)}`}
           </button>
         </div>
 

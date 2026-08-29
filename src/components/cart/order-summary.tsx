@@ -8,7 +8,9 @@ export function useOrderTotals(shippingMethodId?: string) {
   const lines = useCart((s) => s.lines);
   const coupon = useCart((s) => s.coupon);
   return computeTotals({
-    lines: lines.map((l) => ({ unitPrice: l.unitPrice, quantity: l.quantity })),
+    lines: lines
+      .filter((l) => !l.unavailable)
+      .map((l) => ({ unitPrice: l.unitPrice, quantity: Math.min(l.quantity, l.available) })),
     shippingMethodId,
     coupon,
   });

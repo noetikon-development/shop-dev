@@ -47,6 +47,9 @@ export type ProductCardView = {
   colorSwatches: string[];
   inStock: boolean;
   stockStatus: StockStatus;
+  /** The single ACTIVE variant's id when a product has exactly one; null when a
+   *  choice is required (quick-add is then disabled and the card links to PDP). */
+  defaultVariantId: string | null;
   createdAt: string;
 };
 

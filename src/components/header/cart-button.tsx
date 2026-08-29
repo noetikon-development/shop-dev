@@ -7,7 +7,7 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useUI } from "@/lib/ui-store";
 
 export function CartButton() {
-  const count = useCart((s) => s.lines.reduce((n, l) => n + l.quantity, 0));
+  const count = useCart((s) => s.itemCount);
   const hydrated = useCart((s) => s.hydrated);
   const openCart = useUI((s) => s.openCart);
 

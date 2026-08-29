@@ -47,6 +47,11 @@ ALTER TABLE "ContentBlock"        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "MediaAsset"          ENABLE ROW LEVEL SECURITY;
 -- Inventory adjustment history (Step 6, 2026-08-30). Same posture.
 ALTER TABLE "InventoryAdjustment" ENABLE ROW LEVEL SECURITY;
+-- Cart (Step 7, 2026-08-30). Guest + customer carts are only ever read/written
+-- through the app's direct `postgres` connection with server-side ownership
+-- checks. Same posture: RLS on, no policy.
+ALTER TABLE "Cart"               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "CartItem"           ENABLE ROW LEVEL SECURITY;
 
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -78,7 +83,8 @@ END $$;
 --    PRIVILEGES took effect.
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
-  "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment"
+  "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
+  "Cart", "CartItem"
 FROM anon, authenticated;
 
 -- ============================================================================
@@ -93,3 +99,28 @@ ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_available_nonneg;
 ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_available_nonneg CHECK ("quantity" >= "reserved");
 ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_reorder_nonneg;
 ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_reorder_nonneg   CHECK ("reorderPoint" >= 0);
+
+-- ============================================================================
+-- 7. Cart invariants (Step 7). src/lib/cart.ts also guards these; the DB is the
+--    final authority under concurrent writes.
+-- ============================================================================
+-- Exactly one ACTIVE cart per signed-in customer.
+DROP INDEX IF EXISTS "cart_active_user_uniq";
+CREATE UNIQUE INDEX "cart_active_user_uniq"
+  ON "Cart" ("userId")
+  WHERE "userId" IS NOT NULL AND "status" = 'ACTIVE';
+
+-- Every cart must have an owner (a customer or a guest token).
+ALTER TABLE "Cart" DROP CONSTRAINT IF EXISTS cart_has_owner;
+ALTER TABLE "Cart" ADD  CONSTRAINT cart_has_owner
+  CHECK ("userId" IS NOT NULL OR "token" IS NOT NULL);
+
+-- Line quantities are always positive and bounded.
+ALTER TABLE "CartItem" DROP CONSTRAINT IF EXISTS cartitem_quantity_positive;
+ALTER TABLE "CartItem" ADD  CONSTRAINT cartitem_quantity_positive
+  CHECK ("quantity" > 0 AND "quantity" <= 99);
+
+-- Snapshot price is never negative.
+ALTER TABLE "CartItem" DROP CONSTRAINT IF EXISTS cartitem_price_nonneg;
+ALTER TABLE "CartItem" ADD  CONSTRAINT cartitem_price_nonneg
+  CHECK ("priceSnapshot" >= 0);

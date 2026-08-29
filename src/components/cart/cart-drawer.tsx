@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Minus, Plus, Trash2, ShoppingBag } from "lucide-react";
+import { Minus, Plus, Trash2, ShoppingBag, AlertTriangle } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
 import { ProductImage } from "@/components/product-image";
 import { useCart } from "@/lib/cart-store";
@@ -15,10 +15,14 @@ export function CartDrawer() {
   const lines = useCart((s) => s.lines);
   const coupon = useCart((s) => s.coupon);
   const setQuantity = useCart((s) => s.setQuantity);
-  const removeLine = useCart((s) => s.removeLine);
+  const remove = useCart((s) => s.removeItem);
 
+  const purchasable = lines.filter((l) => !l.unavailable);
   const totals = computeTotals({
-    lines: lines.map((l) => ({ unitPrice: l.unitPrice, quantity: l.quantity })),
+    lines: purchasable.map((l) => ({
+      unitPrice: l.unitPrice,
+      quantity: Math.min(l.quantity, l.available),
+    })),
     coupon,
   });
 
@@ -48,9 +52,15 @@ export function CartDrawer() {
             <p className="text-xs text-ink-faint">
               Shipping &amp; taxes calculated at checkout.
             </p>
-            <Link href="/checkout" onClick={closeCart} className="btn btn-primary w-full">
-              Checkout · {formatPrice(totals.grandTotal)}
-            </Link>
+            {purchasable.length > 0 ? (
+              <Link href="/checkout" onClick={closeCart} className="btn btn-primary w-full">
+                Checkout · {formatPrice(totals.grandTotal)}
+              </Link>
+            ) : (
+              <button disabled className="btn btn-primary w-full opacity-50">
+                Checkout
+              </button>
+            )}
             <Link
               href="/cart"
               onClick={closeCart}
@@ -121,7 +131,7 @@ export function CartDrawer() {
                       {l.name}
                     </Link>
                     <button
-                      onClick={() => removeLine(l.key)}
+                      onClick={() => remove(l.variantId)}
                       aria-label="Remove"
                       className="shrink-0 text-ink-faint hover:text-sale"
                     >
@@ -131,32 +141,44 @@ export function CartDrawer() {
                   {l.optionSummary && (
                     <p className="mt-0.5 text-xs text-ink-faint">{l.optionSummary}</p>
                   )}
-                  <div className="mt-2 flex items-center justify-between">
-                    <div className="inline-flex items-center rounded-sm border border-line-strong">
-                      <button
-                        onClick={() => setQuantity(l.key, l.quantity - 1)}
-                        className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                        disabled={l.quantity <= 1}
-                        aria-label="Decrease quantity"
-                      >
-                        <Minus size={13} />
-                      </button>
-                      <span className="w-7 text-center text-xs font-medium tabular-nums">
-                        {l.quantity}
+
+                  {l.unavailable ? (
+                    <p className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-sale">
+                      <AlertTriangle size={12} /> No longer available
+                    </p>
+                  ) : (
+                    <div className="mt-2 flex items-center justify-between">
+                      <div className="inline-flex items-center rounded-sm border border-line-strong">
+                        <button
+                          onClick={() => setQuantity(l.variantId, l.quantity - 1)}
+                          className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                          disabled={l.quantity <= 1}
+                          aria-label="Decrease quantity"
+                        >
+                          <Minus size={13} />
+                        </button>
+                        <span className="w-7 text-center text-xs font-medium tabular-nums">
+                          {l.quantity}
+                        </span>
+                        <button
+                          onClick={() => setQuantity(l.variantId, l.quantity + 1)}
+                          className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                          disabled={l.quantity >= l.available}
+                          aria-label="Increase quantity"
+                        >
+                          <Plus size={13} />
+                        </button>
+                      </div>
+                      <span className="text-sm font-medium tabular-nums">
+                        {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
                       </span>
-                      <button
-                        onClick={() => setQuantity(l.key, l.quantity + 1)}
-                        className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                        disabled={l.quantity >= l.maxStock}
-                        aria-label="Increase quantity"
-                      >
-                        <Plus size={13} />
-                      </button>
                     </div>
-                    <span className="text-sm font-medium tabular-nums">
-                      {formatPrice(l.unitPrice * l.quantity)}
-                    </span>
-                  </div>
+                  )}
+                  {!l.unavailable && l.overStock && (
+                    <p className="mt-1.5 text-xs font-medium text-clay">
+                      Only {l.available} left in stock
+                    </p>
+                  )}
                 </div>
               </li>
             ))}

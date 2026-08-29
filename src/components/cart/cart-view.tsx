@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight } from "lucide-react";
+import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, AlertTriangle } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { PriceTag } from "@/components/ui/primitives";
 import { CouponField } from "@/components/cart/coupon-field";
@@ -15,10 +15,14 @@ export function CartView() {
   const lines = useCart((s) => s.lines);
   const hydrated = useCart((s) => s.hydrated);
   const setQuantity = useCart((s) => s.setQuantity);
-  const removeLine = useCart((s) => s.removeLine);
+  const remove = useCart((s) => s.removeItem);
 
+  const purchasable = lines.filter((l) => !l.unavailable);
   const totals = computeTotals({
-    lines: lines.map((l) => ({ unitPrice: l.unitPrice, quantity: l.quantity })),
+    lines: purchasable.map((l) => ({
+      unitPrice: l.unitPrice,
+      quantity: Math.min(l.quantity, l.available),
+    })),
   });
   const freeShipPct = Math.min(100, Math.round((totals.subtotal / FREE_SHIPPING_THRESHOLD) * 100));
 
@@ -86,39 +90,58 @@ export function CartView() {
                     {l.optionSummary && (
                       <p className="mt-0.5 text-sm text-ink-faint">{l.optionSummary}</p>
                     )}
+                    <p className="mt-0.5 text-xs text-ink-faint">SKU {l.sku}</p>
                   </div>
                   <PriceTag price={l.unitPrice} compareAt={l.compareAtPrice} size="sm" />
                 </div>
 
+                {l.unavailable ? (
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-sale">
+                    <AlertTriangle size={14} /> No longer available
+                  </p>
+                ) : (
+                  l.overStock && (
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-clay">
+                      <AlertTriangle size={14} /> Only {l.available} left — quantity will be adjusted
+                    </p>
+                  )
+                )}
+
                 <div className="mt-auto flex items-center justify-between pt-3">
-                  <div className="inline-flex items-center rounded-sm border border-line-strong">
-                    <button
-                      onClick={() => setQuantity(l.key, l.quantity - 1)}
-                      disabled={l.quantity <= 1}
-                      className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                      aria-label="Decrease quantity"
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span className="w-9 text-center text-sm font-medium tabular-nums">
-                      {l.quantity}
-                    </span>
-                    <button
-                      onClick={() => setQuantity(l.key, l.quantity + 1)}
-                      disabled={l.quantity >= l.maxStock}
-                      className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                      aria-label="Increase quantity"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
+                  {l.unavailable ? (
+                    <span className="text-sm text-ink-faint">—</span>
+                  ) : (
+                    <div className="inline-flex items-center rounded-sm border border-line-strong">
+                      <button
+                        onClick={() => setQuantity(l.variantId, l.quantity - 1)}
+                        disabled={l.quantity <= 1}
+                        className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                        aria-label="Decrease quantity"
+                      >
+                        <Minus size={14} />
+                      </button>
+                      <span className="w-9 text-center text-sm font-medium tabular-nums">
+                        {l.quantity}
+                      </span>
+                      <button
+                        onClick={() => setQuantity(l.variantId, l.quantity + 1)}
+                        disabled={l.quantity >= l.available}
+                        className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                        aria-label="Increase quantity"
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-4">
-                    <span className="text-[15px] font-medium tabular-nums">
-                      {formatPrice(l.unitPrice * l.quantity)}
-                    </span>
+                    {!l.unavailable && (
+                      <span className="text-[15px] font-medium tabular-nums">
+                        {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
+                      </span>
+                    )}
                     <button
-                      onClick={() => removeLine(l.key)}
+                      onClick={() => remove(l.variantId)}
                       className="text-ink-faint hover:text-sale"
                       aria-label={`Remove ${l.name}`}
                     >
@@ -148,7 +171,11 @@ export function CartView() {
           <div className="mt-5">
             <OrderSummaryLines />
           </div>
-          <Link href="/checkout" className="btn btn-primary mt-5 w-full">
+          <Link
+            href="/checkout"
+            className="btn btn-primary mt-5 w-full aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            aria-disabled={purchasable.length === 0}
+          >
             Checkout <ArrowRight size={16} />
           </Link>
           <p className="mt-3 text-center text-xs text-ink-faint">

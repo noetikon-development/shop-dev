@@ -61,10 +61,10 @@ node --env-file=.env scripts/dump-seed-sql.mjs      # regenerates supabase/seed.
   `Category, Product, ProductImage, ProductOption, ProductOptionValue, Variant,
   VariantOptionValue, Review`.
 - Every other table (`User, Address, Order*, Inventory, InventoryAdjustment,
-  StoreSetting, Coupon, WishlistItem`, the RBAC tables `Role, Permission,
-  UserRole, RolePermission, AdminInvite, AdminAuditLog`, and the CMS/media
-  tables `ContentPage, ContentBlock, MediaAsset`) has RLS on and **no policy**
-  → the public API returns nothing and cannot write.
+  Cart, CartItem, StoreSetting, Coupon, WishlistItem`, the RBAC tables `Role,
+  Permission, UserRole, RolePermission, AdminInvite, AdminAuditLog`, and the
+  CMS/media tables `ContentPage, ContentBlock, MediaAsset`) has RLS on and
+  **no policy** → the public API returns nothing and cannot write.
 
 ## Storage
 
@@ -88,6 +88,8 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `VariantOptionValue` | join: variant ↔ option value |
 | `Inventory` | 1:1 with `Variant`; `quantity`, `reserved`, `reorderPoint`. CHECK: `quantity ≥ 0`, `reserved ≥ 0`, `quantity ≥ reserved`, `reorderPoint ≥ 0` |
 | `InventoryAdjustment` | append-only stock-change history (Step 6): `previousQuantity`, signed `delta`, `newQuantity`, open-string `reason`, `note`, `actorUserId`. Excluded from `seed.sql` |
+| `Cart` | Step 7. Guest (`token`, httpOnly cookie) or customer (`userId`) cart; `status` ACTIVE/CONVERTED/ABANDONED. Partial unique index = one ACTIVE cart per user. CHECK: has an owner. Excluded from `seed.sql` |
+| `CartItem` | Step 7. `@@unique([cartId, variantId])`; `priceSnapshot` is a display cache, not authoritative. CHECK: `0 < quantity ≤ 99`, `priceSnapshot ≥ 0`. Excluded from `seed.sql` |
 | `StoreSetting` | key/value store config, seeded from `src/lib/constants.ts` |
 | `Coupon` | promo codes |
 | `User` | application record only — **no password**; `supabaseUserId` unique link to `auth.users`; `role` is a coarse mirror of the RBAC tables |
