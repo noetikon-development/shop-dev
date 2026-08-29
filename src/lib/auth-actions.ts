@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { syncAppUser } from "@/lib/auth";
@@ -188,13 +189,24 @@ export async function changePassword(
   } = await supabase.auth.getUser();
   if (!user?.email) return { error: "Please sign in again." };
 
-  // Re-authenticate with the current password before allowing the change.
-  const { error: reauthError } = await supabase.auth.signInWithPassword({
+  // Verify the current password on a throwaway client that never persists a
+  // session — signing in on the cookie-bound client would rotate the refresh
+  // token and kill the real session mid-action.
+  const verifier = createSupabaseClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+  const { error: reauthError } = await verifier.auth.signInWithPassword({
     email: user.email,
     password: current,
   });
   if (reauthError) return { error: "Your current password is incorrect." };
+  // Only clear this throwaway client's (in-memory, unpersisted) session — a
+  // default global sign-out would revoke the caller's real session too.
+  await verifier.auth.signOut({ scope: "local" });
 
+  // Apply the change on the real cookie-bound session.
   const { error } = await supabase.auth.updateUser({ password: next.data });
   if (error) return { error: error.message };
   return { ok: true };
