@@ -1,0 +1,535 @@
+import "server-only";
+import { prisma } from "@/lib/prisma";
+import { artKindFromRef } from "@/lib/art-ref";
+import type {
+  CategoryNode,
+  ProductCardView,
+  ProductDetailView,
+  ReviewView,
+} from "@/lib/types";
+import type { SortId } from "@/lib/constants";
+
+function safeParse<T>(value: string, fallback: T): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+const cardSelect = {
+  id: true,
+  slug: true,
+  name: true,
+  brand: true,
+  shortDescription: true,
+  price: true,
+  compareAtPrice: true,
+  ratingAvg: true,
+  ratingCount: true,
+  soldCount: true,
+  badges: true,
+  freeShipping: true,
+  createdAt: true,
+  category: { select: { slug: true, name: true } },
+  images: { orderBy: { sortOrder: "asc" }, take: 1, select: { url: true, alt: true } },
+  options: {
+    where: { name: "Colour" },
+    select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
+  },
+  variants: { select: { stock: true } },
+} as const;
+
+type CardRow = {
+  id: string;
+  slug: string;
+  name: string;
+  brand: string;
+  shortDescription: string;
+  price: number;
+  compareAtPrice: number | null;
+  ratingAvg: number;
+  ratingCount: number;
+  soldCount: number;
+  badges: string;
+  freeShipping: boolean;
+  createdAt: Date;
+  category: { slug: string; name: string };
+  images: { url: string; alt: string }[];
+  options: { values: { swatchHex: string | null }[] }[];
+  variants: { stock: number }[];
+};
+
+function toCard(p: CardRow): ProductCardView {
+  const img = p.images[0] ?? { url: "art:accessory:" + p.slug, alt: p.name };
+  const swatches = (p.options[0]?.values ?? [])
+    .map((v) => v.swatchHex)
+    .filter((h): h is string => Boolean(h));
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    brand: p.brand,
+    shortDescription: p.shortDescription,
+    price: p.price,
+    compareAtPrice: p.compareAtPrice,
+    ratingAvg: p.ratingAvg,
+    ratingCount: p.ratingCount,
+    soldCount: p.soldCount,
+    badges: safeParse<string[]>(p.badges, []),
+    freeShipping: p.freeShipping,
+    image: { url: img.url, alt: img.alt },
+    art: artKindFromRef(img.url),
+    categorySlug: p.category.slug,
+    categoryName: p.category.name,
+    colorSwatches: swatches,
+    inStock: p.variants.some((v) => v.stock > 0),
+    createdAt: p.createdAt.toISOString(),
+  };
+}
+
+function orderBy(sort: SortId) {
+  switch (sort) {
+    case "newest":
+      return [{ createdAt: "desc" as const }];
+    case "price-asc":
+      return [{ price: "asc" as const }];
+    case "price-desc":
+      return [{ price: "desc" as const }];
+    case "rating":
+      return [{ ratingAvg: "desc" as const }, { ratingCount: "desc" as const }];
+    case "bestselling":
+      return [{ soldCount: "desc" as const }];
+    default:
+      return [{ soldCount: "desc" as const }, { ratingAvg: "desc" as const }];
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Categories
+// ---------------------------------------------------------------------------
+
+export async function getCategoryTree(): Promise<CategoryNode[]> {
+  const cats = await prisma.category.findMany({
+    orderBy: { sortOrder: "asc" },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      description: true,
+      heroColor: true,
+      featured: true,
+      parentId: true,
+      _count: { select: { products: true } },
+    },
+  });
+
+  const byId = new Map(
+    cats.map((c) => [
+      c.id,
+      {
+        id: c.id,
+        name: c.name,
+        slug: c.slug,
+        description: c.description,
+        heroColor: c.heroColor,
+        featured: c.featured,
+        productCount: c._count.products,
+        children: [] as CategoryNode[],
+      },
+    ]),
+  );
+
+  const roots: CategoryNode[] = [];
+  for (const c of cats) {
+    const node = byId.get(c.id)!;
+    if (c.parentId && byId.has(c.parentId)) {
+      byId.get(c.parentId)!.children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  // roll up product counts to parents
+  for (const r of roots) {
+    r.productCount = r.children.reduce((n, ch) => n + (ch.productCount ?? 0), r.productCount ?? 0);
+  }
+  return roots;
+}
+
+export async function getCategoryBySlug(slug: string) {
+  return prisma.category.findUnique({
+    where: { slug },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      description: true,
+      heroColor: true,
+      parentId: true,
+      parent: { select: { name: true, slug: true } },
+      children: {
+        orderBy: { sortOrder: "asc" },
+        select: { id: true, name: true, slug: true, _count: { select: { products: true } } },
+      },
+    },
+  });
+}
+
+async function descendantCategoryIds(categoryId: string): Promise<string[]> {
+  const children = await prisma.category.findMany({
+    where: { parentId: categoryId },
+    select: { id: true },
+  });
+  const ids = [categoryId];
+  for (const ch of children) ids.push(...(await descendantCategoryIds(ch.id)));
+  return ids;
+}
+
+// ---------------------------------------------------------------------------
+// Product listing
+// ---------------------------------------------------------------------------
+
+export type ListingParams = {
+  categorySlug?: string;
+  query?: string;
+  sort?: SortId;
+  minPrice?: number;
+  maxPrice?: number;
+  colors?: string[];
+  onSale?: boolean;
+  inStock?: boolean;
+  freeShipping?: boolean;
+  minRating?: number;
+  page?: number;
+  perPage?: number;
+};
+
+export type ListingResult = {
+  products: ProductCardView[];
+  total: number;
+  page: number;
+  perPage: number;
+  pageCount: number;
+  priceBounds: { min: number; max: number };
+  colorFacets: { name: string; hex: string | null; count: number }[];
+};
+
+export async function listProducts(params: ListingParams): Promise<ListingResult> {
+  const perPage = params.perPage ?? 24;
+  const page = Math.max(1, params.page ?? 1);
+
+  let categoryIds: string[] | undefined;
+  if (params.categorySlug) {
+    const cat = await prisma.category.findUnique({
+      where: { slug: params.categorySlug },
+      select: { id: true },
+    });
+    if (!cat) {
+      return {
+        products: [],
+        total: 0,
+        page,
+        perPage,
+        pageCount: 0,
+        priceBounds: { min: 0, max: 0 },
+        colorFacets: [],
+      };
+    }
+    categoryIds = await descendantCategoryIds(cat.id);
+  }
+
+  const AND: Record<string, unknown>[] = [{ status: "ACTIVE" }];
+  if (categoryIds) AND.push({ categoryId: { in: categoryIds } });
+  if (params.query) {
+    const q = params.query.trim();
+    AND.push({
+      OR: [
+        { name: { contains: q } },
+        { shortDescription: { contains: q } },
+        { description: { contains: q } },
+        { brand: { contains: q } },
+        { category: { name: { contains: q } } },
+      ],
+    });
+  }
+  if (params.minPrice != null) AND.push({ price: { gte: params.minPrice } });
+  if (params.maxPrice != null) AND.push({ price: { lte: params.maxPrice } });
+  if (params.onSale) AND.push({ compareAtPrice: { not: null } });
+  if (params.freeShipping) AND.push({ freeShipping: true });
+  if (params.minRating) AND.push({ ratingAvg: { gte: params.minRating } });
+  if (params.colors?.length) {
+    AND.push({
+      options: {
+        some: {
+          name: "Colour",
+          values: { some: { value: { in: params.colors } } },
+        },
+      },
+    });
+  }
+  if (params.inStock) {
+    AND.push({ variants: { some: { stock: { gt: 0 } } } });
+  }
+
+  const where = { AND };
+
+  const [rows, total, priceAgg, colorGroups] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      orderBy: orderBy(params.sort ?? "relevance"),
+      skip: (page - 1) * perPage,
+      take: perPage,
+      select: cardSelect,
+    }),
+    prisma.product.count({ where }),
+    prisma.product.aggregate({
+      where: categoryIds ? { status: "ACTIVE", categoryId: { in: categoryIds } } : { status: "ACTIVE" },
+      _min: { price: true },
+      _max: { price: true },
+    }),
+    prisma.productOptionValue.findMany({
+      where: {
+        option: {
+          name: "Colour",
+          product: categoryIds
+            ? { status: "ACTIVE", categoryId: { in: categoryIds } }
+            : { status: "ACTIVE" },
+        },
+      },
+      select: { value: true, swatchHex: true },
+    }),
+  ]);
+
+  const colorMap = new Map<string, { name: string; hex: string | null; count: number }>();
+  for (const c of colorGroups) {
+    const existing = colorMap.get(c.value);
+    if (existing) existing.count += 1;
+    else colorMap.set(c.value, { name: c.value, hex: c.swatchHex, count: 1 });
+  }
+
+  return {
+    products: (rows as unknown as CardRow[]).map(toCard),
+    total,
+    page,
+    perPage,
+    pageCount: Math.max(1, Math.ceil(total / perPage)),
+    priceBounds: {
+      min: priceAgg._min.price ?? 0,
+      max: priceAgg._max.price ?? 0,
+    },
+    colorFacets: [...colorMap.values()].sort((a, b) => b.count - a.count),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Homepage helpers
+// ---------------------------------------------------------------------------
+
+export async function getProductsByBadge(badge: string, take = 8): Promise<ProductCardView[]> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE", badges: { contains: `"${badge}"` } },
+    orderBy: { soldCount: "desc" },
+    take,
+    select: cardSelect,
+  });
+  return (rows as unknown as CardRow[]).map(toCard);
+}
+
+export async function getBestSellers(take = 8): Promise<ProductCardView[]> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE" },
+    orderBy: { soldCount: "desc" },
+    take,
+    select: cardSelect,
+  });
+  return (rows as unknown as CardRow[]).map(toCard);
+}
+
+export async function getNewArrivals(take = 8): Promise<ProductCardView[]> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE" },
+    orderBy: { createdAt: "desc" },
+    take,
+    select: cardSelect,
+  });
+  return (rows as unknown as CardRow[]).map(toCard);
+}
+
+export async function getOnSale(take = 8): Promise<ProductCardView[]> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE", compareAtPrice: { not: null } },
+    orderBy: { soldCount: "desc" },
+    take,
+    select: cardSelect,
+  });
+  return (rows as unknown as CardRow[]).map(toCard);
+}
+
+// ---------------------------------------------------------------------------
+// Product detail
+// ---------------------------------------------------------------------------
+
+export async function getProductBySlug(slug: string): Promise<ProductDetailView | null> {
+  const p = await prisma.product.findUnique({
+    where: { slug },
+    include: {
+      category: { select: { slug: true, name: true } },
+      images: { orderBy: { sortOrder: "asc" } },
+      options: {
+        orderBy: { sortOrder: "asc" },
+        include: { values: { orderBy: { sortOrder: "asc" } } },
+      },
+      variants: { include: { optionValues: { select: { optionValueId: true } } } },
+    },
+  });
+  if (!p) return null;
+
+  const firstImg = p.images[0] ?? { url: `art:accessory:${p.slug}`, alt: p.name };
+  const swatches = (p.options.find((o) => o.name === "Colour")?.values ?? [])
+    .map((v) => v.swatchHex)
+    .filter((h): h is string => Boolean(h));
+  const totalStock = p.variants.reduce((n, v) => n + v.stock, 0);
+
+  return {
+    id: p.id,
+    slug: p.slug,
+    name: p.name,
+    brand: p.brand,
+    shortDescription: p.shortDescription,
+    description: p.description,
+    price: p.price,
+    compareAtPrice: p.compareAtPrice,
+    ratingAvg: p.ratingAvg,
+    ratingCount: p.ratingCount,
+    soldCount: p.soldCount,
+    badges: safeParse<string[]>(p.badges, []),
+    highlights: safeParse<string[]>(p.highlights, []),
+    specs: safeParse<Record<string, string>>(p.specs, {}),
+    care: p.care,
+    weightGrams: p.weightGrams,
+    freeShipping: p.freeShipping,
+    image: { url: firstImg.url, alt: firstImg.alt },
+    images: p.images.map((i) => ({ url: i.url, alt: i.alt })),
+    art: artKindFromRef(firstImg.url),
+    categorySlug: p.category.slug,
+    categoryName: p.category.name,
+    colorSwatches: swatches,
+    inStock: totalStock > 0,
+    totalStock,
+    createdAt: p.createdAt.toISOString(),
+    options: p.options.map((o) => ({
+      id: o.id,
+      name: o.name,
+      values: o.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })),
+    })),
+    variants: p.variants.map((v) => ({
+      id: v.id,
+      sku: v.sku,
+      price: v.price,
+      compareAtPrice: v.compareAtPrice,
+      stock: v.stock,
+      imageUrl: v.imageUrl,
+      optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
+    })),
+  };
+}
+
+export async function getRelatedProducts(
+  categorySlug: string,
+  excludeSlug: string,
+  take = 6,
+): Promise<ProductCardView[]> {
+  const rows = await prisma.product.findMany({
+    where: { status: "ACTIVE", category: { slug: categorySlug }, slug: { not: excludeSlug } },
+    orderBy: { soldCount: "desc" },
+    take,
+    select: cardSelect,
+  });
+  return (rows as unknown as CardRow[]).map(toCard);
+}
+
+export async function getProductReviews(productId: string): Promise<ReviewView[]> {
+  const rows = await prisma.review.findMany({
+    where: { productId },
+    orderBy: { createdAt: "desc" },
+    include: { user: { select: { name: true } } },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    rating: r.rating,
+    title: r.title,
+    body: r.body,
+    author: r.user.name ?? "AXIARO customer",
+    verified: r.verified,
+    createdAt: r.createdAt.toISOString(),
+  }));
+}
+
+export async function getProductCardsBySlugs(slugs: string[]): Promise<ProductCardView[]> {
+  if (!slugs.length) return [];
+  const rows = await prisma.product.findMany({
+    where: { slug: { in: slugs } },
+    select: cardSelect,
+  });
+  const cards = (rows as unknown as CardRow[]).map(toCard);
+  const order = new Map(slugs.map((s, i) => [s, i]));
+  return cards.sort((a, b) => (order.get(a.slug) ?? 0) - (order.get(b.slug) ?? 0));
+}
+
+export async function getAllProductSlugs() {
+  const rows = await prisma.product.findMany({ select: { slug: true } });
+  return rows.map((r) => r.slug);
+}
+
+// ---------------------------------------------------------------------------
+// Orders
+// ---------------------------------------------------------------------------
+
+export type OrderView = Awaited<ReturnType<typeof getOrderByNumber>>;
+
+export async function getOrderByNumber(orderNumber: string) {
+  const order = await prisma.order.findUnique({
+    where: { orderNumber },
+    include: {
+      items: true,
+      events: { orderBy: { createdAt: "asc" } },
+    },
+  });
+  if (!order) return null;
+  return {
+    ...order,
+    shippingAddress: safeParse<Record<string, string>>(order.shippingAddress, {}),
+  };
+}
+
+export async function getUserOrders(userId: string) {
+  const orders = await prisma.order.findMany({
+    where: { userId },
+    orderBy: { placedAt: "desc" },
+    include: { items: true },
+  });
+  return orders.map((o) => ({
+    ...o,
+    shippingAddress: safeParse<Record<string, string>>(o.shippingAddress, {}),
+  }));
+}
+
+export async function searchSuggestions(q: string, take = 6) {
+  if (!q.trim()) return [];
+  const rows = await prisma.product.findMany({
+    where: {
+      status: "ACTIVE",
+      OR: [{ name: { contains: q } }, { brand: { contains: q } }, { shortDescription: { contains: q } }],
+    },
+    orderBy: { soldCount: "desc" },
+    take,
+    select: { slug: true, name: true, price: true, category: { select: { name: true } }, images: { take: 1, select: { url: true } } },
+  });
+  return rows.map((r) => ({
+    slug: r.slug,
+    name: r.name,
+    price: r.price,
+    category: r.category.name,
+    art: artKindFromRef(r.images[0]?.url),
+  }));
+}

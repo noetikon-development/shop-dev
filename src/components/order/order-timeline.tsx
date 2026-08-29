@@ -1,0 +1,69 @@
+import { Check } from "lucide-react";
+import { ORDER_STATUS_FLOW, ORDER_STATUS_META } from "@/lib/constants";
+import { formatDate, cn } from "@/lib/utils";
+
+type Event = { status: string; title: string; detail: string | null; location: string | null; createdAt: Date | string };
+
+export function OrderTimeline({
+  status,
+  events,
+}: {
+  status: string;
+  events: Event[];
+}) {
+  if (status === "CANCELLED") {
+    return (
+      <div className="rounded-md border border-sale/30 bg-clay-50 px-4 py-3 text-sm text-sale">
+        This order was cancelled.
+      </div>
+    );
+  }
+
+  const currentIndex = ORDER_STATUS_FLOW.indexOf(status as (typeof ORDER_STATUS_FLOW)[number]);
+  const eventByStatus = new Map(events.map((e) => [e.status, e]));
+
+  return (
+    <ol className="relative space-y-6">
+      {ORDER_STATUS_FLOW.map((s, i) => {
+        const meta = ORDER_STATUS_META[s];
+        const done = i <= currentIndex;
+        const active = i === currentIndex;
+        const ev = eventByStatus.get(s);
+        return (
+          <li key={s} className="relative flex gap-4 pl-1">
+            {i < ORDER_STATUS_FLOW.length - 1 && (
+              <span
+                className={cn(
+                  "absolute left-[13px] top-6 h-[calc(100%+0.5rem)] w-px",
+                  i < currentIndex ? "bg-ink" : "bg-line-strong",
+                )}
+              />
+            )}
+            <span
+              className={cn(
+                "relative z-10 mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border-2 transition-colors",
+                done ? "border-ink bg-ink text-paper" : "border-line-strong bg-paper text-transparent",
+                active && "ring-4 ring-ink/10",
+              )}
+            >
+              <Check size={12} strokeWidth={3} />
+            </span>
+            <div className="pb-1">
+              <p className={cn("text-sm font-medium", done ? "text-ink" : "text-ink-faint")}>
+                {ev?.title ?? meta.label}
+              </p>
+              <p className="text-xs text-ink-faint">
+                {ev
+                  ? [ev.location, formatDate(ev.createdAt, { hour: "numeric", minute: "2-digit" })]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : meta.description}
+              </p>
+              {ev?.detail && <p className="mt-1 text-xs text-ink-soft">{ev.detail}</p>}
+            </div>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}

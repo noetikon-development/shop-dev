@@ -1,0 +1,150 @@
+import Link from "next/link";
+import type { Metadata } from "next";
+import { notFound } from "next/navigation";
+import { ChevronRight } from "lucide-react";
+import {
+  getProductBySlug,
+  getProductReviews,
+  getRelatedProducts,
+} from "@/lib/data";
+import { ProductViewer } from "@/components/pdp/product-viewer";
+import { DetailsAccordion } from "@/components/pdp/details-accordion";
+import { Reviews } from "@/components/pdp/reviews";
+import { ProductRail } from "@/components/product-rail";
+import { SITE } from "@/lib/constants";
+
+export async function generateMetadata({
+  params,
+}: PageProps<"/p/[slug]">): Promise<Metadata> {
+  const { slug } = await params;
+  const product = await getProductBySlug(slug);
+  if (!product) return { title: "Not found" };
+  return {
+    title: product.name,
+    description: product.shortDescription,
+    openGraph: {
+      title: `${product.name} | ${SITE.brand}`,
+      description: product.shortDescription,
+    },
+  };
+}
+
+export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
+  const { slug } = await params;
+  const product = await getProductBySlug(slug);
+  if (!product) notFound();
+
+  const [reviews, related] = await Promise.all([
+    getProductReviews(product.id),
+    getRelatedProducts(product.categorySlug, product.slug, 8),
+  ]);
+
+  const specEntries = Object.entries(product.specs);
+
+  return (
+    <div className="pb-10">
+      <div className="container-page py-5">
+        <nav className="flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
+          <Link href="/" className="hover:text-ink">
+            Home
+          </Link>
+          <ChevronRight size={12} />
+          <Link href={`/c/${product.categorySlug}`} className="hover:text-ink">
+            {product.categoryName}
+          </Link>
+          <ChevronRight size={12} />
+          <span className="text-ink">{product.name}</span>
+        </nav>
+      </div>
+
+      <div className="container-page">
+        <ProductViewer product={product} />
+      </div>
+
+      {/* Details */}
+      <div className="container-page mt-16 grid gap-12 lg:grid-cols-[1fr_1.4fr] lg:gap-20">
+        <div>
+          <h2 className="text-2xl">About this piece</h2>
+          <div className="mt-4 space-y-4 text-[15px] leading-relaxed text-ink-soft">
+            {product.description.split("\n").map((para, i) => (
+              <p key={i}>{para}</p>
+            ))}
+          </div>
+        </div>
+
+        <DetailsAccordion
+          sections={[
+            ...(specEntries.length
+              ? [
+                  {
+                    id: "specs",
+                    title: "Specifications",
+                    content: (
+                      <dl className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+                        {specEntries.map(([k, v]) => (
+                          <div
+                            key={k}
+                            className="flex justify-between gap-4 border-b border-line/70 py-2"
+                          >
+                            <dt className="text-ink-faint">{k}</dt>
+                            <dd className="text-right font-medium text-ink">{v}</dd>
+                          </div>
+                        ))}
+                      </dl>
+                    ),
+                  },
+                ]
+              : []),
+            ...(product.care
+              ? [{ id: "care", title: "Care", content: <p>{product.care}</p> }]
+              : []),
+            {
+              id: "shipping",
+              title: "Shipping & returns",
+              content: (
+                <div className="space-y-2">
+                  <p>
+                    Standard delivery is ₱129 and takes 3–7 business days, free on orders over
+                    ₱2,500. Express (1–3 days) is ₱249.
+                  </p>
+                  <p>
+                    Return anything unused within 30 days for a full refund. Large furniture is
+                    collected from your door.
+                  </p>
+                </div>
+              ),
+            },
+            {
+              id: "guarantee",
+              title: "Our guarantee",
+              content: (
+                <p>
+                  Every piece of AXIARO furniture carries a 10-year guarantee against manufacturing
+                  faults in the frame. Textiles and wardrobe are covered for one year.
+                </p>
+              ),
+            },
+          ]}
+        />
+      </div>
+
+      {/* Reviews */}
+      <div className="container-page mt-20">
+        <Reviews
+          reviews={reviews}
+          ratingAvg={product.ratingAvg}
+          ratingCount={product.ratingCount}
+        />
+      </div>
+
+      {/* Related */}
+      <div className="mt-20">
+        <ProductRail
+          eyebrow="You might also like"
+          title={`More from ${product.categoryName}`}
+          products={related}
+        />
+      </div>
+    </div>
+  );
+}
