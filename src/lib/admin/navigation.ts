@@ -54,6 +54,7 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     group: "catalog",
     accepts: ["view_products"],
     emptyLabel: "No products to manage here yet.",
+    live: true,
   },
   {
     path: "/admin/categories",
@@ -62,14 +63,16 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     group: "catalog",
     accepts: ["view_categories"],
     emptyLabel: "No categories to manage here yet.",
+    live: true,
   },
   {
     path: "/admin/variants",
     label: "Variants",
-    description: "Manage option values and per-variant pricing and SKUs.",
+    description: "Every product variant, with its SKU, price and status.",
     group: "catalog",
     accepts: ["view_products"],
     emptyLabel: "No variants to manage here yet.",
+    live: true,
   },
 
   // Standalone sections

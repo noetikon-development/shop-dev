@@ -125,6 +125,7 @@ type CategoryRow = {
 const loadCategoryRows = unstable_cache(
   async (): Promise<CategoryRow[]> => {
     const cats = await prisma.category.findMany({
+      where: { active: true },
       orderBy: { sortOrder: "asc" },
       select: {
         id: true,
@@ -415,8 +416,8 @@ export async function getProductsByBadge(badge: string, take = 8): Promise<Produ
 // ---------------------------------------------------------------------------
 
 async function loadProductBySlug(slug: string): Promise<ProductDetailView | null> {
-  const p = await prisma.product.findUnique({
-    where: { slug },
+  const p = await prisma.product.findFirst({
+    where: { slug, status: "ACTIVE" },
     include: {
       category: { select: { slug: true, name: true } },
       images: { orderBy: { sortOrder: "asc" } },
@@ -526,7 +527,7 @@ export const getProductReviews = unstable_cache(
 export async function getProductCardsBySlugs(slugs: string[]): Promise<ProductCardView[]> {
   if (!slugs.length) return [];
   const rows = await prisma.product.findMany({
-    where: { slug: { in: slugs } },
+    where: { slug: { in: slugs }, status: "ACTIVE" },
     select: cardSelect,
   });
   const cards = (rows as unknown as CardRow[]).map(toCard);

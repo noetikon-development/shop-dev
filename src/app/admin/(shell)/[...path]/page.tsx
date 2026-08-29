@@ -13,7 +13,16 @@ import { PageHeader, EmptyState, Card } from "@/components/admin/ui";
  * before the CRUD tools exist.
  */
 
-const RESERVED = new Set(["/admin", "/admin/users", "/admin/audit", "/admin/media", "/admin/settings"]);
+const RESERVED = new Set([
+  "/admin",
+  "/admin/users",
+  "/admin/audit",
+  "/admin/media",
+  "/admin/settings",
+  "/admin/products",
+  "/admin/categories",
+  "/admin/variants",
+]);
 
 async function resolve(pathParam: Promise<{ path: string[] }>) {
   const { path } = await pathParam;

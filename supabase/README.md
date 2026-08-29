@@ -84,7 +84,7 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `Product` | FK → `Category`; JSON-ish fields stored as text |
 | `ProductImage` | FK → `Product` (cascade) |
 | `ProductOption` / `ProductOptionValue` | option definitions (Colour, Size…) |
-| `Variant` | FK → `Product`; `sku` unique; `stock` is a mirror of `Inventory.quantity` |
+| `Variant` | FK → `Product`; `sku` unique; `status` ACTIVE/ARCHIVED; `stock` mirrors `Inventory.quantity` (Step 6) |
 | `VariantOptionValue` | join: variant ↔ option value |
 | `Inventory` | 1:1 with `Variant`; `quantity`, `reserved`, `reorderPoint` |
 | `StoreSetting` | key/value store config, seeded from `src/lib/constants.ts` |

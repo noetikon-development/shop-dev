@@ -26,3 +26,4 @@ export {
 export { Tabs, type TabItem } from "./tabs";
 export { ActionMenu, type ActionItem } from "./action-menu";
 export { notify } from "./notify";
+export { usePersistentAction } from "./use-form";

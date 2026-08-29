@@ -1121,6 +1121,7 @@ async function main() {
         specs: JSON.stringify(p.specs),
         care: p.care ?? null,
         freeShipping: p.freeShipping ?? p.price >= 250000,
+        featured: (p.badges ?? []).includes("bestseller"),
         weightGrams: p.weightGrams ?? 500,
         ratingAvg,
         ratingCount,

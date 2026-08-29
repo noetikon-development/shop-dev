@@ -142,6 +142,39 @@ a permission-gated foundation page.
   200 with forbidden content. Per-section loading uses `<Suspense>` around the
   data component (permission check runs first, in the page body → real 403).
 
+## Catalog management (Step 5)
+
+`/admin/products`, `/admin/categories`, `/admin/variants` — full management,
+built on the Step 4 UI kit and Step 3 RBAC.
+
+- **Products:** list (search / filter by status + category / sort / paginate),
+  create, edit (tabbed: Details · Images · Variants), status
+  (`DRAFT` / `ACTIVE` / `ARCHIVED`), archive, and delete (only when the product
+  has no orders, reviews or wishlist entries — otherwise archive). Slugs are
+  URL-safe, unique, stable, and auto-generated from the name.
+- **Images:** uploaded to Supabase Storage (`products/` folder) via
+  `manage_product_images`; `ProductImage.mediaAssetId` links the file, the
+  lowest `sortOrder` is the primary image. Reorder / set-primary / delete /
+  replace. `<ProductImage>` already renders real URLs, so the storefront needs
+  no change.
+- **Variants:** define option types (Colour / Size / Material / Style / …); the
+  variant matrix is regenerated as the cartesian product. Per-variant SKU,
+  price, compare-at and status. Variants with order history are archived, never
+  deleted; a product always keeps ≥ 1 variant. `Variant.stock` stays 0 —
+  inventory is Step 6.
+- **Categories:** list, create, edit, image (Storage), display order (up/down
+  + Save), `active` toggle (inactive = hidden from the storefront, products
+  stay in the catalog), delete (only when empty).
+- **Schema additions (all additive):** `Product.featured`, `Category.active`,
+  `Category.imageMediaId`, `ProductImage.mediaAssetId`, `Variant.status`. SKU
+  stays on the variant (every product has ≥ 1 variant); the product form's SKU
+  field manages the default variant's SKU. Existing rows keep working. `src/lib/data.ts` now hides non-`ACTIVE` products and inactive
+  categories from the storefront; mutations `revalidateTag("products"/"categories")`.
+- Validation: `src/lib/admin/catalog-schemas.ts` (Zod) — required fields,
+  lengths, non-negative integer-centavos prices, `compareAt > price`, slug
+  shape, SKU shape, enum status. Enforced server-side in
+  `src/lib/admin/catalog-actions.ts`; every mutation `requirePermission(...)`.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only); `src/lib/actions.ts` holds the

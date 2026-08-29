@@ -196,18 +196,22 @@ model Category {
   name        String
   slug        String     @unique
   description String?
-  imageUrl    String?
+  imageUrl    String?    // resolved public URL of `imageMedia` (kept for the storefront read path)
+  imageMediaId String?   // uploaded image in Supabase Storage (Step 5 admin)
   heroColor   String?    // used for category tiles / headers
   sortOrder   Int        @default(0)
   featured    Boolean    @default(false)
+  active      Boolean    @default(true) // inactive / archived categories are hidden from the storefront
 
   parentId String?
   parent   Category?  @relation("CategoryTree", fields: [parentId], references: [id])
   children Category[] @relation("CategoryTree")
 
-  products Product[]
+  products   Product[]
+  imageMedia MediaAsset? @relation("CategoryImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
 
   @@index([parentId])
+  @@index([active])
 }
 
 model Product {
@@ -234,6 +238,7 @@ model Product {
   care           String?
 
   freeShipping   Boolean  @default(false)
+  featured       Boolean  @default(false) // admin-controlled; drives future "featured products" merchandising
   weightGrams    Int      @default(500)
 
   createdAt      DateTime @default(now())
@@ -248,20 +253,25 @@ model Product {
 
   @@index([categoryId])
   @@index([status])
+  @@index([featured])
 }
 
 model ProductImage {
   id        String  @id @default(cuid())
   productId String
-  url       String
+  url       String  // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
   alt       String  @default("")
-  sortOrder Int     @default(0)
+  sortOrder Int     @default(0) // lowest sortOrder is the primary image
   // optional link to a specific option value (e.g. the "Sand" colourway)
   optionValueId String?
+  // set when the image was uploaded via the admin (Supabase Storage / MediaAsset)
+  mediaAssetId String?
 
-  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
 
   @@index([productId])
+  @@index([mediaAssetId])
 }
 
 model ProductOption {
@@ -295,7 +305,8 @@ model Variant {
   sku        String  @unique
   price      Int     // absolute price for this variant, in centavos
   compareAtPrice Int?
-  stock      Int     @default(0) // convenience mirror of Inventory.quantity (source the app currently reads)
+  status     String  @default("ACTIVE") // ACTIVE | ARCHIVED (archived = not purchasable)
+  stock      Int     @default(0) // convenience mirror of Inventory.quantity (source the app currently reads). Managed in Step 6.
   imageUrl   String?
 
   product     Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -304,6 +315,7 @@ model Variant {
   inventory   Inventory?
 
   @@index([productId])
+  @@index([status])
 }
 
 // Per-variant stock ledger. `quantity` is on-hand; `reserved` is allocated to
@@ -545,6 +557,9 @@ model MediaAsset {
   alt       String?
   folder    String   @default("") // logical grouping, e.g. "banners", "products"
   createdAt DateTime @default(now())
+
+  productImages  ProductImage[]
+  categoryImages Category[]     @relation("CategoryImage")
 
   @@unique([bucket, path])
   @@index([folder])

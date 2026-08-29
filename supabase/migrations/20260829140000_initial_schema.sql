@@ -4,8 +4,9 @@
 --   npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script)
 -- Apply order: this file, then 20260829140100_rls_and_grants.sql, then ../seed.sql
 --
--- 2026-08-30: + RBAC tables (Step 3) and Admin Panel / CMS foundation tables
---             (Step 4: ContentPage, ContentBlock, MediaAsset).
+-- 2026-08-30: + RBAC (Step 3), Admin/CMS foundation (Step 4),
+--             catalog fields Product.featured/sku, Category.active/imageMediaId,
+--             ProductImage.mediaAssetId, Variant.status (Step 5).
 -- ============================================================================
 
 CREATE SCHEMA IF NOT EXISTS "public";
@@ -130,9 +131,11 @@ CREATE TABLE "Category" (
     "slug" TEXT NOT NULL,
     "description" TEXT,
     "imageUrl" TEXT,
+    "imageMediaId" TEXT,
     "heroColor" TEXT,
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "featured" BOOLEAN NOT NULL DEFAULT false,
+    "active" BOOLEAN NOT NULL DEFAULT true,
     "parentId" TEXT,
 
     CONSTRAINT "Category_pkey" PRIMARY KEY ("id")
@@ -159,6 +162,7 @@ CREATE TABLE "Product" (
     "specs" TEXT NOT NULL DEFAULT '{}',
     "care" TEXT,
     "freeShipping" BOOLEAN NOT NULL DEFAULT false,
+    "featured" BOOLEAN NOT NULL DEFAULT false,
     "weightGrams" INTEGER NOT NULL DEFAULT 500,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -174,6 +178,7 @@ CREATE TABLE "ProductImage" (
     "alt" TEXT NOT NULL DEFAULT '',
     "sortOrder" INTEGER NOT NULL DEFAULT 0,
     "optionValueId" TEXT,
+    "mediaAssetId" TEXT,
 
     CONSTRAINT "ProductImage_pkey" PRIMARY KEY ("id")
 );
@@ -206,6 +211,7 @@ CREATE TABLE "Variant" (
     "sku" TEXT NOT NULL,
     "price" INTEGER NOT NULL,
     "compareAtPrice" INTEGER,
+    "status" TEXT NOT NULL DEFAULT 'ACTIVE',
     "stock" INTEGER NOT NULL DEFAULT 0,
     "imageUrl" TEXT,
 
@@ -462,6 +468,9 @@ CREATE UNIQUE INDEX "Category_slug_key" ON "Category"("slug");
 CREATE INDEX "Category_parentId_idx" ON "Category"("parentId");
 
 -- CreateIndex
+CREATE INDEX "Category_active_idx" ON "Category"("active");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Product_slug_key" ON "Product"("slug");
 
 -- CreateIndex
@@ -471,7 +480,13 @@ CREATE INDEX "Product_categoryId_idx" ON "Product"("categoryId");
 CREATE INDEX "Product_status_idx" ON "Product"("status");
 
 -- CreateIndex
+CREATE INDEX "Product_featured_idx" ON "Product"("featured");
+
+-- CreateIndex
 CREATE INDEX "ProductImage_productId_idx" ON "ProductImage"("productId");
+
+-- CreateIndex
+CREATE INDEX "ProductImage_mediaAssetId_idx" ON "ProductImage"("mediaAssetId");
 
 -- CreateIndex
 CREATE INDEX "ProductOption_productId_idx" ON "ProductOption"("productId");
@@ -484,6 +499,9 @@ CREATE UNIQUE INDEX "Variant_sku_key" ON "Variant"("sku");
 
 -- CreateIndex
 CREATE INDEX "Variant_productId_idx" ON "Variant"("productId");
+
+-- CreateIndex
+CREATE INDEX "Variant_status_idx" ON "Variant"("status");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Inventory_variantId_key" ON "Inventory"("variantId");
@@ -582,10 +600,16 @@ ALTER TABLE "Address" ADD CONSTRAINT "Address_userId_fkey" FOREIGN KEY ("userId"
 ALTER TABLE "Category" ADD CONSTRAINT "Category_parentId_fkey" FOREIGN KEY ("parentId") REFERENCES "Category"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Category" ADD CONSTRAINT "Category_imageMediaId_fkey" FOREIGN KEY ("imageMediaId") REFERENCES "MediaAsset"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Product" ADD CONSTRAINT "Product_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductImage" ADD CONSTRAINT "ProductImage_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductImage" ADD CONSTRAINT "ProductImage_mediaAssetId_fkey" FOREIGN KEY ("mediaAssetId") REFERENCES "MediaAsset"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductOption" ADD CONSTRAINT "ProductOption_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;

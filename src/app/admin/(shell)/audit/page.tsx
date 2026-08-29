@@ -46,7 +46,7 @@ export default async function AdminAuditPage() {
     <div className="mx-auto max-w-4xl">
       <PageHeader
         title="Audit Log"
-        description="The 100 most recent security-relevant admin events — sign in, invitations, role changes and media uploads. Read-only."
+        description="The 100 most recent admin events — sign in, invitations, role changes, media, and product / category / variant changes. Read-only."
       />
       <DataTable
         columns={columns}
