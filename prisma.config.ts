@@ -12,6 +12,8 @@ export default defineConfig({
   },
   engine: "classic",
   datasource: {
-    url: env("DATABASE_URL"),
+    // CLI only (db push / migrate / studio) — use the direct / session-pooler
+    // connection. The app runtime uses DATABASE_URL from prisma/schema.prisma.
+    url: env("DIRECT_URL"),
   },
 });

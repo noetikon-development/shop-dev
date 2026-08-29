@@ -1,7 +1,11 @@
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
-const prisma = new PrismaClient();
+// Seeding is a one-off admin task — use the direct / session-pooler connection
+// so bulk writes and transactions aren't affected by the pgbouncer pooler.
+const prisma = new PrismaClient({
+  datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL,
+});
 
 // ---------------------------------------------------------------------------
 // Categories
