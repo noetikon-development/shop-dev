@@ -31,17 +31,26 @@ wordmark — use `<Logo />` everywhere the mark appears.
 
 ## Getting started
 
-Runs on **Supabase Postgres** (or any Postgres host).
+Runs on **Supabase** — Postgres for app data (Prisma), **Supabase Auth** for customer accounts.
 
 ```bash
-cp .env.example .env         # then fill in DATABASE_URL / DIRECT_URL / AUTH_SECRET
+cp .env.example .env         # fill in DATABASE_URL / DIRECT_URL / NEXT_PUBLIC_SUPABASE_* / SUPABASE_SERVICE_ROLE_KEY
 npm install
-npm run db:push              # create the schema in Supabase
-npm run db:seed              # load demo catalogue + accounts
-npm run dev                  # http://localhost:3000
+npm run db:push              # schema -> Supabase
+npm run db:seed              # demo catalogue + application User rows
+npm run db:seed:config       # inventory + store settings
+npm run db:seed:auth         # demo accounts in Supabase Auth + link to User rows
+npm run dev                  # http://localhost:3400
 ```
 
-Re-seed at any time (wipes + reloads demo data): `npm run db:seed`.
+### Supabase Auth dashboard settings (required)
+
+- **Authentication → URL Configuration → Site URL:** your production URL
+- **Authentication → URL Configuration → Redirect URLs:** add
+  `http://localhost:3400/**` and `https://YOUR-DOMAIN/**`
+- **Authentication → Sign In / Providers → Email:** "Confirm email" ON
+- The built-in email sender is rate-limited (~a few/hour). Configure **custom
+  SMTP** (Authentication → Emails) for real verification / password-reset email.
 
 ### Demo accounts
 
@@ -87,15 +96,17 @@ Prices are integer centavos throughout; `formatPrice` renders PHP.
    | --- | --- |
    | `DATABASE_URL` | transaction-pooler string (`…:6543/postgres?pgbouncer=true&connection_limit=1`) |
    | `DIRECT_URL` | session-pooler / direct string (`…:5432/postgres`) |
-   | `AUTH_SECRET` | output of `npx auth secret` (or `openssl rand -base64 33`) |
-   | `NEXT_PUBLIC_SITE_URL` | your production URL, e.g. `https://axiaro.vercel.app` (optional) |
-4. **Create the schema + seed data** once, from your machine (uses `DIRECT_URL`):
+   | `NEXT_PUBLIC_SUPABASE_URL` | `https://PROJECT_REF.supabase.co` |
+   | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Settings → API → `anon` `public` |
+   | `SUPABASE_SERVICE_ROLE_KEY` | Settings → API → `service_role` `secret` — **do not** prefix `NEXT_PUBLIC_` |
+   | `NEXT_PUBLIC_SITE_URL` | your production URL, e.g. `https://shop.demo.noetikon.tech` (needed for correct auth email links) |
+4. **Configure Supabase Auth** (see "Supabase Auth dashboard settings" above) — Site URL + Redirect URLs.
+5. **Create the schema + seed data** once, from your machine (uses `DIRECT_URL`):
    ```bash
-   npm run db:push     # creates all tables in Supabase
-   npm run db:seed      # loads the demo catalogue + accounts
+   npm run db:push && npm run db:seed && npm run db:seed:config && npm run db:seed:auth
    ```
    (Fill `.env` first — copy from `.env.example`.)
-5. **Redeploy.** The build runs `prisma generate` automatically (`build` script + `postinstall`) and never connects to the database itself.
+6. **Redeploy.** The build runs `prisma generate` automatically (`build` script + `postinstall`) and never connects to the database itself.
 
 The build never connects to the database — every storefront route is
 `force-dynamic` and renders on request. SQLite is not used anywhere; it cannot

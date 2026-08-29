@@ -2,8 +2,8 @@
 
 import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
-import { signOut } from "next-auth/react";
-import { User, Package, Heart, MapPin, LogOut } from "lucide-react";
+import { User, Package, Heart, MapPin, LogOut, KeyRound } from "lucide-react";
+import { signOut } from "@/lib/auth-actions";
 
 export function AccountMenu({
   signedIn,
@@ -45,6 +45,20 @@ export function AccountMenu({
                 Account overview
               </MenuLink>
               <MenuLink
+                href="/account/profile"
+                icon={<User size={15} />}
+                onClick={() => setOpen(false)}
+              >
+                Profile
+              </MenuLink>
+              <MenuLink
+                href="/account/password"
+                icon={<KeyRound size={15} />}
+                onClick={() => setOpen(false)}
+              >
+                Change password
+              </MenuLink>
+              <MenuLink
                 href="/account/orders"
                 icon={<Package size={15} />}
                 onClick={() => setOpen(false)}
@@ -65,13 +79,15 @@ export function AccountMenu({
               >
                 Addresses
               </MenuLink>
-              <button
-                onClick={() => signOut({ callbackUrl: "/" })}
-                className="flex w-full items-center gap-2.5 border-t border-line px-3.5 py-2.5 text-left text-sm text-ink-soft hover:bg-surface hover:text-ink"
-              >
-                <LogOut size={15} />
-                Sign out
-              </button>
+              <form action={signOut}>
+                <button
+                  type="submit"
+                  className="flex w-full items-center gap-2.5 border-t border-line px-3.5 py-2.5 text-left text-sm text-ink-soft hover:bg-surface hover:text-ink"
+                >
+                  <LogOut size={15} />
+                  Sign out
+                </button>
+              </form>
             </>
           ) : (
             <>

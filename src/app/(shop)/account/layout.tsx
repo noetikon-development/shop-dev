@@ -1,17 +1,17 @@
-import { redirect } from "next/navigation";
-import { auth } from "@/auth";
+import { requireUser } from "@/lib/auth";
 import { AccountNav } from "@/components/account/account-nav";
 
+export const dynamic = "force-dynamic";
+
 export default async function AccountLayout({ children }: LayoutProps<"/account">) {
-  const session = await auth();
-  if (!session?.user) redirect("/login?redirectTo=/account");
+  const user = await requireUser("/account");
 
   return (
     <div className="container-page py-8 sm:py-12">
       <header className="mb-8">
         <h1 className="text-3xl sm:text-[2.5rem]">My account</h1>
         <p className="mt-1.5 text-sm text-ink-soft">
-          Signed in as {session.user.name ?? session.user.email}
+          Signed in as {user.name ?? user.email}
         </p>
       </header>
 

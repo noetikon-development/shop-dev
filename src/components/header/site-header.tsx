@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { auth } from "@/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { getCategoryTree } from "@/lib/data";
 import { Logo } from "@/components/logo";
 import { MegaMenu } from "@/components/header/mega-menu";
@@ -17,8 +17,9 @@ const ANNOUNCEMENTS = [
 ];
 
 export async function SiteHeader() {
-  const [tree, session] = await Promise.all([getCategoryTree(), auth()]);
+  const [tree, user] = await Promise.all([getCategoryTree(), getCurrentUser()]);
   const featured = tree.filter((c) => c.featured);
+  const displayName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0];
 
   return (
     <>
@@ -45,10 +46,7 @@ export async function SiteHeader() {
             </div>
 
             <div className="ml-auto flex items-center gap-0.5">
-              <AccountMenu
-                signedIn={Boolean(session?.user)}
-                name={session?.user?.name?.split(" ")[0]}
-              />
+              <AccountMenu signedIn={Boolean(user)} name={displayName} />
               <WishlistButton />
               <CartButton />
             </div>
@@ -75,7 +73,7 @@ export async function SiteHeader() {
         </div>
       </header>
 
-      <MobileMenu tree={tree} signedIn={Boolean(session?.user)} />
+      <MobileMenu tree={tree} signedIn={Boolean(user)} />
     </>
   );
 }

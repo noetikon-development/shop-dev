@@ -1,0 +1,11 @@
+# Minimal Supabase CLI config so `supabase link` + `supabase db push` work.
+# project_id is the Supabase project ref; the CLI reads the DB password from
+# SUPABASE_DB_PASSWORD / the login prompt, never from this file.
+project_id = "lccwdwsmidjdjhrzjixr"
+
+[db]
+major_version = 15
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]

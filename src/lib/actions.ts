@@ -1,83 +1,11 @@
 "use server";
 
 import { revalidatePath, revalidateTag } from "next/cache";
-import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { AuthError } from "next-auth";
 import { prisma } from "@/lib/prisma";
-import { auth, signIn } from "@/auth";
+import { getCurrentUser } from "@/lib/auth";
 import { computeTotals, type CouponInput } from "@/lib/pricing";
 import { ORDER_STATUS_META } from "@/lib/constants";
-
-// ---------------------------------------------------------------------------
-// Auth
-// ---------------------------------------------------------------------------
-
-const registerSchema = z
-  .object({
-    name: z.string().trim().min(2, "Please enter your name").max(80),
-    email: z.string().trim().toLowerCase().email("Enter a valid email"),
-    password: z.string().min(8, "Use at least 8 characters").max(100),
-  });
-
-export type RegisterState = { error?: string; fieldErrors?: Record<string, string>; ok?: boolean };
-
-export async function registerUser(
-  _prev: RegisterState,
-  formData: FormData,
-): Promise<RegisterState> {
-  const parsed = registerSchema.safeParse({
-    name: formData.get("name"),
-    email: formData.get("email"),
-    password: formData.get("password"),
-  });
-
-  if (!parsed.success) {
-    const fieldErrors: Record<string, string> = {};
-    for (const issue of parsed.error.issues) {
-      fieldErrors[String(issue.path[0])] = issue.message;
-    }
-    return { fieldErrors };
-  }
-
-  const existing = await prisma.user.findUnique({ where: { email: parsed.data.email } });
-  if (existing) {
-    return { error: "An account with that email already exists. Try signing in." };
-  }
-
-  const passwordHash = await bcrypt.hash(parsed.data.password, 10);
-  await prisma.user.create({
-    data: {
-      name: parsed.data.name,
-      email: parsed.data.email,
-      passwordHash,
-      role: "CUSTOMER",
-    },
-  });
-
-  return { ok: true };
-}
-
-export type LoginState = { error?: string };
-
-export async function authenticate(
-  _prev: LoginState,
-  formData: FormData,
-): Promise<LoginState> {
-  try {
-    await signIn("credentials", {
-      email: String(formData.get("email") ?? ""),
-      password: String(formData.get("password") ?? ""),
-      redirectTo: String(formData.get("redirectTo") || "/account"),
-    });
-    return {};
-  } catch (error) {
-    if (error instanceof AuthError) {
-      return { error: "That email and password don’t match an account." };
-    }
-    throw error; // re-throw redirects
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Coupons
@@ -175,7 +103,7 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
     return { ok: false, error: "Some details are missing or invalid. Please review the form." };
   }
   const data = parsed.data;
-  const session = await auth();
+  const appUser = await getCurrentUser();
 
   // Re-price against the database — never trust client prices.
   const variantIds = data.items.map((i) => i.variantId);
@@ -244,10 +172,10 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
       : null;
 
     let addressId: string | undefined;
-    if (session?.user?.id && data.saveAddress) {
+    if (appUser && data.saveAddress) {
       const addr = await tx.address.create({
         data: {
-          userId: session.user.id,
+          userId: appUser.id,
           recipient: data.address.recipient,
           phone: data.address.phone,
           line1: data.address.line1,
@@ -265,7 +193,7 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
     const order = await tx.order.create({
       data: {
         orderNumber: num,
-        userId: session?.user?.id ?? null,
+        userId: appUser?.id ?? null,
         email: data.email,
         phone: data.phone,
         status: "PENDING",
@@ -328,8 +256,8 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
 // ---------------------------------------------------------------------------
 
 export async function saveAddress(_prev: unknown, formData: FormData) {
-  const session = await auth();
-  if (!session?.user?.id) return { error: "Please sign in" };
+  const user = await getCurrentUser();
+  if (!user) return { error: "Please sign in" };
 
   const parsed = addressSchema
     .extend({ label: z.string().trim().max(40).optional().or(z.literal("")), id: z.string().optional() })
@@ -352,13 +280,13 @@ export async function saveAddress(_prev: unknown, formData: FormData) {
 
   if (d.id) {
     await prisma.address.updateMany({
-      where: { id: d.id, userId: session.user.id },
+      where: { id: d.id, userId: user.id },
       data: payload,
     });
   } else {
-    const count = await prisma.address.count({ where: { userId: session.user.id } });
+    const count = await prisma.address.count({ where: { userId: user.id } });
     await prisma.address.create({
-      data: { ...payload, userId: session.user.id, isDefault: count === 0 },
+      data: { ...payload, userId: user.id, isDefault: count === 0 },
     });
   }
 
@@ -367,19 +295,19 @@ export async function saveAddress(_prev: unknown, formData: FormData) {
 }
 
 export async function deleteAddress(id: string) {
-  const session = await auth();
-  if (!session?.user?.id) return { error: "Please sign in" };
-  await prisma.address.deleteMany({ where: { id, userId: session.user.id } });
+  const user = await getCurrentUser();
+  if (!user) return { error: "Please sign in" };
+  await prisma.address.deleteMany({ where: { id, userId: user.id } });
   revalidatePath("/account/addresses");
   return { ok: true };
 }
 
 export async function setDefaultAddress(id: string) {
-  const session = await auth();
-  if (!session?.user?.id) return { error: "Please sign in" };
+  const user = await getCurrentUser();
+  if (!user) return { error: "Please sign in" };
   await prisma.$transaction([
-    prisma.address.updateMany({ where: { userId: session.user.id }, data: { isDefault: false } }),
-    prisma.address.updateMany({ where: { id, userId: session.user.id }, data: { isDefault: true } }),
+    prisma.address.updateMany({ where: { userId: user.id }, data: { isDefault: false } }),
+    prisma.address.updateMany({ where: { id, userId: user.id }, data: { isDefault: true } }),
   ]);
   revalidatePath("/account/addresses");
   return { ok: true };

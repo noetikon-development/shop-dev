@@ -1,14 +1,14 @@
 import type { Metadata } from "next";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { AddressManager } from "@/components/account/address-manager";
 
 export const metadata: Metadata = { title: "Addresses" };
 
 export default async function AddressesPage() {
-  const session = await auth();
+  const user = await requireUser("/account/addresses");
   const addresses = await prisma.address.findMany({
-    where: { userId: session!.user.id },
+    where: { userId: user.id },
     orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }],
   });
 

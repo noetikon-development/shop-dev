@@ -1,32 +1,28 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
-import { Logo } from "@/components/logo";
+import { getCurrentUser } from "@/lib/auth";
 import { CheckoutForm } from "@/components/checkout/checkout-form";
 
 export const metadata: Metadata = { title: "Checkout" };
 
 export default async function CheckoutPage() {
-  const session = await auth();
+  const currentUser = await getCurrentUser();
   let prefill = {
-    email: session?.user?.email ?? "",
+    email: currentUser?.email ?? "",
     phone: "",
     address: {} as Record<string, string>,
-    signedIn: Boolean(session?.user),
+    signedIn: Boolean(currentUser),
   };
 
-  if (session?.user?.id) {
-    const [user, address] = await Promise.all([
-      prisma.user.findUnique({ where: { id: session.user.id }, select: { phone: true } }),
-      prisma.address.findFirst({
-        where: { userId: session.user.id },
-        orderBy: { isDefault: "desc" },
-      }),
-    ]);
+  if (currentUser) {
+    const address = await prisma.address.findFirst({
+      where: { userId: currentUser.id },
+      orderBy: { isDefault: "desc" },
+    });
     prefill = {
       ...prefill,
-      phone: user?.phone ?? address?.phone ?? "",
+      phone: currentUser.phone ?? address?.phone ?? "",
       address: address
         ? {
             recipient: address.recipient,

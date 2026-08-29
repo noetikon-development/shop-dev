@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { ArrowRight, Package } from "lucide-react";
-import { auth } from "@/auth";
+import { requireUser } from "@/lib/auth";
 import { getUserOrders } from "@/lib/data";
 import { ProductImage } from "@/components/product-image";
 import { ORDER_STATUS_META } from "@/lib/constants";
@@ -10,8 +10,8 @@ import { formatPrice, formatDate, cn } from "@/lib/utils";
 export const metadata: Metadata = { title: "Orders" };
 
 export default async function OrdersPage() {
-  const session = await auth();
-  const orders = await getUserOrders(session!.user.id);
+  const user = await requireUser("/account/orders");
+  const orders = await getUserOrders(user.id);
 
   if (orders.length === 0) {
     return (

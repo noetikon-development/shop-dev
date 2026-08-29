@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
-import { auth } from "@/auth";
+import { requireUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { OrderDetail } from "@/components/order/order-detail";
 
@@ -17,10 +17,10 @@ export default async function AccountOrderPage({
   params,
 }: PageProps<"/account/orders/[orderNumber]">) {
   const { orderNumber } = await params;
-  const session = await auth();
+  const user = await requireUser(`/account/orders/${orderNumber}`);
   const order = await getOrderByNumber(orderNumber);
 
-  if (!order || order.userId !== session!.user.id) notFound();
+  if (!order || order.userId !== user.id) notFound();
 
   return (
     <div className="space-y-6">

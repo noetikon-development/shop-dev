@@ -1,27 +1,33 @@
 "use client";
 
-import { useActionState, useEffect } from "react";
+import { useActionState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
-import { signIn } from "next-auth/react";
-import { Loader2 } from "lucide-react";
-import { toast } from "sonner";
-import { registerUser, type RegisterState } from "@/lib/actions";
+import { useSearchParams } from "next/navigation";
+import { Loader2, MailCheck } from "lucide-react";
+import { registerUser, type RegisterState } from "@/lib/auth-actions";
 
 export function RegisterForm() {
-  const router = useRouter();
   const params = useSearchParams();
   const redirectTo = params.get("redirectTo") || "/account";
   const [state, formAction, pending] = useActionState<RegisterState, FormData>(registerUser, {});
 
-  useEffect(() => {
-    if (!state.ok) return;
-    const form = document.getElementById("register-form") as HTMLFormElement | null;
-    const email = (form?.elements.namedItem("email") as HTMLInputElement)?.value;
-    const password = (form?.elements.namedItem("password") as HTMLInputElement)?.value;
-    toast.success("Account created — signing you in");
-    signIn("credentials", { email, password, redirectTo }).catch(() => router.push("/login"));
-  }, [state.ok, redirectTo, router]);
+  if (state.ok) {
+    return (
+      <div className="text-center">
+        <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sage-50">
+          <MailCheck size={24} className="text-sage" />
+        </div>
+        <h1 className="mt-5 text-2xl">Confirm your email</h1>
+        <p className="mt-2 text-sm text-ink-soft">
+          We&apos;ve sent a verification link to your inbox. Click it to activate your account, then
+          sign in.
+        </p>
+        <Link href="/login" className="btn btn-primary mt-6 w-full">
+          Go to sign in
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div>
@@ -66,8 +72,8 @@ export function RegisterForm() {
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
         )}
 
-        <button type="submit" disabled={pending || state.ok} className="btn btn-primary w-full">
-          {(pending || state.ok) && <Loader2 size={15} className="animate-spin" />}
+        <button type="submit" disabled={pending} className="btn btn-primary w-full">
+          {pending && <Loader2 size={15} className="animate-spin" />}
           Create account
         </button>
         <p className="text-center text-xs text-ink-faint">

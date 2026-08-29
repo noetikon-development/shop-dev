@@ -1,14 +1,13 @@
 import Link from "next/link";
 import { ArrowRight, Package } from "lucide-react";
-import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { requireUser } from "@/lib/auth";
 import { getUserOrders } from "@/lib/data";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import { formatPrice, formatDate } from "@/lib/utils";
 
 export default async function AccountOverview() {
-  const session = await auth();
-  const userId = session!.user.id;
+  const { id: userId } = await requireUser("/account");
 
   const [orders, addressCount, user] = await Promise.all([
     getUserOrders(userId),

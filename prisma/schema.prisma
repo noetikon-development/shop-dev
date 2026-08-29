@@ -16,62 +16,29 @@ datasource db {
 }
 
 // ----------------------------------------------------------------------------
-// Auth (Auth.js / next-auth) + customers
+// Customers
+//
+// Authentication is handled by Supabase Auth (auth.users). This table holds
+// application data only — NO passwords. `supabaseUserId` is the 1:1 link to the
+// Supabase Auth user; it is set server-side on first authenticated request.
 // ----------------------------------------------------------------------------
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  passwordHash  String?
-  role          String    @default("CUSTOMER") // CUSTOMER | ADMIN
-  phone         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id             String    @id @default(cuid())
+  supabaseUserId String?   @unique
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  role           String    @default("CUSTOMER") // CUSTOMER | ADMIN
+  phone          String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
-  accounts      Account[]
-  sessions      Session[]
-  addresses     Address[]
-  orders        Order[]
-  reviews       Review[]
-  wishlist      WishlistItem[]
-}
-
-model Account {
-  id                String  @id @default(cuid())
-  userId            String
-  type              String
-  provider          String
-  providerAccountId String
-  refresh_token     String?
-  access_token      String?
-  expires_at        Int?
-  token_type        String?
-  scope             String?
-  id_token          String?
-  session_state     String?
-
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
-
-  @@unique([provider, providerAccountId])
-}
-
-model Session {
-  id           String   @id @default(cuid())
-  sessionToken String   @unique
-  userId       String
-  expires      DateTime
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-}
-
-model VerificationToken {
-  identifier String
-  token      String   @unique
-  expires    DateTime
-
-  @@unique([identifier, token])
+  addresses Address[]
+  orders    Order[]
+  reviews   Review[]
+  wishlist  WishlistItem[]
 }
 
 model Address {
@@ -204,14 +171,33 @@ model Variant {
   sku        String  @unique
   price      Int     // absolute price for this variant, in centavos
   compareAtPrice Int?
-  stock      Int     @default(0)
+  stock      Int     @default(0) // convenience mirror of Inventory.quantity (source the app currently reads)
   imageUrl   String?
 
   product     Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValues VariantOptionValue[]
   orderItems  OrderItem[]
+  inventory   Inventory?
 
   @@index([productId])
+}
+
+// Per-variant stock ledger. `quantity` is on-hand; `reserved` is allocated to
+// unfulfilled orders; available = quantity - reserved.
+model Inventory {
+  id           String    @id @default(cuid())
+  variantId    String    @unique
+  sku          String
+  quantity     Int       @default(0)
+  reserved     Int       @default(0)
+  reorderPoint Int       @default(3)
+  restockEta   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@index([variantId])
 }
 
 // join: which option values define a given variant
@@ -356,4 +342,21 @@ model OrderEvent {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+}
+
+// ----------------------------------------------------------------------------
+// Store configuration (key/value). Seeded from src/lib/constants.ts. The
+// storefront still reads constants.ts today; moving reads here is a later step.
+// ----------------------------------------------------------------------------
+
+model StoreSetting {
+  key       String   @id
+  value     String // JSON-encoded value
+  type      String   @default("string") // string | number | boolean | json
+  label     String?
+  group     String   @default("general")
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([group])
 }
