@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { AuthError } from "next-auth";
@@ -319,6 +319,7 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
   });
 
   revalidatePath("/account/orders");
+  revalidateTag("products", "max"); // stock changed
   return { ok: true, orderNumber: created.orderNumber };
 }
 

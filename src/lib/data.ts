@@ -1,4 +1,5 @@
 import "server-only";
+import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import type {
@@ -106,26 +107,47 @@ function orderBy(sort: SortId) {
 }
 
 // ---------------------------------------------------------------------------
-// Categories
+// Categories — one cached query, everything else derived in memory
 // ---------------------------------------------------------------------------
 
-export async function getCategoryTree(): Promise<CategoryNode[]> {
-  const cats = await prisma.category.findMany({
-    orderBy: { sortOrder: "asc" },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      description: true,
-      heroColor: true,
-      featured: true,
-      parentId: true,
-      _count: { select: { products: true } },
-    },
-  });
+type CategoryRow = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  heroColor: string | null;
+  featured: boolean;
+  sortOrder: number;
+  parentId: string | null;
+  productCount: number;
+};
 
+const loadCategoryRows = unstable_cache(
+  async (): Promise<CategoryRow[]> => {
+    const cats = await prisma.category.findMany({
+      orderBy: { sortOrder: "asc" },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        description: true,
+        heroColor: true,
+        featured: true,
+        sortOrder: true,
+        parentId: true,
+        _count: { select: { products: true } },
+      },
+    });
+    return cats.map(({ _count, ...c }) => ({ ...c, productCount: _count.products }));
+  },
+  ["category-rows"],
+  { revalidate: 300, tags: ["categories"] },
+);
+
+export async function getCategoryTree(): Promise<CategoryNode[]> {
+  const rows = await loadCategoryRows();
   const byId = new Map(
-    cats.map((c) => [
+    rows.map((c) => [
       c.id,
       {
         id: c.id,
@@ -134,22 +156,18 @@ export async function getCategoryTree(): Promise<CategoryNode[]> {
         description: c.description,
         heroColor: c.heroColor,
         featured: c.featured,
-        productCount: c._count.products,
+        productCount: c.productCount,
         children: [] as CategoryNode[],
       },
     ]),
   );
 
   const roots: CategoryNode[] = [];
-  for (const c of cats) {
+  for (const c of rows) {
     const node = byId.get(c.id)!;
-    if (c.parentId && byId.has(c.parentId)) {
-      byId.get(c.parentId)!.children.push(node);
-    } else {
-      roots.push(node);
-    }
+    if (c.parentId && byId.has(c.parentId)) byId.get(c.parentId)!.children.push(node);
+    else roots.push(node);
   }
-  // roll up product counts to parents
   for (const r of roots) {
     r.productCount = r.children.reduce((n, ch) => n + (ch.productCount ?? 0), r.productCount ?? 0);
   }
@@ -157,32 +175,54 @@ export async function getCategoryTree(): Promise<CategoryNode[]> {
 }
 
 export async function getCategoryBySlug(slug: string) {
-  return prisma.category.findUnique({
-    where: { slug },
-    select: {
-      id: true,
-      name: true,
-      slug: true,
-      description: true,
-      heroColor: true,
-      parentId: true,
-      parent: { select: { name: true, slug: true } },
-      children: {
-        orderBy: { sortOrder: "asc" },
-        select: { id: true, name: true, slug: true, _count: { select: { products: true } } },
-      },
-    },
-  });
+  const rows = await loadCategoryRows();
+  const cat = rows.find((c) => c.slug === slug);
+  if (!cat) return null;
+  const parent = cat.parentId ? rows.find((c) => c.id === cat.parentId) ?? null : null;
+  const children = rows
+    .filter((c) => c.parentId === cat.id)
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      slug: c.slug,
+      _count: { products: c.productCount },
+    }));
+  return {
+    id: cat.id,
+    name: cat.name,
+    slug: cat.slug,
+    description: cat.description,
+    heroColor: cat.heroColor,
+    parentId: cat.parentId,
+    parent: parent ? { name: parent.name, slug: parent.slug } : null,
+    children,
+  };
 }
 
 async function descendantCategoryIds(categoryId: string): Promise<string[]> {
-  const children = await prisma.category.findMany({
-    where: { parentId: categoryId },
-    select: { id: true },
-  });
-  const ids = [categoryId];
-  for (const ch of children) ids.push(...(await descendantCategoryIds(ch.id)));
-  return ids;
+  const rows = await loadCategoryRows();
+  const childrenOf = new Map<string, string[]>();
+  for (const c of rows) {
+    if (!c.parentId) continue;
+    const arr = childrenOf.get(c.parentId);
+    if (arr) arr.push(c.id);
+    else childrenOf.set(c.parentId, [c.id]);
+  }
+  const out: string[] = [];
+  const stack = [categoryId];
+  while (stack.length) {
+    const id = stack.pop()!;
+    out.push(id);
+    const kids = childrenOf.get(id);
+    if (kids) stack.push(...kids);
+  }
+  return out;
+}
+
+async function categoryIdBySlug(slug: string): Promise<string | null> {
+  const rows = await loadCategoryRows();
+  return rows.find((c) => c.slug === slug)?.id ?? null;
 }
 
 // ---------------------------------------------------------------------------
@@ -214,17 +254,14 @@ export type ListingResult = {
   colorFacets: { name: string; hex: string | null; count: number }[];
 };
 
-export async function listProducts(params: ListingParams): Promise<ListingResult> {
+async function runListProducts(params: ListingParams): Promise<ListingResult> {
   const perPage = params.perPage ?? 24;
   const page = Math.max(1, params.page ?? 1);
 
   let categoryIds: string[] | undefined;
   if (params.categorySlug) {
-    const cat = await prisma.category.findUnique({
-      where: { slug: params.categorySlug },
-      select: { id: true },
-    });
-    if (!cat) {
+    const catId = await categoryIdBySlug(params.categorySlug);
+    if (!catId) {
       return {
         products: [],
         total: 0,
@@ -235,7 +272,7 @@ export async function listProducts(params: ListingParams): Promise<ListingResult
         colorFacets: [],
       };
     }
-    categoryIds = await descendantCategoryIds(cat.id);
+    categoryIds = await descendantCategoryIds(catId);
   }
 
   const AND: Record<string, unknown>[] = [{ status: "ACTIVE" }];
@@ -321,55 +358,63 @@ export async function listProducts(params: ListingParams): Promise<ListingResult
   };
 }
 
+export const listProducts = unstable_cache(runListProducts, ["list-products"], {
+  revalidate: 60,
+  tags: ["products"],
+});
+
 // ---------------------------------------------------------------------------
-// Homepage helpers
+// Homepage helpers — cached; the same for everyone, changes rarely
 // ---------------------------------------------------------------------------
+
+const rail = (
+  key: string,
+  where: Record<string, unknown>,
+  orderBy: Record<string, "asc" | "desc">,
+) =>
+  unstable_cache(
+    async (take: number): Promise<ProductCardView[]> => {
+      const rows = await prisma.product.findMany({ where, orderBy, take, select: cardSelect });
+      return (rows as unknown as CardRow[]).map(toCard);
+    },
+    [`rail-${key}`],
+    { revalidate: 180, tags: ["products"] },
+  );
+
+const bestSellersRail = rail("bestsellers", { status: "ACTIVE" }, { soldCount: "desc" });
+const newArrivalsRail = rail("new-arrivals", { status: "ACTIVE" }, { createdAt: "desc" });
+const onSaleRail = rail(
+  "on-sale",
+  { status: "ACTIVE", compareAtPrice: { not: null } },
+  { soldCount: "desc" },
+);
+
+export const getBestSellers = (take = 8) => bestSellersRail(take);
+export const getNewArrivals = (take = 8) => newArrivalsRail(take);
+export const getOnSale = (take = 8) => onSaleRail(take);
 
 export async function getProductsByBadge(badge: string, take = 8): Promise<ProductCardView[]> {
-  const rows = await prisma.product.findMany({
-    where: { status: "ACTIVE", badges: { contains: `"${badge}"` } },
-    orderBy: { soldCount: "desc" },
-    take,
-    select: cardSelect,
-  });
-  return (rows as unknown as CardRow[]).map(toCard);
-}
-
-export async function getBestSellers(take = 8): Promise<ProductCardView[]> {
-  const rows = await prisma.product.findMany({
-    where: { status: "ACTIVE" },
-    orderBy: { soldCount: "desc" },
-    take,
-    select: cardSelect,
-  });
-  return (rows as unknown as CardRow[]).map(toCard);
-}
-
-export async function getNewArrivals(take = 8): Promise<ProductCardView[]> {
-  const rows = await prisma.product.findMany({
-    where: { status: "ACTIVE" },
-    orderBy: { createdAt: "desc" },
-    take,
-    select: cardSelect,
-  });
-  return (rows as unknown as CardRow[]).map(toCard);
-}
-
-export async function getOnSale(take = 8): Promise<ProductCardView[]> {
-  const rows = await prisma.product.findMany({
-    where: { status: "ACTIVE", compareAtPrice: { not: null } },
-    orderBy: { soldCount: "desc" },
-    take,
-    select: cardSelect,
-  });
-  return (rows as unknown as CardRow[]).map(toCard);
+  const run = unstable_cache(
+    async (b: string, t: number) => {
+      const rows = await prisma.product.findMany({
+        where: { status: "ACTIVE", badges: { contains: `"${b}"` } },
+        orderBy: { soldCount: "desc" },
+        take: t,
+        select: cardSelect,
+      });
+      return (rows as unknown as CardRow[]).map(toCard);
+    },
+    ["rail-badge"],
+    { revalidate: 180, tags: ["products"] },
+  );
+  return run(badge, take);
 }
 
 // ---------------------------------------------------------------------------
 // Product detail
 // ---------------------------------------------------------------------------
 
-export async function getProductBySlug(slug: string): Promise<ProductDetailView | null> {
+async function loadProductBySlug(slug: string): Promise<ProductDetailView | null> {
   const p = await prisma.product.findUnique({
     where: { slug },
     include: {
@@ -434,36 +479,49 @@ export async function getProductBySlug(slug: string): Promise<ProductDetailView 
   };
 }
 
-export async function getRelatedProducts(
-  categorySlug: string,
-  excludeSlug: string,
-  take = 6,
-): Promise<ProductCardView[]> {
-  const rows = await prisma.product.findMany({
-    where: { status: "ACTIVE", category: { slug: categorySlug }, slug: { not: excludeSlug } },
-    orderBy: { soldCount: "desc" },
-    take,
-    select: cardSelect,
-  });
-  return (rows as unknown as CardRow[]).map(toCard);
-}
+export const getProductBySlug = unstable_cache(loadProductBySlug, ["product-by-slug"], {
+  revalidate: 120,
+  tags: ["products"],
+});
 
-export async function getProductReviews(productId: string): Promise<ReviewView[]> {
-  const rows = await prisma.review.findMany({
-    where: { productId },
-    orderBy: { createdAt: "desc" },
-    include: { user: { select: { name: true } } },
-  });
-  return rows.map((r) => ({
-    id: r.id,
-    rating: r.rating,
-    title: r.title,
-    body: r.body,
-    author: r.user.name ?? "AXIARO customer",
-    verified: r.verified,
-    createdAt: r.createdAt.toISOString(),
-  }));
-}
+export const getRelatedProducts = unstable_cache(
+  async (
+    categorySlug: string,
+    excludeSlug: string,
+    take = 6,
+  ): Promise<ProductCardView[]> => {
+    const rows = await prisma.product.findMany({
+      where: { status: "ACTIVE", category: { slug: categorySlug }, slug: { not: excludeSlug } },
+      orderBy: { soldCount: "desc" },
+      take,
+      select: cardSelect,
+    });
+    return (rows as unknown as CardRow[]).map(toCard);
+  },
+  ["related-products"],
+  { revalidate: 180, tags: ["products"] },
+);
+
+export const getProductReviews = unstable_cache(
+  async (productId: string): Promise<ReviewView[]> => {
+    const rows = await prisma.review.findMany({
+      where: { productId },
+      orderBy: { createdAt: "desc" },
+      include: { user: { select: { name: true } } },
+    });
+    return rows.map((r) => ({
+      id: r.id,
+      rating: r.rating,
+      title: r.title,
+      body: r.body,
+      author: r.user.name ?? "AXIARO customer",
+      verified: r.verified,
+      createdAt: r.createdAt.toISOString(),
+    }));
+  },
+  ["product-reviews"],
+  { revalidate: 300, tags: ["products"] },
+);
 
 export async function getProductCardsBySlugs(slugs: string[]): Promise<ProductCardView[]> {
   if (!slugs.length) return [];
