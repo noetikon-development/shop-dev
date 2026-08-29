@@ -37,9 +37,10 @@ Runs on **Supabase** — Postgres for app data (Prisma), **Supabase Auth** for c
 cp .env.example .env         # fill in DATABASE_URL / DIRECT_URL / NEXT_PUBLIC_SUPABASE_* / SUPABASE_SERVICE_ROLE_KEY
 npm install
 npm run db:push              # schema -> Supabase
-npm run db:seed              # demo catalogue + application User rows
+npm run db:seed              # demo catalogue + application User rows (also seeds RBAC)
 npm run db:seed:config       # inventory + store settings
 npm run db:seed:auth         # demo accounts in Supabase Auth + link to User rows
+npm run db:seed:rbac         # roles + permissions + link admin@axiaro.test -> SUPER_ADMIN
 npm run dev                  # http://localhost:3400
 ```
 
@@ -78,6 +79,32 @@ npm run dev                  # http://localhost:3400
 | Accounts | `/account`, `/account/orders`, `/account/orders/[n]`, `/account/addresses` | auth-guarded |
 | Wishlist | `/wishlist` | device-local |
 | Auth | `/login`, `/register` | |
+| Admin | `/admin`, `/admin/login`, `/admin/users`, `/admin/audit` | separate login; database-backed RBAC (see below) |
+
+## Admin area & RBAC
+
+`/admin` has its own sign-in (`/admin/login`) and never shows the storefront
+header/footer. Admins are ordinary Supabase Auth users (one Supabase user ↔ one
+Prisma `User`) who hold one or more **roles**; each role grants a set of granular
+**permissions**. Everything is database-backed — `Role`, `Permission`,
+`UserRole`, `RolePermission` — and seeded from `src/lib/rbac/catalog.ts`
+(`npm run db:seed:rbac`). Shipped roles: `SUPER_ADMIN`, `ADMIN`, `STAFF`,
+`SUPPORT`, `CONTENT_MANAGER`, `FINANCE`.
+
+- **Route protection:** `proxy.ts` redirects unauthenticated `/admin/**` traffic
+  to `/admin/login`; `src/app/admin/(shell)/layout.tsx` returns a real **HTTP 403**
+  for signed-in non-admins (`app/forbidden.tsx`).
+- **Authorization helpers** (`src/lib/admin/rbac.ts`): `getCurrentAdmin()`,
+  `requireAdmin()`, `requireRole()`, `requirePermission()`,
+  `requireAnyPermission()`, `hasPermission()`. Enforced server-side on every
+  protected page **and** server action — UI visibility is never the only gate.
+- **Provisioning:** only `SUPER_ADMIN` can invite/promote. New addresses get a
+  Supabase invitation email (they set a password at `/admin/accept`); existing
+  accounts are promoted instantly. The `AdminInvite` row — not `user_metadata` —
+  is the trusted record of the intended role. `AdminAuditLog` records logins,
+  invitations and role changes (`/admin/audit`, `view_audit_logs`).
+- **First admin:** `npm run db:seed:rbac` links `admin@axiaro.test` to
+  `SUPER_ADMIN`. `admin@axiaro.test / password123`.
 
 ## Data model
 
@@ -103,9 +130,10 @@ Prices are integer centavos throughout; `formatPrice` renders PHP.
 4. **Configure Supabase Auth** (see "Supabase Auth dashboard settings" above) — Site URL + Redirect URLs.
 5. **Create the schema + seed data** once, from your machine (uses `DIRECT_URL`):
    ```bash
-   npm run db:push && npm run db:seed && npm run db:seed:config && npm run db:seed:auth
+   npm run db:push && npm run db:seed && npm run db:seed:config && npm run db:seed:auth && npm run db:seed:rbac
    ```
-   (Fill `.env` first — copy from `.env.example`.)
+   (Fill `.env` first — copy from `.env.example`.) On an existing database, just
+   `npm run db:push && npm run db:seed:rbac` adds the RBAC tables + catalogue.
 6. **Redeploy.** The build runs `prisma generate` automatically (`build` script + `postinstall`) and never connects to the database itself.
 
 The build never connects to the database — every storefront route is

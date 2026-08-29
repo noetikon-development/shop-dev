@@ -30,6 +30,10 @@ model User {
   email          String    @unique
   emailVerified  DateTime?
   image          String?
+  // Coarse account type, kept as a convenience mirror of the RBAC tables:
+  // "ADMIN" when the user holds one or more admin roles, otherwise "CUSTOMER".
+  // Authorization is ALWAYS resolved from UserRole / RolePermission — never
+  // from this column. See src/lib/admin/rbac.ts.
   role           String    @default("CUSTOMER") // CUSTOMER | ADMIN
   phone          String?
   createdAt      DateTime  @default(now())
@@ -39,6 +43,126 @@ model User {
   orders    Order[]
   reviews   Review[]
   wishlist  WishlistItem[]
+
+  // RBAC / admin
+  userRoles     UserRole[]
+  invitesSent   AdminInvite[]   @relation("AdminInviteInvitedBy")
+  invitesAccepted AdminInvite[] @relation("AdminInviteAcceptedBy")
+  auditEvents   AdminAuditLog[] @relation("AdminAuditActor")
+}
+
+// ----------------------------------------------------------------------------
+// RBAC — roles & permissions
+//
+// Data-driven: the initial catalogue lives in src/lib/rbac/catalog.ts and is
+// applied by `npm run db:seed:rbac`. The application reads roles/permissions
+// from these tables at request time; nothing is hardcoded in the auth path.
+// New roles / permissions can be added later without code changes to the
+// authorization layer.
+// ----------------------------------------------------------------------------
+
+model Role {
+  id          String  @id @default(cuid())
+  key         String  @unique // stable machine key, e.g. "SUPER_ADMIN"
+  name        String          // human label, e.g. "Super Admin"
+  description String?
+  // System roles ship with the product and cannot be deleted from the UI.
+  isSystem    Boolean @default(true)
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  userRoles       UserRole[]
+  rolePermissions RolePermission[]
+  invites         AdminInvite[]
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  key         String  @unique // e.g. "view_products"
+  description String?
+  group       String  @default("General") // UI grouping, e.g. "Products"
+  sortOrder   Int     @default(0)
+  createdAt   DateTime @default(now())
+
+  rolePermissions RolePermission[]
+
+  @@index([group])
+}
+
+model UserRole {
+  id         String   @id @default(cuid())
+  userId     String
+  roleId     String
+  // User.id of the admin who granted this role (null for seeded assignments).
+  assignedBy String?
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
+}
+
+model RolePermission {
+  id           String   @id @default(cuid())
+  roleId       String
+  permissionId String
+  createdAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permissionId])
+  @@index([roleId])
+  @@index([permissionId])
+}
+
+// A pending admin invitation. Created only by a SUPER_ADMIN action; the row is
+// the trusted record of the intended role (never trust client input or
+// Supabase user_metadata for this). Claimed server-side on the invitee's first
+// authenticated request.
+model AdminInvite {
+  id             String    @id @default(cuid())
+  email          String    // lower-cased
+  roleId         String
+  invitedById    String
+  status         String    @default("PENDING") // PENDING | ACCEPTED | REVOKED
+  supabaseUserId String?   // Supabase auth user id created by the invite email
+  acceptedById   String?
+  acceptedAt     DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  role       Role  @relation(fields: [roleId], references: [id])
+  invitedBy  User  @relation("AdminInviteInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy User? @relation("AdminInviteAcceptedBy", fields: [acceptedById], references: [id])
+
+  @@index([email])
+  @@index([status])
+  @@index([roleId])
+  @@index([invitedById])
+}
+
+// Append-only trail of security-sensitive admin actions (logins, invitations,
+// role changes). Surfaced read-only to holders of `view_audit_logs`.
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  action      String   // e.g. "admin.login", "admin.role.assign"
+  targetType  String?  // e.g. "user", "invite"
+  targetId    String?
+  summary     String?  // short human-readable description
+  meta        String   @default("{}") // JSON-encoded detail
+  createdAt   DateTime @default(now())
+
+  actor User? @relation("AdminAuditActor", fields: [actorUserId], references: [id])
+
+  @@index([actorUserId])
+  @@index([action])
+  @@index([createdAt])
 }
 
 model Address {

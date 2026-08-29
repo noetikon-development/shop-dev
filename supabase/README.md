@@ -11,13 +11,17 @@ All in environment variables — never in code. See `../.env.example`.
 
 | Var | What | Used by |
 | --- | --- | --- |
-| `DATABASE_URL` | Supabase **transaction pooler** (`:6543`, `?pgbouncer=true`) | app at runtime |
-| `DIRECT_URL` | Supabase **session pooler** (`:5432`) | `prisma migrate` / `db push` / seed |
-| `AUTH_SECRET` | Auth.js JWT secret | app |
+| `DATABASE_URL` | Supabase **transaction pooler** (`:6543`, `?pgbouncer=true`) | app at runtime (Prisma) |
+| `DIRECT_URL` | Supabase **session pooler** (`:5432`) | `prisma db push` / seed |
+| `NEXT_PUBLIC_SUPABASE_URL` | project URL | Supabase Auth (browser + server) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | anon / public key | Supabase Auth cookie sessions |
+| `SUPABASE_SERVICE_ROLE_KEY` | service-role / secret key | **server only** — admin invitations (`inviteUserByEmail`) and seed scripts |
+| `NEXT_PUBLIC_SITE_URL` | canonical site origin | auth email redirect links |
 
-The Supabase **service-role key is not used anywhere** and must never be added to
-client code. The anon key is likewise unused; the auto-generated PostgREST API is
-locked down by RLS (below).
+The **service-role key is server-only** — it is never sent to the browser, never
+prefixed `NEXT_PUBLIC_`, and is used only in `src/lib/supabase/admin.ts`
+(`createAdminClient`) for admin provisioning, plus the seed scripts. The
+auto-generated PostgREST API is locked down by RLS (below).
 
 ## Reproducing the database from scratch
 
@@ -56,9 +60,10 @@ node --env-file=.env scripts/dump-seed-sql.mjs      # regenerates supabase/seed.
 - Adds a single `SELECT` policy (public read) to the catalogue tables:
   `Category, Product, ProductImage, ProductOption, ProductOptionValue, Variant,
   VariantOptionValue, Review`.
-- Every other table (`User, Account, Session, Address, Order*, Inventory,
-  StoreSetting, Coupon, WishlistItem, VerificationToken`) has RLS on and **no
-  policy** → the public API returns nothing and cannot write.
+- Every other table (`User, Address, Order*, Inventory, StoreSetting, Coupon,
+  WishlistItem`, and the RBAC tables `Role, Permission, UserRole,
+  RolePermission, AdminInvite, AdminAuditLog`) has RLS on and **no policy** →
+  the public API returns nothing and cannot write.
 
 The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`.
 
@@ -75,8 +80,13 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `Inventory` | 1:1 with `Variant`; `quantity`, `reserved`, `reorderPoint` |
 | `StoreSetting` | key/value store config, seeded from `src/lib/constants.ts` |
 | `Coupon` | promo codes |
-| `User` | application record only — **no password**; `supabaseUserId` unique link to `auth.users` |
+| `User` | application record only — **no password**; `supabaseUserId` unique link to `auth.users`; `role` is a coarse mirror of the RBAC tables |
 | `Address` | FK → `User` (cascade) |
+| `Role` / `Permission` | RBAC catalogue; seeded from `src/lib/rbac/catalog.ts` — included in `seed.sql` |
+| `RolePermission` | join: role ↔ permission — included in `seed.sql` |
+| `UserRole` | join: user ↔ role (who is an admin, and as what) |
+| `AdminInvite` | pending admin invitations; trusted record of the intended role |
+| `AdminAuditLog` | append-only trail of admin logins / invites / role changes |
 | `Order` / `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; out of scope, excluded from `seed.sql` |
 
 ## Authentication
@@ -84,6 +94,12 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 Passwords and sessions are handled by **Supabase Auth** (`auth.users`), not by
 Prisma. `User.supabaseUserId` is the 1:1 link, set server-side on first
 authenticated request (`src/lib/auth.ts` → `syncAppUser`). The app connects to
-Postgres as `postgres` (BYPASSRLS) and never uses `supabase-js`, the anon key, or
-the service-role key in the request path — only the direct Postgres connection.
-`scripts/seed-auth-users.mjs` provisions + links the two demo accounts.
+Postgres as `postgres` (BYPASSRLS) for its data. `scripts/seed-auth-users.mjs`
+provisions + links the demo accounts.
+
+**Admin authorization (Step 3)** is database-backed RBAC: `Role`, `Permission`,
+`UserRole`, `RolePermission`, seeded from `src/lib/rbac/catalog.ts`
+(`npm run db:seed:rbac`). Admin identity is resolved server-side in
+`src/lib/admin/rbac.ts` — never from client input or Supabase `user_metadata`.
+The **service-role key** is used only server-side, only for `inviteUserByEmail`
+during admin provisioning (`src/lib/admin/actions.ts` → `createAdminClient`).

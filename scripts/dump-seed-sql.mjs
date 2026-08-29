@@ -5,13 +5,15 @@ import { writeFileSync } from "node:fs";
 
 const db = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 
-// Catalogue + config only, in FK-safe insert order. Customer / order data
-// (User, Address, Order*, Review, WishlistItem) is intentionally excluded —
-// that is a later step.
+// Catalogue + config + RBAC reference data, in FK-safe insert order. Customer /
+// order / admin-assignment data (User, Address, Order*, Review, WishlistItem,
+// UserRole, AdminInvite, AdminAuditLog) is intentionally excluded.
 const TABLES = [
   "Category", "Product", "ProductImage", "ProductOption",
   "ProductOptionValue", "Variant", "VariantOptionValue", "Inventory",
   "Coupon", "StoreSetting",
+  // RBAC catalogue (roles, permissions, grants) — reference data, not per-user.
+  "Permission", "Role", "RolePermission",
 ];
 
 function lit(v) {

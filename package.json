@@ -12,6 +12,7 @@
     "db:seed": "prisma db seed",
     "db:seed:config": "node --env-file=.env scripts/seed-inventory-settings.mjs",
     "db:seed:auth": "node --env-file=.env scripts/seed-auth-users.mjs",
+    "db:seed:rbac": "node --env-file=.env --import tsx scripts/seed-rbac.ts",
     "db:rls": "node --env-file=.env scripts/apply-rls.mjs",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"

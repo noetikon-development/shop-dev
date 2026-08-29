@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { EmailOtpType } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 import { syncAppUser } from "@/lib/auth";
+import { claimAdminInvites } from "@/lib/admin/provisioning";
 
 /**
  * Landing point for every Supabase email link (email verification + password
@@ -40,7 +41,10 @@ export async function GET(request: Request) {
       } = await supabase.auth.getUser();
       if (user) {
         try {
-          await syncAppUser(user);
+          const appUser = await syncAppUser(user);
+          // Apply any pending admin invitation for this address (e.g. arriving
+          // via a Supabase invite email). Idempotent and safe for customers.
+          await claimAdminInvites(appUser, user.email ?? appUser.email);
         } catch {
           /* provisioned on next authenticated request */
         }
