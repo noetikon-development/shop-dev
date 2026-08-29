@@ -29,12 +29,17 @@ auto-generated PostgREST API is locked down by RLS (below).
 # 1. schema (all tables, PKs, FKs, indexes, constraints)
 psql "$DIRECT_URL" -f supabase/migrations/20260829140000_initial_schema.sql
 
-# 2. RLS + API-role grants
+# 2. RLS + API-role grants + integrity constraints
 psql "$DIRECT_URL" -f supabase/migrations/20260829140100_rls_and_grants.sql
 
 # 3. demo catalogue data
 psql "$DIRECT_URL" -f supabase/seed.sql
 ```
+
+`20260830120000_address_step8.sql` is a one-off transform of a pre-Step-8
+`Address` table (split `recipient`, drop `isDefault`). It is **not** needed on a
+fresh database — `20260829140000_initial_schema.sql` already produces the
+Step 8 shape — but it is idempotent and harmless to run.
 
 Or with the Prisma toolchain (no psql needed):
 
@@ -93,7 +98,7 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `StoreSetting` | key/value store config, seeded from `src/lib/constants.ts` |
 | `Coupon` | promo codes |
 | `User` | application record only — **no password**; `supabaseUserId` unique link to `auth.users`; `role` is a coarse mirror of the RBAC tables |
-| `Address` | FK → `User` (cascade) |
+| `Address` | FK → `User` (cascade). Step 8: firstName/lastName/company/country + independent `defaultShipping`/`defaultBilling`. Partial unique indexes = at most one default of each type per user. CHECK: names non-empty. Excluded from `seed.sql` |
 | `Role` / `Permission` | RBAC catalogue; seeded from `src/lib/rbac/catalog.ts` — included in `seed.sql` |
 | `RolePermission` | join: role ↔ permission — included in `seed.sql` |
 | `UserRole` | join: user ↔ role (who is an admin, and as what) |

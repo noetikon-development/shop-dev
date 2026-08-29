@@ -124,3 +124,24 @@ ALTER TABLE "CartItem" ADD  CONSTRAINT cartitem_quantity_positive
 ALTER TABLE "CartItem" DROP CONSTRAINT IF EXISTS cartitem_price_nonneg;
 ALTER TABLE "CartItem" ADD  CONSTRAINT cartitem_price_nonneg
   CHECK ("priceSnapshot" >= 0);
+
+-- ============================================================================
+-- 8. Customer address integrity (Step 8). At most one default shipping and one
+--    default billing address per customer. The column transformation (split
+--    recipient, drop isDefault, …) is a one-off in
+--    supabase/migrations/20260830120000_address_step8.sql; this section is the
+--    re-runnable integrity guard.
+-- ============================================================================
+DROP INDEX IF EXISTS "address_default_shipping_uniq";
+CREATE UNIQUE INDEX "address_default_shipping_uniq"
+  ON "Address" ("userId") WHERE "defaultShipping" = true;
+
+DROP INDEX IF EXISTS "address_default_billing_uniq";
+CREATE UNIQUE INDEX "address_default_billing_uniq"
+  ON "Address" ("userId") WHERE "defaultBilling" = true;
+
+ALTER TABLE "Address" DROP CONSTRAINT IF EXISTS address_names_present;
+ALTER TABLE "Address" ADD  CONSTRAINT address_names_present
+  CHECK (length(trim("firstName")) > 0 AND length(trim("lastName")) > 0);
+
+REVOKE ALL ON "Address" FROM anon, authenticated;

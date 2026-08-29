@@ -18,7 +18,7 @@ export default async function CheckoutPage() {
   if (currentUser) {
     const address = await prisma.address.findFirst({
       where: { userId: currentUser.id },
-      orderBy: { isDefault: "desc" },
+      orderBy: [{ defaultShipping: "desc" }, { createdAt: "asc" }],
     });
     prefill = {
       ...prefill,

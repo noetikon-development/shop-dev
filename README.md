@@ -248,10 +248,49 @@ Database-backed cart. `src/lib/cart.ts` (server-only) owns all logic;
   `/cart` all read the one store; unavailable / over-stock lines are flagged
   inline and excluded from the subtotal and from checkout.
 
+## Customer addresses (Step 8)
+
+`/account/addresses` — an authenticated customer manages multiple saved
+addresses (add / edit / delete / set default). `src/lib/addresses.ts`
+(server-only) owns the logic; `src/lib/address-actions.ts` is the browser
+surface; `src/components/account/address-manager.tsx` is the UI.
+
+- **Ownership is resolved server-side on every call** (`getCurrentUser()`).
+  The browser never sends a userId or an ownership claim; an address id that
+  isn't the caller's returns "not found" (no IDOR). Guests can't reach the
+  page (middleware + `requireUser`) or the actions (they return a 401 result).
+- **Model** (`Address`, evolved additively): `firstName` / `lastName` /
+  `company?` / `phone` / `line1` / `line2?` / `barangay?` (PH) / `city` /
+  `province` / `region?` (PH) / `postalCode` / `country` / `label` /
+  `defaultShipping` / `defaultBilling` / timestamps. `recipient` is kept as a
+  maintained `"firstName lastName"` denormalisation so the checkout prefill and
+  the order address snapshot keep working unchanged. Flat field set — new
+  fields can be added later without restructuring.
+- **Country** is an ISO-3166-1 alpha-2 code validated against
+  `src/lib/countries.ts` (Philippines only today; the form uses each country's
+  own wording and phone / postal patterns). Extensible with a one-line add.
+- **Independent defaults.** Setting a new default shipping (or billing) address
+  unsets the previous default *of the same type only* in the same transaction;
+  the other type is untouched. The same address can be both. Deleting a default
+  auto-promotes the most recent remaining address.
+- **DB integrity** (`20260830120000_address_step8.sql` +
+  `20260829140100_rls_and_grants.sql` §8): partial unique indexes
+  `at most one default shipping / billing per userId`, `CHECK` first/last name
+  non-empty, `(userId, defaultShipping)` / `(userId, defaultBilling)` indexes,
+  RLS on + no policy.
+- **Deletion never destroys order history.** An address attached to a past
+  order can't be deleted (clear error, edit instead); orders carry their own
+  `shippingAddress` JSON snapshot regardless.
+- **Server actions:** `getCustomerAddresses`, `createAddress`, `updateAddress`,
+  `deleteAddress`, `setDefaultShippingAddress`, `setDefaultBillingAddress` —
+  each resolves the customer, validates (Zod, server-side), verifies ownership,
+  mutates, keeps default integrity, and returns the updated list. No admin
+  permissions; no `AdminAuditLog` entries.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only); `src/lib/actions.ts` holds the
-mutations (register, sign-in, validate coupon, place order, address CRUD).
+order/coupon mutations; addresses live in `src/lib/addresses.ts`.
 Prices are integer centavos throughout; `formatPrice` renders PHP.
 
 ## Deploying to Vercel (Supabase Postgres)

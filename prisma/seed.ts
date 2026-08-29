@@ -1057,6 +1057,8 @@ async function main() {
         create: [
           {
             label: "Home",
+            firstName: "Mara",
+            lastName: "Santos",
             recipient: "Mara Santos",
             phone: "+63 917 555 0142",
             line1: "42 Kalayaan Avenue",
@@ -1066,7 +1068,9 @@ async function main() {
             province: "Metro Manila",
             region: "NCR",
             postalCode: "1101",
-            isDefault: true,
+            country: "PH",
+            defaultShipping: true,
+            defaultBilling: true,
           },
         ],
       },

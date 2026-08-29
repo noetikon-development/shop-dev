@@ -175,10 +175,16 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
 
       let addressId: string | undefined;
       if (appUser && data.saveAddress) {
+        const recipient = data.address.recipient.trim();
+        const firstSpace = recipient.indexOf(" ");
+        const firstName = firstSpace > 0 ? recipient.slice(0, firstSpace) : recipient;
+        const lastName = firstSpace > 0 ? recipient.slice(firstSpace + 1).trim() || "-" : "-";
         const addr = await tx.address.create({
           data: {
             userId: appUser.id,
-            recipient: data.address.recipient,
+            firstName,
+            lastName,
+            recipient,
             phone: data.address.phone,
             line1: data.address.line1,
             line2: data.address.line2 || null,
@@ -187,6 +193,7 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
             province: data.address.province,
             region: data.address.region || null,
             postalCode: data.address.postalCode,
+            country: "PH",
           },
         });
         addressId = addr.id;
@@ -286,64 +293,6 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
   }
 }
 
-// ---------------------------------------------------------------------------
-// Addresses
-// ---------------------------------------------------------------------------
-
-export async function saveAddress(_prev: unknown, formData: FormData) {
-  const user = await getCurrentUser();
-  if (!user) return { error: "Please sign in" };
-
-  const parsed = addressSchema
-    .extend({ label: z.string().trim().max(40).optional().or(z.literal("")), id: z.string().optional() })
-    .safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Please check the address fields" };
-
-  const d = parsed.data;
-  const payload = {
-    label: d.label || "Home",
-    recipient: d.recipient,
-    phone: d.phone,
-    line1: d.line1,
-    line2: d.line2 || null,
-    barangay: d.barangay || null,
-    city: d.city,
-    province: d.province,
-    region: d.region || null,
-    postalCode: d.postalCode,
-  };
-
-  if (d.id) {
-    await prisma.address.updateMany({
-      where: { id: d.id, userId: user.id },
-      data: payload,
-    });
-  } else {
-    const count = await prisma.address.count({ where: { userId: user.id } });
-    await prisma.address.create({
-      data: { ...payload, userId: user.id, isDefault: count === 0 },
-    });
-  }
-
-  revalidatePath("/account/addresses");
-  return { ok: true };
-}
-
-export async function deleteAddress(id: string) {
-  const user = await getCurrentUser();
-  if (!user) return { error: "Please sign in" };
-  await prisma.address.deleteMany({ where: { id, userId: user.id } });
-  revalidatePath("/account/addresses");
-  return { ok: true };
-}
-
-export async function setDefaultAddress(id: string) {
-  const user = await getCurrentUser();
-  if (!user) return { error: "Please sign in" };
-  await prisma.$transaction([
-    prisma.address.updateMany({ where: { userId: user.id }, data: { isDefault: false } }),
-    prisma.address.updateMany({ where: { id, userId: user.id }, data: { isDefault: true } }),
-  ]);
-  revalidatePath("/account/addresses");
-  return { ok: true };
-}
+// Address management lives in src/lib/addresses.ts + src/lib/address-actions.ts
+// (Step 8). The checkout "save this address" path below writes an Address row
+// directly from the order form's shape.

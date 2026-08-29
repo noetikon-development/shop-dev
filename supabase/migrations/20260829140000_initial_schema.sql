@@ -2,13 +2,17 @@
 -- AXIARO — initial schema (all tables, PKs, FKs, indexes, unique constraints).
 -- Source of truth: prisma/schema.prisma  (regenerate with:
 --   npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script)
--- Apply order: this file, then 20260829140100_rls_and_grants.sql, then ../seed.sql
+-- Apply order: this file, then 20260830120000_address_step8.sql (one-off data
+--   transform for the pre-Step-8 Address shape — skip on a fresh DB), then
+--   20260829140100_rls_and_grants.sql, then ../seed.sql
 --
 -- 2026-08-30: + RBAC (Step 3), Admin/CMS foundation (Step 4),
 --             catalog fields Product.featured, Category.active/imageMediaId,
 --             ProductImage.mediaAssetId, Variant.status (Step 5),
 --             InventoryAdjustment history table (Step 6),
---             Cart + CartItem (Step 7).
+--             Cart + CartItem (Step 7),
+--             Address firstName/lastName/company/country/updatedAt +
+--             defaultShipping/defaultBilling (Step 8).
 -- ============================================================================
 
 -- CreateSchema
@@ -112,7 +116,9 @@ CREATE TABLE "Address" (
     "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "label" TEXT NOT NULL DEFAULT 'Home',
-    "recipient" TEXT NOT NULL,
+    "firstName" TEXT NOT NULL,
+    "lastName" TEXT NOT NULL,
+    "company" TEXT,
     "phone" TEXT NOT NULL,
     "line1" TEXT NOT NULL,
     "line2" TEXT,
@@ -121,8 +127,12 @@ CREATE TABLE "Address" (
     "province" TEXT NOT NULL,
     "region" TEXT,
     "postalCode" TEXT NOT NULL,
-    "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "country" TEXT NOT NULL DEFAULT 'PH',
+    "defaultShipping" BOOLEAN NOT NULL DEFAULT false,
+    "defaultBilling" BOOLEAN NOT NULL DEFAULT false,
+    "recipient" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Address_pkey" PRIMARY KEY ("id")
 );
@@ -503,6 +513,12 @@ CREATE INDEX "AdminAuditLog_createdAt_idx" ON "AdminAuditLog"("createdAt");
 
 -- CreateIndex
 CREATE INDEX "Address_userId_idx" ON "Address"("userId");
+
+-- CreateIndex
+CREATE INDEX "Address_userId_defaultShipping_idx" ON "Address"("userId", "defaultShipping");
+
+-- CreateIndex
+CREATE INDEX "Address_userId_defaultBilling_idx" ON "Address"("userId", "defaultBilling");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Category_slug_key" ON "Category"("slug");
