@@ -1,5 +1,6 @@
 import { PrismaClient } from "@prisma/client";
 import { seedRbac } from "../scripts/seed-rbac";
+import { seedAdminFoundation } from "../scripts/seed-admin-foundation";
 
 // Seeding is a one-off admin task — use the direct / session-pooler connection
 // so bulk writes and transactions aren't affected by the pgbouncer pooler.
@@ -999,6 +1000,9 @@ async function main() {
   await prisma.category.deleteMany();
   await prisma.coupon.deleteMany();
   await prisma.address.deleteMany();
+  await prisma.contentBlock.deleteMany();
+  await prisma.contentPage.deleteMany();
+  await prisma.mediaAsset.deleteMany();
   await prisma.adminAuditLog.deleteMany();
   await prisma.adminInvite.deleteMany();
   await prisma.userRole.deleteMany();
@@ -1074,6 +1078,9 @@ async function main() {
   // RBAC — roles, permissions, grants (+ links admin@axiaro.test to SUPER_ADMIN)
   await seedRbac(prisma);
   console.log("RBAC: roles + permissions seeded; admin@axiaro.test → SUPER_ADMIN");
+
+  // Admin Panel / CMS foundation — settings registry defaults
+  await seedAdminFoundation(prisma, (m) => console.log(`  ${m}`));
 
   // Products
   let productCount = 0;

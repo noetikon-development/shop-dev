@@ -41,6 +41,8 @@ npm run db:seed              # demo catalogue + application User rows (also seed
 npm run db:seed:config       # inventory + store settings
 npm run db:seed:auth         # demo accounts in Supabase Auth + link to User rows
 npm run db:seed:rbac         # roles + permissions + link admin@axiaro.test -> SUPER_ADMIN
+npm run db:seed:settings     # store-settings registry defaults (StoreSetting rows)
+npm run storage:setup        # create the Supabase Storage "media" bucket
 npm run dev                  # http://localhost:3400
 ```
 
@@ -105,6 +107,40 @@ Prisma `User`) who hold one or more **roles**; each role grants a set of granula
   invitations and role changes (`/admin/audit`, `view_audit_logs`).
 - **First admin:** `npm run db:seed:rbac` links `admin@axiaro.test` to
   `SUPER_ADMIN`. `admin@axiaro.test / password123`.
+
+## Admin Panel foundation (Step 4)
+
+A professional admin shell — responsive sidebar (off-canvas on mobile),
+top bar with breadcrumbs and a user menu, permission-filtered navigation,
+and a dashboard foundation. **No business CRUD yet** — every section renders
+a permission-gated foundation page.
+
+- **IA / navigation:** `src/lib/admin/navigation.ts` is the single source of
+  truth — sidebar groups, breadcrumbs and per-route `accepts` permissions.
+  Adding a section is one entry here; the `[...path]` foundation route and its
+  guard pick it up automatically.
+- **UI kit:** `src/components/admin/ui` — `Card`, `StatCard`, `PageHeader`,
+  `Breadcrumbs`, `DataTable`, `SearchInput`, `FilterBar`/`FilterSelect`,
+  `Pagination`, `StatusBadge`, `EmptyState`, `LoadingState`, `ErrorState`,
+  `Modal`, `ConfirmDialog`, `FormField`, `Select`, `Tabs`, `ActionMenu`,
+  `notify`. Generic and reusable — CRUD steps compose these, they don't fork.
+- **CMS foundation:** `ContentPage` (standalone pages) + `ContentBlock`
+  (data-driven homepage/banner/collection blocks — `type` selects the payload
+  schema, `data` is JSON, so new block types need no migration). Editor and
+  management UI come later.
+- **Media:** files live in **Supabase Storage** (bucket `media`, public read,
+  server-side writes only). `MediaAsset` stores metadata only — never binary
+  data. `/admin/media` has a minimal upload + grid + delete to prove the
+  foundation; the full library is a later step.
+- **Settings:** `src/lib/admin/settings-registry.ts` defines *what* is
+  configurable (identity, contact, business, regional, social, SEO, payments,
+  shipping, email); values live in `StoreSetting`. Nothing brand-specific is in
+  application logic. Sensitive credentials (payment/SMTP keys) stay in the
+  server environment and are never in the registry or the client.
+- **403 vs loading:** there is intentionally **no route-level `loading.tsx`** in
+  `/admin` — a Suspense boundary there would turn a permission failure into a
+  200 with forbidden content. Per-section loading uses `<Suspense>` around the
+  data component (permission check runs first, in the page body → real 403).
 
 ## Data model
 

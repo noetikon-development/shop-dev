@@ -484,3 +484,69 @@ model StoreSetting {
 
   @@index([group])
 }
+
+// ----------------------------------------------------------------------------
+// Admin Panel / CMS foundation (Step 4)
+//
+// These tables hold the *shape* of CMS content and media — the editor and the
+// management UI arrive in later steps. Nothing here is AXIARO-specific: every
+// value is data, seeded as an empty/draft starting point.
+// ----------------------------------------------------------------------------
+
+// A standalone content page (About, Shipping policy, …). `body` is a serialized
+// document (Markdown or a JSON block tree — the app layer decides later).
+model ContentPage {
+  id             String    @id @default(cuid())
+  slug           String    @unique
+  title          String
+  status         String    @default("DRAFT") // DRAFT | PUBLISHED
+  excerpt        String?
+  body           String    @default("")
+  seoTitle       String?
+  seoDescription String?
+  publishedAt    DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([status])
+}
+
+// A data-driven block of managed content — a homepage hero, a promo banner, a
+// featured-collection strip, etc. `type` selects the payload schema; `data`
+// carries it as JSON. Generic on purpose so new block types need no migration.
+model ContentBlock {
+  id        String   @id @default(cuid())
+  key       String   @unique // stable identifier, e.g. "homepage.hero"
+  area      String   @default("homepage") // homepage | global | …
+  type      String   // hero | banner | collection | featured_products | richtext | …
+  title     String?
+  data      String   @default("{}") // JSON payload for this block type
+  position  Int      @default(0)
+  status    String   @default("DRAFT") // DRAFT | PUBLISHED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([area])
+  @@index([status])
+}
+
+// Metadata for a file stored in Supabase Storage. Binary data never lives in
+// Postgres — only the reference + descriptive fields.
+model MediaAsset {
+  id        String   @id @default(cuid())
+  bucket    String   @default("media")
+  path      String   // object path within the bucket
+  url       String   // resolved public URL
+  filename  String
+  mimeType  String
+  sizeBytes Int
+  width     Int?
+  height    Int?
+  alt       String?
+  folder    String   @default("") // logical grouping, e.g. "banners", "products"
+  createdAt DateTime @default(now())
+
+  @@unique([bucket, path])
+  @@index([folder])
+  @@index([mimeType])
+}

@@ -1,95 +1,179 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import {
+  ShoppingBag,
+  Users,
+  Package,
+  TriangleAlert,
+  Receipt,
+  ArrowUpRight,
+} from "lucide-react";
 import { requirePermission } from "@/lib/admin/rbac";
-import { PERMISSIONS, PERMISSION_GROUPS } from "@/lib/rbac/catalog";
-import { ADMIN_SECTIONS, sectionVisibleFor } from "@/lib/admin/sections";
+import { prisma } from "@/lib/prisma";
+import { getAdminRoute, routeAllowed, ADMIN_ROUTES } from "@/lib/admin/navigation";
+import {
+  PageHeader,
+  Card,
+  CardHeader,
+  StatCard,
+  EmptyState,
+} from "@/components/admin/ui";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function AdminDashboard() {
   const admin = await requirePermission("view_dashboard");
+  const can = (perm: string) => admin.isSuperAdmin || admin.permissions.has(perm);
 
-  const grantedByGroup = PERMISSION_GROUPS.map((group) => ({
-    group,
-    perms: PERMISSIONS.filter(
-      (p) => p.group === group && (admin.isSuperAdmin || admin.permissions.has(p.key)),
-    ),
-  })).filter((g) => g.perms.length > 0);
+  // Honest, non-analytics counts only. Revenue/sales metrics stay as
+  // placeholders until analytics is built.
+  const [productCount, categoryCount, customerCount, orderCount, lowStockCount] =
+    await Promise.all([
+      can("view_products") ? prisma.product.count() : Promise.resolve(null),
+      can("view_categories") ? prisma.category.count() : Promise.resolve(null),
+      can("view_customers") ? prisma.user.count({ where: { role: "CUSTOMER" } }) : Promise.resolve(null),
+      can("view_orders") ? prisma.order.count() : Promise.resolve(null),
+      can("view_inventory")
+        ? prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*)::bigint AS count FROM "Inventory"
+            WHERE "quantity" - "reserved" <= "reorderPoint"`.then((r) => Number(r[0]?.count ?? 0))
+        : Promise.resolve(null),
+    ]);
 
-  const quickLinks = ADMIN_SECTIONS.filter(
-    (s) => s.slug && (admin.isSuperAdmin || sectionVisibleFor(s, admin.permissions)),
-  );
+  const recentOrders = can("view_orders")
+    ? await prisma.order.findMany({
+        orderBy: { placedAt: "desc" },
+        take: 5,
+        select: { id: true, orderNumber: true, email: true, status: true, grandTotal: true, placedAt: true },
+      })
+    : [];
+
+  const quickActions = ADMIN_ROUTES.filter(
+    (r) => r.path !== "/admin" && !r.hideInNav && (admin.isSuperAdmin || routeAllowed(r, admin.permissions)),
+  ).slice(0, 6);
+
+  const dash = getAdminRoute("/admin")!;
 
   return (
-    <div className="mx-auto max-w-4xl">
-      <header>
-        <p className="eyebrow">Admin</p>
-        <h1 className="mt-1 text-3xl">Welcome, {admin.user.name?.split(" ")[0] ?? "there"}</h1>
-        <p className="mt-1.5 text-sm text-ink-soft">
-          Signed in as {admin.user.email}. This is a foundation build — management
-          screens arrive in the next step.
-        </p>
-      </header>
+    <div>
+      <PageHeader title="Dashboard" description={dash.description} />
 
-      <section className="mt-8 grid gap-4 sm:grid-cols-2">
-        <div className="card-surface p-5">
-          <p className="eyebrow">Your roles</p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {admin.roles.map((r) => (
-              <span
-                key={r}
-                className="rounded-xs bg-ink px-2 py-1 text-xs font-medium uppercase tracking-wide text-paper"
-              >
-                {r.replace(/_/g, " ")}
-              </span>
-            ))}
-          </div>
-        </div>
-        <div className="card-surface p-5">
-          <p className="eyebrow">Access</p>
-          <p className="mt-2 text-sm text-ink-soft">
-            {admin.isSuperAdmin
-              ? "Full access to every permission."
-              : `${admin.permissions.size} permission${admin.permissions.size === 1 ? "" : "s"} across ${grantedByGroup.length} area${grantedByGroup.length === 1 ? "" : "s"}.`}
-          </p>
-        </div>
+      {/* Stat cards */}
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        <StatCard
+          label="Total sales"
+          icon={<Receipt size={16} />}
+          placeholder="Connected when analytics ships"
+        />
+        <StatCard
+          label="Orders"
+          value={orderCount ?? undefined}
+          hint="All time"
+          icon={<ShoppingBag size={16} />}
+          placeholder={orderCount === null ? "No access" : undefined}
+        />
+        <StatCard
+          label="Customers"
+          value={customerCount ?? undefined}
+          hint="Registered accounts"
+          icon={<Users size={16} />}
+          placeholder={customerCount === null ? "No access" : undefined}
+        />
+        <StatCard
+          label="Products"
+          value={productCount ?? undefined}
+          hint={categoryCount != null ? `${categoryCount} categories` : "In the catalog"}
+          icon={<Package size={16} />}
+          placeholder={productCount === null ? "No access" : undefined}
+        />
+        <StatCard
+          label="Low stock"
+          value={lowStockCount ?? undefined}
+          hint="At or below reorder point"
+          icon={<TriangleAlert size={16} />}
+          placeholder={lowStockCount === null ? "No access" : undefined}
+        />
       </section>
 
-      {quickLinks.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-lg">Sections you can open</h2>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {quickLinks.map((s) => (
-              <Link
-                key={s.slug}
-                href={`/admin/${s.slug}`}
-                className="rounded-sm border border-line-strong px-3 py-2 text-sm transition-colors hover:border-ink hover:bg-surface"
-              >
-                {s.label}
-                {!s.live && <span className="ml-1.5 text-xs text-ink-faint">soon</span>}
+      <div className="mt-6 grid gap-6 lg:grid-cols-3">
+        {/* Sales overview — placeholder */}
+        <Card className="lg:col-span-2">
+          <CardHeader title="Sales overview" />
+          <EmptyState
+            compact
+            title="No sales data to chart yet"
+            description="The sales trend will appear here once order analytics is connected in a later step."
+          />
+        </Card>
+
+        {/* Quick actions */}
+        <Card>
+          <CardHeader title="Quick actions" />
+          {quickActions.length === 0 ? (
+            <EmptyState compact title="No sections available" />
+          ) : (
+            <ul className="space-y-1">
+              {quickActions.map((r) => (
+                <li key={r.path}>
+                  <Link
+                    href={r.path}
+                    className="flex items-center justify-between rounded-sm px-2.5 py-2 text-sm text-ink-soft transition-colors hover:bg-surface-sunken hover:text-ink"
+                  >
+                    {r.label}
+                    <ArrowUpRight size={14} className="text-ink-faint" />
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+
+      {/* Recent orders */}
+      {can("view_orders") && (
+        <Card className="mt-6">
+          <CardHeader
+            title="Recent orders"
+            action={
+              <Link href="/admin/orders" className="text-xs text-ink-faint hover:text-ink">
+                View all
               </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section className="mt-8">
-        <h2 className="text-lg">Your permissions</h2>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
-          {grantedByGroup.map(({ group, perms }) => (
-            <div key={group} className="card-surface p-4">
-              <p className="text-sm font-medium">{group}</p>
-              <ul className="mt-1.5 space-y-1">
-                {perms.map((p) => (
-                  <li key={p.key} className="text-xs text-ink-soft">
-                    <code className="text-ink">{p.key}</code> — {p.description}
-                  </li>
-                ))}
-              </ul>
+            }
+          />
+          {recentOrders.length === 0 ? (
+            <EmptyState compact title="No orders yet" description="New orders will show up here." />
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[32rem] text-sm">
+                <thead>
+                  <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-ink-faint">
+                    <th className="py-2 pr-4 font-medium">Order</th>
+                    <th className="py-2 pr-4 font-medium">Customer</th>
+                    <th className="py-2 pr-4 font-medium">Status</th>
+                    <th className="py-2 pr-4 text-right font-medium">Total</th>
+                    <th className="py-2 font-medium">Placed</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentOrders.map((o) => (
+                    <tr key={o.id} className="border-b border-line/60 last:border-0">
+                      <td className="py-2.5 pr-4 font-medium text-ink">{o.orderNumber}</td>
+                      <td className="py-2.5 pr-4 text-ink-soft">{o.email}</td>
+                      <td className="py-2.5 pr-4 text-ink-soft">{o.status}</td>
+                      <td className="py-2.5 pr-4 text-right text-ink-soft">
+                        ₱{(o.grandTotal / 100).toLocaleString()}
+                      </td>
+                      <td className="py-2.5 text-ink-faint">
+                        {o.placedAt.toLocaleDateString()}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
-        </div>
-      </section>
+          )}
+        </Card>
+      )}
     </div>
   );
 }

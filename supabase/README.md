@@ -61,9 +61,18 @@ node --env-file=.env scripts/dump-seed-sql.mjs      # regenerates supabase/seed.
   `Category, Product, ProductImage, ProductOption, ProductOptionValue, Variant,
   VariantOptionValue, Review`.
 - Every other table (`User, Address, Order*, Inventory, StoreSetting, Coupon,
-  WishlistItem`, and the RBAC tables `Role, Permission, UserRole,
-  RolePermission, AdminInvite, AdminAuditLog`) has RLS on and **no policy** →
-  the public API returns nothing and cannot write.
+  WishlistItem`, the RBAC tables `Role, Permission, UserRole, RolePermission,
+  AdminInvite, AdminAuditLog`, and the CMS/media tables `ContentPage,
+  ContentBlock, MediaAsset`) has RLS on and **no policy** → the public API
+  returns nothing and cannot write.
+
+## Storage
+
+Bucket **`media`** (public read, 8 MB limit, image + PDF mime types) holds
+admin-uploaded files. Created by `npm run storage:setup`. All writes happen
+server-side with the service-role key (`src/lib/admin/media.ts`); the bucket is
+public-read so `<img src>` works on the storefront. `MediaAsset` rows hold the
+reference + metadata; binary data is never in Postgres.
 
 The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`.
 
@@ -86,7 +95,10 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `RolePermission` | join: role ↔ permission — included in `seed.sql` |
 | `UserRole` | join: user ↔ role (who is an admin, and as what) |
 | `AdminInvite` | pending admin invitations; trusted record of the intended role |
-| `AdminAuditLog` | append-only trail of admin logins / invites / role changes |
+| `AdminAuditLog` | append-only trail of admin logins / invites / role changes / media ops |
+| `ContentPage` | standalone CMS pages (slug, title, body, SEO, status) — Step 4 foundation |
+| `ContentBlock` | data-driven managed blocks (hero/banner/collection…); `type` + JSON `data` |
+| `MediaAsset` | metadata for files in Supabase **Storage** (bucket `media`) — no binary data |
 | `Order` / `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; out of scope, excluded from `seed.sql` |
 
 ## Authentication

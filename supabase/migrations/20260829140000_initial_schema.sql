@@ -4,8 +4,8 @@
 --   npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script)
 -- Apply order: this file, then 20260829140100_rls_and_grants.sql, then ../seed.sql
 --
--- 2026-08-30: adds the RBAC tables (Role, Permission, UserRole, RolePermission,
---             AdminInvite, AdminAuditLog) for Step 3 — admin auth & permissions.
+-- 2026-08-30: + RBAC tables (Step 3) and Admin Panel / CMS foundation tables
+--             (Step 4: ContentPage, ContentBlock, MediaAsset).
 -- ============================================================================
 
 CREATE SCHEMA IF NOT EXISTS "public";
@@ -347,6 +347,57 @@ CREATE TABLE "StoreSetting" (
     CONSTRAINT "StoreSetting_pkey" PRIMARY KEY ("key")
 );
 
+-- CreateTable
+CREATE TABLE "ContentPage" (
+    "id" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "title" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'DRAFT',
+    "excerpt" TEXT,
+    "body" TEXT NOT NULL DEFAULT '',
+    "seoTitle" TEXT,
+    "seoDescription" TEXT,
+    "publishedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ContentPage_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ContentBlock" (
+    "id" TEXT NOT NULL,
+    "key" TEXT NOT NULL,
+    "area" TEXT NOT NULL DEFAULT 'homepage',
+    "type" TEXT NOT NULL,
+    "title" TEXT,
+    "data" TEXT NOT NULL DEFAULT '{}',
+    "position" INTEGER NOT NULL DEFAULT 0,
+    "status" TEXT NOT NULL DEFAULT 'DRAFT',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ContentBlock_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "MediaAsset" (
+    "id" TEXT NOT NULL,
+    "bucket" TEXT NOT NULL DEFAULT 'media',
+    "path" TEXT NOT NULL,
+    "url" TEXT NOT NULL,
+    "filename" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "sizeBytes" INTEGER NOT NULL,
+    "width" INTEGER,
+    "height" INTEGER,
+    "alt" TEXT,
+    "folder" TEXT NOT NULL DEFAULT '',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "MediaAsset_pkey" PRIMARY KEY ("id")
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_supabaseUserId_key" ON "User"("supabaseUserId");
 
@@ -475,6 +526,30 @@ CREATE INDEX "OrderEvent_orderId_idx" ON "OrderEvent"("orderId");
 
 -- CreateIndex
 CREATE INDEX "StoreSetting_group_idx" ON "StoreSetting"("group");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ContentPage_slug_key" ON "ContentPage"("slug");
+
+-- CreateIndex
+CREATE INDEX "ContentPage_status_idx" ON "ContentPage"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ContentBlock_key_key" ON "ContentBlock"("key");
+
+-- CreateIndex
+CREATE INDEX "ContentBlock_area_idx" ON "ContentBlock"("area");
+
+-- CreateIndex
+CREATE INDEX "ContentBlock_status_idx" ON "ContentBlock"("status");
+
+-- CreateIndex
+CREATE INDEX "MediaAsset_folder_idx" ON "MediaAsset"("folder");
+
+-- CreateIndex
+CREATE INDEX "MediaAsset_mimeType_idx" ON "MediaAsset"("mimeType");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MediaAsset_bucket_path_key" ON "MediaAsset"("bucket", "path");
 
 -- AddForeignKey
 ALTER TABLE "UserRole" ADD CONSTRAINT "UserRole_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

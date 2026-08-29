@@ -41,6 +41,10 @@ ALTER TABLE "UserRole"            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "RolePermission"      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AdminInvite"         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "AdminAuditLog"       ENABLE ROW LEVEL SECURITY;
+-- Admin Panel / CMS foundation (Step 4, 2026-08-30). Same posture.
+ALTER TABLE "ContentPage"         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ContentBlock"        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "MediaAsset"          ENABLE ROW LEVEL SECURITY;
 
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -71,5 +75,6 @@ END $$;
 --    later CREATE TABLE picked up a default grant before step 1's ALTER DEFAULT
 --    PRIVILEGES took effect.
 REVOKE ALL ON
-  "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog"
+  "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
+  "ContentPage", "ContentBlock", "MediaAsset"
 FROM anon, authenticated;

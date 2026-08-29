@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { requirePermission } from "@/lib/admin/rbac";
 import { prisma } from "@/lib/prisma";
 import { formatDate } from "@/lib/utils";
+import { PageHeader, StatusBadge } from "@/components/admin/ui";
 import { InviteAdminForm } from "@/components/admin/invite-admin-form";
 import { PendingInvites } from "@/components/admin/pending-invites";
 import { AdminRoster } from "@/components/admin/admin-roster";
@@ -30,18 +31,20 @@ export default async function AdminUsersPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <header>
-        <p className="eyebrow">Admin</p>
-        <h1 className="mt-1 text-3xl">Admin Users</h1>
-        <p className="mt-1.5 text-sm text-ink-soft">
-          {canManage
+      <PageHeader
+        title="Admin Users"
+        description={
+          canManage
             ? "Invite administrators and manage their roles. Only a Super Admin can make changes here."
-            : "You can view administrators. Role changes are restricted to Super Admins."}
-        </p>
-      </header>
+            : "You can view administrators. Role changes are restricted to Super Admins."
+        }
+        actions={
+          !canManage ? <StatusBadge tone="neutral">Read-only</StatusBadge> : undefined
+        }
+      />
 
       {canManage && (
-        <section className="mt-8">
+        <section>
           <h2 className="text-lg">Invite an administrator</h2>
           <p className="mt-1 text-sm text-ink-soft">
             New addresses get a Supabase invitation email. Existing accounts are
