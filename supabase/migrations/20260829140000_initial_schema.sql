@@ -2,9 +2,9 @@
 -- AXIARO — initial schema (all tables, PKs, FKs, indexes, unique constraints).
 -- Source of truth: prisma/schema.prisma  (regenerate with:
 --   npx prisma migrate diff --from-empty --to-schema-datamodel prisma/schema.prisma --script)
--- Apply order: this file, then 20260830120000_address_step8.sql (one-off data
---   transform for the pre-Step-8 Address shape — skip on a fresh DB), then
---   20260829140100_rls_and_grants.sql, then ../seed.sql
+-- Apply order: this file, then 20260830120000_address_step8.sql (a one-off data
+--   transform — skip on a fresh DB), then 20260829140100_rls_and_grants.sql
+--   (RLS + integrity constraints + the order_number_seq sequence), then ../seed.sql
 --
 -- 2026-08-30: + RBAC (Step 3), Admin/CMS foundation (Step 4),
 --             catalog fields Product.featured, Category.active/imageMediaId,
@@ -12,7 +12,8 @@
 --             InventoryAdjustment history table (Step 6),
 --             Cart + CartItem (Step 7),
 --             Address firstName/lastName/company/country/updatedAt +
---             defaultShipping/defaultBilling (Step 8).
+--             defaultShipping/defaultBilling (Step 8),
+--             Order cartId/billingAddressId/billingAddress + PENDING_PAYMENT (Step 9).
 -- ============================================================================
 
 -- CreateSchema
@@ -353,8 +354,11 @@ CREATE TABLE "Order" (
     "couponCode" TEXT,
     "paymentMethod" TEXT NOT NULL DEFAULT 'COD',
     "paymentStatus" TEXT NOT NULL DEFAULT 'UNPAID',
+    "cartId" TEXT,
     "addressId" TEXT,
+    "billingAddressId" TEXT,
     "shippingAddress" TEXT NOT NULL,
+    "billingAddress" TEXT,
     "shippingMethod" TEXT NOT NULL DEFAULT 'standard',
     "note" TEXT,
     "placedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -620,10 +624,16 @@ CREATE UNIQUE INDEX "Coupon_code_key" ON "Coupon"("code");
 CREATE UNIQUE INDEX "Order_orderNumber_key" ON "Order"("orderNumber");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Order_cartId_key" ON "Order"("cartId");
+
+-- CreateIndex
 CREATE INDEX "Order_userId_idx" ON "Order"("userId");
 
 -- CreateIndex
 CREATE INDEX "Order_status_idx" ON "Order"("status");
+
+-- CreateIndex
+CREATE INDEX "Order_billingAddressId_idx" ON "Order"("billingAddressId");
 
 -- CreateIndex
 CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
@@ -749,7 +759,13 @@ ALTER TABLE "CartItem" ADD CONSTRAINT "CartItem_variantId_fkey" FOREIGN KEY ("va
 ALTER TABLE "Order" ADD CONSTRAINT "Order_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_cartId_fkey" FOREIGN KEY ("cartId") REFERENCES "Cart"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_addressId_fkey" FOREIGN KEY ("addressId") REFERENCES "Address"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_billingAddressId_fkey" FOREIGN KEY ("billingAddressId") REFERENCES "Address"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_couponId_fkey" FOREIGN KEY ("couponId") REFERENCES "Coupon"("id") ON DELETE SET NULL ON UPDATE CASCADE;

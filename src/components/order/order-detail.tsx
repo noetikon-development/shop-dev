@@ -8,7 +8,16 @@ import type { OrderView } from "@/lib/data";
 export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
   const meta = ORDER_STATUS_META[order.status] ?? ORDER_STATUS_META.PENDING;
   const addr = order.shippingAddress;
+  const billing = order.billingAddress;
   const payment = PAYMENT_METHODS.find((p) => p.id === order.paymentMethod);
+  const paymentLabel =
+    order.paymentStatus === "PAID"
+      ? "Paid"
+      : order.paymentStatus === "REFUNDED"
+        ? "Refunded"
+        : order.paymentStatus === "PENDING"
+          ? "Awaiting payment"
+          : "Unpaid";
 
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_340px]">
@@ -90,26 +99,22 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
 
         <div className="card-surface p-5 text-sm">
           <h3 className="font-medium">Delivery address</h3>
-          <address className="mt-2 not-italic text-ink-soft">
-            {addr.recipient}
-            <br />
-            {addr.line1}
-            {addr.line2 ? (
-              <>
-                <br />
-                {addr.line2}
-              </>
-            ) : null}
-            <br />
-            {[addr.barangay, addr.city, addr.province, addr.postalCode].filter(Boolean).join(", ")}
-            <br />
-            {addr.phone}
-          </address>
+          <SnapshotAddress a={addr} />
+
+          {billing && (
+            <>
+              <h3 className="mt-4 font-medium">Billing address</h3>
+              <SnapshotAddress a={billing} />
+            </>
+          )}
+
           <h3 className="mt-4 font-medium">Payment</h3>
           <p className="mt-1 text-ink-soft">
-            {payment?.label ?? order.paymentMethod} ·{" "}
+            {order.paymentMethod && order.paymentMethod !== "NONE"
+              ? `${payment?.label ?? order.paymentMethod} · `
+              : ""}
             <span className={order.paymentStatus === "PAID" ? "text-success" : "text-ink-soft"}>
-              {order.paymentStatus === "PAID" ? "Paid" : "Pay on delivery"}
+              {paymentLabel}
             </span>
           </p>
         </div>
@@ -119,5 +124,32 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
         </Link>
       </aside>
     </div>
+  );
+}
+
+function SnapshotAddress({ a }: { a: Record<string, string> }) {
+  const name = [a.firstName, a.lastName].filter(Boolean).join(" ") || a.recipient;
+  return (
+    <address className="mt-2 not-italic text-ink-soft">
+      {name}
+      {a.company ? (
+        <>
+          <br />
+          {a.company}
+        </>
+      ) : null}
+      <br />
+      {a.line1}
+      {a.line2 ? (
+        <>
+          <br />
+          {a.line2}
+        </>
+      ) : null}
+      <br />
+      {[a.barangay, a.city, a.province, a.postalCode].filter(Boolean).join(", ")}
+      <br />
+      {a.phone}
+    </address>
   );
 }

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
+import { getCurrentUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { OrderDetail } from "@/components/order/order-detail";
 import { formatPrice } from "@/lib/utils";
@@ -15,6 +16,16 @@ export default async function OrderConfirmationPage({
   const order = await getOrderByNumber(orderNumber);
   if (!order) notFound();
 
+  // An order that belongs to a customer is only visible to that customer.
+  // (Legacy guest orders have no userId and stay reachable by link.)
+  if (order.userId) {
+    const user = await getCurrentUser();
+    if (!user || user.id !== order.userId) notFound();
+  }
+
+  const awaitingPayment =
+    order.status === "PENDING_PAYMENT" || order.paymentStatus === "PENDING";
+
   return (
     <div className="container-page py-10">
       <div className="mx-auto max-w-md text-center">
@@ -23,19 +34,19 @@ export default async function OrderConfirmationPage({
         </div>
         <h1 className="mt-5 text-3xl">Thank you — your order is in</h1>
         <p className="mt-2 text-ink-soft">
-          We&apos;ve emailed a confirmation to <span className="text-ink">{order.email}</span>.
           Your order number is{" "}
           <span className="font-medium text-ink">{order.orderNumber}</span>.
         </p>
         <p className="mt-1 text-sm text-ink-faint">
-          Total paid / due: {formatPrice(order.grandTotal)}
+          Order total: {formatPrice(order.grandTotal)}
+          {awaitingPayment && " · awaiting payment"}
         </p>
         <div className="mt-5 flex justify-center gap-3">
-          <Link href={`/track?order=${order.orderNumber}`} className="btn btn-outline">
-            Track this order
+          <Link href="/account/orders" className="btn btn-outline">
+            View your orders
           </Link>
-          <Link href="/account/orders" className="btn btn-ghost">
-            All orders
+          <Link href="/c/all" className="btn btn-ghost">
+            Continue shopping
           </Link>
         </div>
       </div>

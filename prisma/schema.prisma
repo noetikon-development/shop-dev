@@ -199,8 +199,9 @@ model Address {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  user   User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  orders Order[]
+  user         User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shipToOrders Order[] @relation("OrderShipTo")
+  billToOrders Order[] @relation("OrderBillTo")
 
   @@index([userId])
   @@index([userId, defaultShipping])
@@ -458,6 +459,7 @@ model Cart {
 
   user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   items CartItem[]
+  order Order? // set once the cart is CONVERTED into an order (Step 9)
 
   @@index([userId])
   @@index([status])
@@ -516,7 +518,8 @@ model Order {
   phone       String?
 
   status String @default("PENDING")
-  // PENDING | PAID | PROCESSING | SHIPPED | OUT_FOR_DELIVERY | DELIVERED | CANCELLED
+  // PENDING_PAYMENT | PENDING | PAID | PROCESSING | SHIPPED | OUT_FOR_DELIVERY | DELIVERED | CANCELLED
+  // Step 9 checkout creates orders as PENDING_PAYMENT (payment is a later step).
 
   subtotal      Int
   shippingFee   Int @default(0)
@@ -526,25 +529,34 @@ model Order {
   couponId   String?
   couponCode String?
 
-  paymentMethod String @default("COD") // COD | CARD | GCASH
-  paymentStatus String @default("UNPAID") // UNPAID | PAID | REFUNDED
+  paymentMethod String @default("COD") // COD | CARD | GCASH | NONE (no method until the payment step)
+  paymentStatus String @default("UNPAID") // PENDING | UNPAID | PAID | REFUNDED
 
-  addressId       String?
-  shippingAddress String // JSON string snapshot at time of order
-  shippingMethod  String  @default("standard")
+  // The ACTIVE cart this order was created from. `@unique` guarantees one order
+  // per cart — the DB-level guard against double submission.
+  cartId String? @unique
+
+  addressId        String? // shipping address, live link (may be edited/deleted later)
+  billingAddressId String? // billing address, live link
+  shippingAddress  String // immutable JSON snapshot taken at order time
+  billingAddress   String? // immutable JSON snapshot; null = billed to the shipping address
+  shippingMethod   String  @default("standard")
 
   note      String?
   placedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   user    User?        @relation(fields: [userId], references: [id])
-  address Address?     @relation(fields: [addressId], references: [id])
+  cart    Cart?        @relation(fields: [cartId], references: [id])
+  address Address?     @relation("OrderShipTo", fields: [addressId], references: [id])
+  billTo  Address?     @relation("OrderBillTo", fields: [billingAddressId], references: [id])
   coupon  Coupon?      @relation(fields: [couponId], references: [id])
   items   OrderItem[]
   events  OrderEvent[]
 
   @@index([userId])
   @@index([status])
+  @@index([billingAddressId])
 }
 
 model OrderItem {

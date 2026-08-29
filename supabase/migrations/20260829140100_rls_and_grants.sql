@@ -145,3 +145,11 @@ ALTER TABLE "Address" ADD  CONSTRAINT address_names_present
   CHECK (length(trim("firstName")) > 0 AND length(trim("lastName")) > 0);
 
 REVOKE ALL ON "Address" FROM anon, authenticated;
+
+-- ============================================================================
+-- 9. Order-number sequence (Step 9). Collision-free order numbers under
+--    concurrent checkout — replaces the old Math.random() 4-digit suffix.
+--    Order numbers are AX-<YYMMDD>-<nextval, zero-padded to 5>. Started above
+--    every existing/seed order number.
+-- ============================================================================
+CREATE SEQUENCE IF NOT EXISTS "order_number_seq" AS bigint INCREMENT BY 1 MINVALUE 100001 START WITH 100001;

@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PROTECTED_PREFIXES = ["/account", "/wishlist"];
+const PROTECTED_PREFIXES = ["/account", "/wishlist", "/checkout"];
 
 // Admin area. Everything under /admin needs an authenticated session except the
 // login page itself. The ROLE check (customer vs admin) can't run here — it

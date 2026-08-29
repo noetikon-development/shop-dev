@@ -581,6 +581,9 @@ export async function getOrderByNumber(orderNumber: string) {
   return {
     ...order,
     shippingAddress: safeParse<Record<string, string>>(order.shippingAddress, {}),
+    billingAddress: order.billingAddress
+      ? safeParse<Record<string, string>>(order.billingAddress, {})
+      : null,
   };
 }
 
@@ -593,6 +596,9 @@ export async function getUserOrders(userId: string) {
   return orders.map((o) => ({
     ...o,
     shippingAddress: safeParse<Record<string, string>>(o.shippingAddress, {}),
+    billingAddress: o.billingAddress
+      ? safeParse<Record<string, string>>(o.billingAddress, {})
+      : null,
   }));
 }
 

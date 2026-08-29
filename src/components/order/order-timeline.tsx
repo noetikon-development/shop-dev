@@ -19,6 +19,18 @@ export function OrderTimeline({
     );
   }
 
+  if (status === "PENDING_PAYMENT") {
+    return (
+      <div className="rounded-md border border-line bg-surface px-4 py-3 text-sm text-ink-soft">
+        <p className="font-medium text-ink">Order placed — awaiting payment</p>
+        <p className="mt-1">
+          We&apos;ve saved your order. Payment isn&apos;t available yet; you&apos;ll be able to
+          complete it in a later step, and we&apos;ll start preparing your items once it&apos;s paid.
+        </p>
+      </div>
+    );
+  }
+
   const currentIndex = ORDER_STATUS_FLOW.indexOf(status as (typeof ORDER_STATUS_FLOW)[number]);
   const eventByStatus = new Map(events.map((e) => [e.status, e]));
 

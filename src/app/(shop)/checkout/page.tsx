@@ -1,42 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { prisma } from "@/lib/prisma";
-import { getCurrentUser } from "@/lib/auth";
-import { CheckoutForm } from "@/components/checkout/checkout-form";
+import { requireUser } from "@/lib/auth";
+import { getCheckoutData } from "@/lib/checkout";
+import { CheckoutFlow } from "@/components/checkout/checkout-flow";
 
 export const metadata: Metadata = { title: "Checkout" };
 
 export default async function CheckoutPage() {
-  const currentUser = await getCurrentUser();
-  let prefill = {
-    email: currentUser?.email ?? "",
-    phone: "",
-    address: {} as Record<string, string>,
-    signedIn: Boolean(currentUser),
-  };
-
-  if (currentUser) {
-    const address = await prisma.address.findFirst({
-      where: { userId: currentUser.id },
-      orderBy: [{ defaultShipping: "desc" }, { createdAt: "asc" }],
-    });
-    prefill = {
-      ...prefill,
-      phone: currentUser.phone ?? address?.phone ?? "",
-      address: address
-        ? {
-            recipient: address.recipient,
-            line1: address.line1,
-            line2: address.line2 ?? "",
-            barangay: address.barangay ?? "",
-            city: address.city,
-            province: address.province,
-            region: address.region ?? "",
-            postalCode: address.postalCode,
-          }
-        : {},
-    };
-  }
+  await requireUser("/checkout");
+  const data = await getCheckoutData();
 
   return (
     <div className="container-page py-6 sm:py-10">
@@ -46,7 +18,7 @@ export default async function CheckoutPage() {
           Back to bag
         </Link>
       </div>
-      <CheckoutForm prefill={prefill} />
+      <CheckoutFlow data={data} />
     </div>
   );
 }
