@@ -2,6 +2,7 @@ import "server-only";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
+import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import type {
   CategoryNode,
   ProductCardView,
@@ -38,7 +39,10 @@ const cardSelect = {
     where: { name: "Colour" },
     select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
   },
-  variants: { select: { stock: true } },
+  variants: {
+    where: { status: "ACTIVE" },
+    select: { stock: true, inventory: { select: { reorderPoint: true } } },
+  },
 } as const;
 
 type CardRow = {
@@ -58,7 +62,7 @@ type CardRow = {
   category: { slug: string; name: string };
   images: { url: string; alt: string }[];
   options: { values: { swatchHex: string | null }[] }[];
-  variants: { stock: number }[];
+  variants: { stock: number; inventory: { reorderPoint: number } | null }[];
 };
 
 function toCard(p: CardRow): ProductCardView {
@@ -66,6 +70,9 @@ function toCard(p: CardRow): ProductCardView {
   const swatches = (p.options[0]?.values ?? [])
     .map((v) => v.swatchHex)
     .filter((h): h is string => Boolean(h));
+  const stockStatus = rollupStatus(
+    p.variants.map((v) => stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0)),
+  );
   return {
     id: p.id,
     slug: p.slug,
@@ -85,6 +92,7 @@ function toCard(p: CardRow): ProductCardView {
     categoryName: p.category.name,
     colorSwatches: swatches,
     inStock: p.variants.some((v) => v.stock > 0),
+    stockStatus,
     createdAt: p.createdAt.toISOString(),
   };
 }
@@ -425,7 +433,12 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         orderBy: { sortOrder: "asc" },
         include: { values: { orderBy: { sortOrder: "asc" } } },
       },
-      variants: { include: { optionValues: { select: { optionValueId: true } } } },
+      variants: {
+        include: {
+          optionValues: { select: { optionValueId: true } },
+          inventory: { select: { reorderPoint: true } },
+        },
+      },
     },
   });
   if (!p) return null;
@@ -434,7 +447,8 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
   const swatches = (p.options.find((o) => o.name === "Colour")?.values ?? [])
     .map((v) => v.swatchHex)
     .filter((h): h is string => Boolean(h));
-  const totalStock = p.variants.reduce((n, v) => n + v.stock, 0);
+  const activeVariants = p.variants.filter((v) => v.status === "ACTIVE");
+  const totalStock = activeVariants.reduce((n, v) => n + Math.max(0, v.stock), 0);
 
   return {
     id: p.id,
@@ -461,6 +475,11 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     categoryName: p.category.name,
     colorSwatches: swatches,
     inStock: totalStock > 0,
+    stockStatus: rollupStatus(
+      activeVariants.map((v) =>
+        stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0),
+      ),
+    ),
     totalStock,
     createdAt: p.createdAt.toISOString(),
     options: p.options.map((o) => ({
@@ -468,12 +487,14 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
       name: o.name,
       values: o.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })),
     })),
-    variants: p.variants.map((v) => ({
+    variants: activeVariants.map((v) => ({
       id: v.id,
       sku: v.sku,
       price: v.price,
       compareAtPrice: v.compareAtPrice,
-      stock: v.stock,
+      stock: Math.max(0, v.stock),
+      reorderPoint: v.inventory?.reorderPoint ?? 0,
+      status: v.status,
       imageUrl: v.imageUrl,
       optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
     })),

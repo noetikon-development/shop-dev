@@ -46,6 +46,9 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const activeCompareAt = matchedVariant?.compareAtPrice ?? product.compareAtPrice;
   const stock = matchedVariant?.stock ?? product.totalStock;
   const outOfStock = matchedVariant ? matchedVariant.stock <= 0 : product.totalStock <= 0;
+  const reorderPoint = matchedVariant?.reorderPoint ?? 0;
+  const lowStock =
+    !outOfStock && !needsSize && stock > 0 && stock <= Math.max(0, reorderPoint);
 
   // Is a given size available for the selected colour?
   const isSizeAvailable = (sizeValueId: string) => {
@@ -54,6 +57,17 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
       (v) =>
         v.optionValueIds.includes(sizeValueId) &&
         (!colourId || v.optionValueIds.includes(colourId)) &&
+        v.stock > 0,
+    );
+  };
+
+  // Is a given colour available (in any size, or the selected size)?
+  const isColourAvailable = (colourValueId: string) => {
+    const sizeId = sizeOption ? selected[sizeOption.id] : undefined;
+    return product.variants.some(
+      (v) =>
+        v.optionValueIds.includes(colourValueId) &&
+        (!sizeId || v.optionValueIds.includes(sizeId)) &&
         v.stock > 0,
     );
   };
@@ -208,6 +222,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             <div className="mt-2.5 flex flex-wrap gap-2">
               {colourOption.values.map((v) => {
                 const active = selected[colourOption.id] === v.id;
+                const available = isColourAvailable(v.id);
                 return (
                   <button
                     key={v.id}
@@ -215,11 +230,13 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                       setSelected((s) => ({ ...s, [colourOption.id]: v.id }));
                       setActiveImage(0);
                     }}
-                    aria-label={v.value}
+                    aria-label={available ? v.value : `${v.value} — out of stock`}
                     aria-pressed={active}
+                    title={available ? v.value : `${v.value} — out of stock`}
                     className={cn(
                       "relative h-10 w-10 rounded-full border-2 transition-transform",
                       active ? "border-ink" : "border-line hover:border-line-strong",
+                      !available && !active && "opacity-45",
                     )}
                   >
                     <span
@@ -231,6 +248,9 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                         size={14}
                         className="absolute inset-0 m-auto text-white mix-blend-difference"
                       />
+                    )}
+                    {!available && !active && (
+                      <span className="absolute inset-0 m-auto h-px w-8 -rotate-45 bg-ink-soft" />
                     )}
                   </button>
                 );
@@ -276,9 +296,9 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
         )}
 
         {/* Stock hint */}
-        {!outOfStock && stock <= 8 && !needsSize && (
+        {lowStock && (
           <p className="mt-4 text-sm font-medium text-clay">
-            Only {stock} left in {colourName ? `${colourName} ` : ""}this option
+            Low stock — only {stock} left{colourName ? ` in ${colourName}` : ""}
           </p>
         )}
 

@@ -3,6 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
+import { adjustStock } from "@/lib/inventory";
 import { getCurrentUser } from "@/lib/auth";
 import { computeTotals, type CouponInput } from "@/lib/pricing";
 import { ORDER_STATUS_META } from "@/lib/constants";
@@ -166,89 +167,123 @@ export async function placeOrder(input: CheckoutInput): Promise<CheckoutResult> 
 
   const num = orderNumber();
 
-  const created = await prisma.$transaction(async (tx) => {
-    const couponRow = coupon
-      ? await tx.coupon.findUnique({ where: { code: coupon.code } })
-      : null;
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const couponRow = coupon
+        ? await tx.coupon.findUnique({ where: { code: coupon.code } })
+        : null;
 
-    let addressId: string | undefined;
-    if (appUser && data.saveAddress) {
-      const addr = await tx.address.create({
+      let addressId: string | undefined;
+      if (appUser && data.saveAddress) {
+        const addr = await tx.address.create({
+          data: {
+            userId: appUser.id,
+            recipient: data.address.recipient,
+            phone: data.address.phone,
+            line1: data.address.line1,
+            line2: data.address.line2 || null,
+            barangay: data.address.barangay || null,
+            city: data.address.city,
+            province: data.address.province,
+            region: data.address.region || null,
+            postalCode: data.address.postalCode,
+          },
+        });
+        addressId = addr.id;
+      }
+
+      const order = await tx.order.create({
         data: {
-          userId: appUser.id,
-          recipient: data.address.recipient,
-          phone: data.address.phone,
-          line1: data.address.line1,
-          line2: data.address.line2 || null,
-          barangay: data.address.barangay || null,
-          city: data.address.city,
-          province: data.address.province,
-          region: data.address.region || null,
-          postalCode: data.address.postalCode,
+          orderNumber: num,
+          userId: appUser?.id ?? null,
+          email: data.email,
+          phone: data.phone,
+          status: "PENDING",
+          subtotal: totals.subtotal,
+          shippingFee: totals.shippingFee,
+          discountTotal: totals.discountTotal,
+          grandTotal: totals.grandTotal,
+          couponId: couponRow?.id ?? null,
+          couponCode: totals.couponApplied,
+          paymentMethod: data.paymentMethod,
+          paymentStatus: data.paymentMethod === "CARD" || data.paymentMethod === "GCASH" ? "PAID" : "UNPAID",
+          addressId: addressId ?? null,
+          shippingAddress: JSON.stringify(data.address),
+          shippingMethod: data.shippingMethod,
+          note: data.note || null,
+          items: { create: lineItems },
+          events: {
+            create: [
+              {
+                status: "PENDING",
+                title: ORDER_STATUS_META.PENDING.label,
+                detail: "We’ve received your order and will start preparing it shortly.",
+              },
+            ],
+          },
         },
       });
-      addressId = addr.id;
-    }
 
-    const order = await tx.order.create({
-      data: {
-        orderNumber: num,
-        userId: appUser?.id ?? null,
-        email: data.email,
-        phone: data.phone,
-        status: "PENDING",
-        subtotal: totals.subtotal,
-        shippingFee: totals.shippingFee,
-        discountTotal: totals.discountTotal,
-        grandTotal: totals.grandTotal,
-        couponId: couponRow?.id ?? null,
-        couponCode: totals.couponApplied,
-        paymentMethod: data.paymentMethod,
-        paymentStatus: data.paymentMethod === "CARD" || data.paymentMethod === "GCASH" ? "PAID" : "UNPAID",
-        addressId: addressId ?? null,
-        shippingAddress: JSON.stringify(data.address),
-        shippingMethod: data.shippingMethod,
-        note: data.note || null,
-        items: { create: lineItems },
-        events: {
-          create: [
-            {
-              status: "PENDING",
-              title: ORDER_STATUS_META.PENDING.label,
-              detail: "We’ve received your order and will start preparing it shortly.",
-            },
-          ],
-        },
-      },
+      // Decrement stock through the inventory system so Inventory stays the
+      // source of truth (records a SALE adjustment + keeps the Variant mirror
+      // in sync). Atomic + row-locked, so a race between the check above and
+      // here can't oversell. Falls back to the legacy mirror decrement only if
+      // a variant has no inventory record yet.
+      for (const item of data.items) {
+        const res = await adjustStock(
+          {
+            variantId: item.variantId,
+            delta: -item.quantity,
+            reason: "SALE",
+            note: `Order ${num}`,
+            actorUserId: appUser?.id ?? null,
+          },
+          tx,
+        );
+        if (!res.ok) {
+          if (res.error === "No inventory record for that variant.") {
+            await tx.variant.update({
+              where: { id: item.variantId },
+              data: { stock: { decrement: item.quantity } },
+            });
+          } else {
+            throw new Error(`STOCK:${item.variantId}:${res.error ?? "unavailable"}`);
+          }
+        }
+      }
+      for (const l of lineItems) {
+        await tx.product.update({
+          where: { id: l.productId },
+          data: { soldCount: { increment: l.quantity } },
+        });
+      }
+
+      if (couponRow) {
+        await tx.coupon.update({
+          where: { id: couponRow.id },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
+      return order;
     });
 
-    // decrement stock
-    for (const item of data.items) {
-      await tx.variant.update({
-        where: { id: item.variantId },
-        data: { stock: { decrement: item.quantity } },
-      });
+    revalidatePath("/account/orders");
+    revalidateTag("products", "max"); // stock changed
+    return { ok: true, orderNumber: created.orderNumber };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    if (msg.startsWith("STOCK:")) {
+      const v = variantMap.get(msg.split(":")[1]);
+      return {
+        ok: false,
+        error: v
+          ? `“${v.product.name}” just sold out in that option. Your order was not placed.`
+          : "One of your items just sold out. Your order was not placed.",
+      };
     }
-    for (const l of lineItems) {
-      await tx.product.update({
-        where: { id: l.productId },
-        data: { soldCount: { increment: l.quantity } },
-      });
-    }
-
-    if (couponRow) {
-      await tx.coupon.update({
-        where: { id: couponRow.id },
-        data: { usedCount: { increment: 1 } },
-      });
-    }
-
-    return order;
-  });
-
-  revalidatePath("/account/orders");
-  revalidateTag("products", "max"); // stock changed
-  return { ok: true, orderNumber: created.orderNumber };
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

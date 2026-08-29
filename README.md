@@ -160,8 +160,8 @@ built on the Step 4 UI kit and Step 3 RBAC.
 - **Variants:** define option types (Colour / Size / Material / Style / …); the
   variant matrix is regenerated as the cartesian product. Per-variant SKU,
   price, compare-at and status. Variants with order history are archived, never
-  deleted; a product always keeps ≥ 1 variant. `Variant.stock` stays 0 —
-  inventory is Step 6.
+  deleted; a product always keeps ≥ 1 variant. `Variant.stock` is a
+  denormalised mirror driven by Step 6 inventory.
 - **Categories:** list, create, edit, image (Storage), display order (up/down
   + Save), `active` toggle (inactive = hidden from the storefront, products
   stay in the catalog), delete (only when empty).
@@ -174,6 +174,43 @@ built on the Step 4 UI kit and Step 3 RBAC.
   lengths, non-negative integer-centavos prices, `compareAt > price`, slug
   shape, SKU shape, enum status. Enforced server-side in
   `src/lib/admin/catalog-actions.ts`; every mutation `requirePermission(...)`.
+
+## Inventory management (Step 6)
+
+`/admin/inventory` (list) and `/admin/inventory/history` (audit) — one
+`Inventory` row per variant, gated by `view_inventory` / `manage_inventory`.
+
+- **Stock list:** product · variant · SKU · on-hand · reserved · **available**
+  (`quantity − reserved`) · reorder threshold · status · last updated. Search,
+  filter by status, paginate. `IN_STOCK` / `LOW_STOCK` / `OUT_OF_STOCK` are
+  **derived** (`src/lib/inventory-status.ts`), never stored — low when
+  `available ≤ reorderPoint`, out when `available ≤ 0`.
+- **Adjustments:** add / remove / set-exact, with a reason
+  (`RESTOCK` · `MANUAL_ADJUSTMENT` · `DAMAGE` · `LOSS` · `RETURN` ·
+  `CORRECTION` · `INITIAL_STOCK` · `SALE` — an open string, new reasons need
+  no migration) and an optional note. The modal previews the new on-hand /
+  available / status and asks for confirmation. Server-validated: whole
+  numbers, never below 0, never below the reserved amount.
+- **History:** append-only `InventoryAdjustment` (previous qty, signed delta,
+  new qty, reason, note, actor, timestamp). Searchable / filterable /
+  paginated via the Step 4 `DataTable`. Audit events
+  `inventory.stock_adjusted` / `inventory.stock_corrected` /
+  `inventory.threshold_updated`.
+- **Primitives** (`src/lib/inventory.ts`, server-only): `getAvailableStock`,
+  `adjustStock`, `setReorderPoint`, and the reservation foundation
+  `reserveStock` / `releaseStock` / `commitStock`. Every write is a single
+  condition-guarded atomic `UPDATE` (Postgres row-locks for its duration) or a
+  `SELECT … FOR UPDATE` inside a transaction — concurrent callers serialise and
+  cannot oversell. DB `CHECK` constraints (`quantity ≥ 0`, `reserved ≥ 0`,
+  `quantity ≥ reserved`, `reorderPoint ≥ 0`) are the final backstop.
+- **Storefront:** `Variant.stock` is a denormalised mirror of **available**,
+  re-derived on every inventory write, so the product grid / PDP show In / Low /
+  Out with no query changes. `placeOrder` records a `SALE` adjustment through
+  `adjustStock` (inside its existing transaction) so `Inventory` stays the
+  source of truth — the reservation primitives are **not** wired into checkout.
+- **Reservation primitives are foundation only** — no customer reservation
+  during checkout, no separate final deduction step. `reserved` is `0`
+  everywhere today.
 
 ## Data model
 

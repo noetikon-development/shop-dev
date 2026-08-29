@@ -5,10 +5,12 @@
 -- Apply order: this file, then 20260829140100_rls_and_grants.sql, then ../seed.sql
 --
 -- 2026-08-30: + RBAC (Step 3), Admin/CMS foundation (Step 4),
---             catalog fields Product.featured/sku, Category.active/imageMediaId,
---             ProductImage.mediaAssetId, Variant.status (Step 5).
+--             catalog fields Product.featured, Category.active/imageMediaId,
+--             ProductImage.mediaAssetId, Variant.status (Step 5),
+--             InventoryAdjustment history table (Step 6).
 -- ============================================================================
 
+-- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateTable
@@ -231,6 +233,21 @@ CREATE TABLE "Inventory" (
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Inventory_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "InventoryAdjustment" (
+    "id" TEXT NOT NULL,
+    "inventoryId" TEXT NOT NULL,
+    "previousQuantity" INTEGER NOT NULL,
+    "delta" INTEGER NOT NULL,
+    "newQuantity" INTEGER NOT NULL,
+    "reason" TEXT NOT NULL,
+    "note" TEXT,
+    "actorUserId" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "InventoryAdjustment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -510,6 +527,18 @@ CREATE UNIQUE INDEX "Inventory_variantId_key" ON "Inventory"("variantId");
 CREATE INDEX "Inventory_variantId_idx" ON "Inventory"("variantId");
 
 -- CreateIndex
+CREATE INDEX "InventoryAdjustment_inventoryId_idx" ON "InventoryAdjustment"("inventoryId");
+
+-- CreateIndex
+CREATE INDEX "InventoryAdjustment_reason_idx" ON "InventoryAdjustment"("reason");
+
+-- CreateIndex
+CREATE INDEX "InventoryAdjustment_createdAt_idx" ON "InventoryAdjustment"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "InventoryAdjustment_actorUserId_idx" ON "InventoryAdjustment"("actorUserId");
+
+-- CreateIndex
 CREATE INDEX "VariantOptionValue_optionValueId_idx" ON "VariantOptionValue"("optionValueId");
 
 -- CreateIndex
@@ -622,6 +651,12 @@ ALTER TABLE "Variant" ADD CONSTRAINT "Variant_productId_fkey" FOREIGN KEY ("prod
 
 -- AddForeignKey
 ALTER TABLE "Inventory" ADD CONSTRAINT "Inventory_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "Variant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryAdjustment" ADD CONSTRAINT "InventoryAdjustment_inventoryId_fkey" FOREIGN KEY ("inventoryId") REFERENCES "Inventory"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "InventoryAdjustment" ADD CONSTRAINT "InventoryAdjustment_actorUserId_fkey" FOREIGN KEY ("actorUserId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "VariantOptionValue" ADD CONSTRAINT "VariantOptionValue_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "Variant"("id") ON DELETE CASCADE ON UPDATE CASCADE;

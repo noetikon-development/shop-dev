@@ -49,6 +49,7 @@ model User {
   invitesSent   AdminInvite[]   @relation("AdminInviteInvitedBy")
   invitesAccepted AdminInvite[] @relation("AdminInviteAcceptedBy")
   auditEvents   AdminAuditLog[] @relation("AdminAuditActor")
+  inventoryAdjustments InventoryAdjustment[] @relation("InventoryAdjustmentActor")
 }
 
 // ----------------------------------------------------------------------------
@@ -306,7 +307,10 @@ model Variant {
   price      Int     // absolute price for this variant, in centavos
   compareAtPrice Int?
   status     String  @default("ACTIVE") // ACTIVE | ARCHIVED (archived = not purchasable)
-  stock      Int     @default(0) // convenience mirror of Inventory.quantity (source the app currently reads). Managed in Step 6.
+  // Denormalised AVAILABLE stock (Inventory.quantity - Inventory.reserved). The
+  // storefront reads this; every inventory mutation in src/lib/inventory.ts
+  // keeps it in sync. Inventory is the source of truth.
+  stock      Int     @default(0)
   imageUrl   String?
 
   product     Product              @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -318,22 +322,51 @@ model Variant {
   @@index([status])
 }
 
-// Per-variant stock ledger. `quantity` is on-hand; `reserved` is allocated to
-// unfulfilled orders; available = quantity - reserved.
+// Per-variant stock ledger — exactly one row per Variant (variantId @unique).
+// `quantity` is on-hand; `reserved` is allocated but not yet shipped;
+// available = quantity - reserved. DB CHECK constraints (see
+// supabase/migrations/20260829140100_rls_and_grants.sql) enforce
+// quantity >= 0, reserved >= 0, quantity >= reserved, reorderPoint >= 0.
+// Stock status (IN_STOCK / LOW_STOCK / OUT_OF_STOCK) is DERIVED, not stored —
+// see src/lib/inventory-status.ts.
 model Inventory {
   id           String    @id @default(cuid())
   variantId    String    @unique
   sku          String
   quantity     Int       @default(0)
   reserved     Int       @default(0)
-  reorderPoint Int       @default(3)
+  reorderPoint Int       @default(3) // low-stock threshold, compared against available
   restockEta   DateTime?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variant     Variant               @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  adjustments InventoryAdjustment[]
 
   @@index([variantId])
+}
+
+// Append-only history of every quantity change to an Inventory row. `delta` is
+// signed; `reason` is an open string (INITIAL_STOCK, RESTOCK, MANUAL_ADJUSTMENT,
+// DAMAGE, LOSS, RETURN, CORRECTION, SALE, …) so new reasons need no migration.
+model InventoryAdjustment {
+  id               String   @id @default(cuid())
+  inventoryId      String
+  previousQuantity Int
+  delta            Int
+  newQuantity      Int
+  reason           String
+  note             String?
+  actorUserId      String?
+  createdAt        DateTime @default(now())
+
+  inventory Inventory @relation(fields: [inventoryId], references: [id], onDelete: Cascade)
+  actor     User?     @relation("InventoryAdjustmentActor", fields: [actorUserId], references: [id])
+
+  @@index([inventoryId])
+  @@index([reason])
+  @@index([createdAt])
+  @@index([actorUserId])
 }
 
 // join: which option values define a given variant

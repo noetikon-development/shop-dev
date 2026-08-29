@@ -79,9 +79,10 @@ export const ADMIN_ROUTES: AdminRoute[] = [
   {
     path: "/admin/inventory",
     label: "Inventory",
-    description: "Track stock levels, reorder points and restock dates.",
+    description: "Stock levels, low-stock thresholds and adjustment history.",
     accepts: ["view_inventory"],
     emptyLabel: "No inventory records to show yet.",
+    live: true,
   },
   {
     path: "/admin/orders",

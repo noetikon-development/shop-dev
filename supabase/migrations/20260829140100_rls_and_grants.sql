@@ -45,6 +45,8 @@ ALTER TABLE "AdminAuditLog"       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ContentPage"         ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ContentBlock"        ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "MediaAsset"          ENABLE ROW LEVEL SECURITY;
+-- Inventory adjustment history (Step 6, 2026-08-30). Same posture.
+ALTER TABLE "InventoryAdjustment" ENABLE ROW LEVEL SECURITY;
 
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -76,5 +78,18 @@ END $$;
 --    PRIVILEGES took effect.
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
-  "ContentPage", "ContentBlock", "MediaAsset"
+  "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment"
 FROM anon, authenticated;
+
+-- ============================================================================
+-- 6. Inventory invariants (Step 6). The application (src/lib/inventory.ts) also
+--    guards these, but the DB is the final authority under concurrent writes.
+-- ============================================================================
+ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_quantity_nonneg;
+ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_quantity_nonneg  CHECK ("quantity" >= 0);
+ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_reserved_nonneg;
+ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_reserved_nonneg  CHECK ("reserved" >= 0);
+ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_available_nonneg;
+ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_available_nonneg CHECK ("quantity" >= "reserved");
+ALTER TABLE "Inventory" DROP CONSTRAINT IF EXISTS inventory_reorder_nonneg;
+ALTER TABLE "Inventory" ADD  CONSTRAINT inventory_reorder_nonneg   CHECK ("reorderPoint" >= 0);

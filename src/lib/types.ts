@@ -1,4 +1,5 @@
 import type { ArtKind } from "@/lib/product-art";
+import type { StockStatus } from "@/lib/inventory-status";
 
 export type ImageRef = { url: string; alt: string };
 
@@ -19,7 +20,9 @@ export type VariantView = {
   sku: string;
   price: number;
   compareAtPrice: number | null;
-  stock: number;
+  stock: number; // available (quantity - reserved)
+  reorderPoint: number;
+  status: string; // ACTIVE | ARCHIVED
   imageUrl: string | null;
   optionValueIds: string[];
 };
@@ -43,6 +46,7 @@ export type ProductCardView = {
   categoryName: string;
   colorSwatches: string[];
   inStock: boolean;
+  stockStatus: StockStatus;
   createdAt: string;
 };
 

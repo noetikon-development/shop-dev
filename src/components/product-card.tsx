@@ -95,6 +95,12 @@ export function ProductCard({
             Out of stock
           </div>
         )}
+
+        {product.inStock && product.stockStatus === "LOW_STOCK" && (
+          <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-[10px] font-medium text-[#8a5a1f] backdrop-blur">
+            Low stock
+          </div>
+        )}
       </div>
 
       <div className="mt-3.5 flex flex-1 flex-col">
