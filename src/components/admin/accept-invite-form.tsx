@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState } from "react";
 import Link from "next/link";
 import { Loader2, Check } from "lucide-react";
 import { setInitialPassword, type AcceptState } from "@/lib/admin/actions";
@@ -10,13 +10,8 @@ export function AcceptInviteForm() {
     setInitialPassword,
     {},
   );
-  const [done, setDone] = useState(false);
 
-  useEffect(() => {
-    if (state.ok) setDone(true);
-  }, [state.ok]);
-
-  if (done) {
+  if (state.ok) {
     return (
       <div className="mt-7 rounded-sm border border-line bg-surface p-4 text-center">
         <p className="inline-flex items-center gap-1.5 text-sm font-medium text-success">

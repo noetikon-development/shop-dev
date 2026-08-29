@@ -1,6 +1,6 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateUserRoles, type RolesState } from "@/lib/admin/actions";
@@ -25,19 +25,18 @@ function RoleEditor({
     updateUserRoles,
     {},
   );
-  const serverKeys = admin.roleKeys.join(",");
+  // Initial checkbox state from the server. The parent re-mounts this component
+  // (via `key`) whenever the persisted role set changes, so this stays in sync
+  // without an effect.
   const [selected, setSelected] = useState<Set<string>>(new Set(admin.roleKeys));
 
-  // Re-sync local checkbox state whenever the server sends a new role set
-  // (e.g. after a successful save revalidates this page).
+  const toastedFor = useRef<RolesState | null>(null);
   useEffect(() => {
-    setSelected(new Set(serverKeys ? serverKeys.split(",") : []));
-  }, [serverKeys]);
-
-  useEffect(() => {
+    if (state === toastedFor.current) return;
     if (state.ok) toast.success(`Roles updated for ${admin.email}`);
-    if (state.error) toast.error(state.error);
-  }, [state.ok, state.error, admin.email]);
+    else if (state.error) toast.error(state.error);
+    toastedFor.current = state;
+  }, [state, admin.email]);
 
   const dirty =
     selected.size !== admin.roleKeys.length ||
@@ -119,7 +118,13 @@ export function AdminRoster({
               </div>
             </div>
 
-            {canManage && !isSelf && <RoleEditor admin={a} roleOptions={roleOptions} />}
+            {canManage && !isSelf && (
+              <RoleEditor
+                key={`${a.id}:${a.roleKeys.join(",")}`}
+                admin={a}
+                roleOptions={roleOptions}
+              />
+            )}
             {canManage && isSelf && (
               <p className="mt-2 text-xs text-ink-faint">
                 You can’t change your own roles.
