@@ -1281,13 +1281,10 @@ async function main() {
     { key: "site.tagline", value: "Considered things for everyday living", type: "string", label: "Tagline", group: "brand" },
     { key: "site.description", value: "AXIARO is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.", type: "string", label: "Meta description", group: "brand" },
     { key: "currency", value: "PHP", type: "string", label: "Currency", group: "checkout" },
-    { key: "shipping.freeThreshold", value: 250000, type: "number", label: "Free shipping threshold (centavos)", group: "checkout" },
-    { key: "shipping.standardFee", value: 12900, type: "number", label: "Standard shipping fee (centavos)", group: "checkout" },
-    { key: "shipping.expressFee", value: 24900, type: "number", label: "Express shipping fee (centavos)", group: "checkout" },
-    { key: "shipping.methods", value: [
-      { id: "standard", label: "Standard delivery", detail: "3–7 business days", fee: 12900 },
-      { id: "express", label: "Express delivery", detail: "1–3 business days", fee: 24900 },
-    ], type: "json", label: "Shipping methods", group: "checkout" },
+    // Store-wide shipping policy. The per-method rates live in the ShippingMethod
+    // table (seeded below / editable in /admin/shipping) — not here.
+    { key: "shipping.freeThreshold", value: 250000, type: "number", label: "Free-shipping threshold (centavos)", group: "shipping" },
+    { key: "shipping.countries", value: ["PH"], type: "json", label: "Supported delivery countries", group: "shipping" },
     { key: "payment.methods", value: [
       { id: "COD", label: "Cash on delivery", detail: "Pay the courier when your order arrives" },
       { id: "CARD", label: "Credit / debit card", detail: "Visa, Mastercard, JCB" },
@@ -1305,6 +1302,21 @@ async function main() {
     });
   }
   console.log(`Store settings: ${STORE_SETTINGS.length}`);
+
+  // Shipping methods (Step 11) — demo rates, editable in /admin/shipping.
+  const SHIPPING_METHODS_SEED = [
+    { code: "STANDARD", name: "Standard Delivery", description: "3–7 business days", rate: 15000, sortOrder: 1 },
+    { code: "EXPRESS", name: "Express Delivery", description: "1–3 business days", rate: 30000, sortOrder: 2 },
+    { code: "PICKUP", name: "Store Pickup", description: "Collect from our Batangas City store, ready in 1–2 days", rate: 0, sortOrder: 3 },
+  ];
+  for (const m of SHIPPING_METHODS_SEED) {
+    await prisma.shippingMethod.upsert({
+      where: { code: m.code },
+      update: {},
+      create: { ...m, currency: "PHP", active: true },
+    });
+  }
+  console.log(`Shipping methods: ${SHIPPING_METHODS_SEED.length}`);
 
   // A sample delivered + in-transit order for the demo account
   const sofa = await prisma.product.findUnique({

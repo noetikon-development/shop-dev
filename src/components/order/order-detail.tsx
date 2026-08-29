@@ -85,7 +85,10 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
               </div>
             )}
             <div className="flex justify-between">
-              <dt className="text-ink-soft">Shipping</dt>
+              <dt className="text-ink-soft">
+                Shipping
+                {order.shippingMethodName ? ` · ${order.shippingMethodName}` : ""}
+              </dt>
               <dd className="tabular-nums">
                 {order.shippingFee === 0 ? "Free" : formatPrice(order.shippingFee)}
               </dd>

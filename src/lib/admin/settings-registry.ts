@@ -107,10 +107,10 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "payments.provider", label: "Card provider", type: "string", group: "payments", default: "", help: "Provider name only. API keys stay in the server environment." },
   { key: "payments.mode", label: "Mode", type: "string", group: "payments", default: "test", help: "test | live" },
 
-  // Shipping
-  { key: "shipping.freeThreshold", label: "Free-shipping threshold (centavos)", type: "number", group: "shipping", default: 250000 },
-  { key: "shipping.standardFee", label: "Standard fee (centavos)", type: "number", group: "shipping", default: 12900 },
-  { key: "shipping.expressFee", label: "Express fee (centavos)", type: "number", group: "shipping", default: 24900 },
+  // Shipping. Per-method rates live in the ShippingMethod table (Step 11,
+  // managed in /admin/shipping); these keys are store-wide policy.
+  { key: "shipping.freeThreshold", label: "Free-shipping threshold (centavos)", type: "number", group: "shipping", default: 250000, help: "Order subtotal at or above which shipping is free. 0 disables free shipping." },
+  { key: "shipping.countries", label: "Supported delivery countries", type: "json", group: "shipping", default: ["PH"], help: "ISO 3166-1 alpha-2 codes the store delivers to." },
 
   // Email (non-sensitive)
   { key: "email.fromName", label: "From name", type: "string", group: "email", default: "" },

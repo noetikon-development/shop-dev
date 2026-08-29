@@ -65,8 +65,8 @@ node --env-file=.env scripts/dump-seed-sql.mjs      # regenerates supabase/seed.
 - Adds a single `SELECT` policy (public read) to the catalogue tables:
   `Category, Product, ProductImage, ProductOption, ProductOptionValue, Variant,
   VariantOptionValue, Review`.
-- Every other table (`User, Address, Order*, Inventory, InventoryAdjustment,
-  Cart, CartItem, StoreSetting, Coupon, WishlistItem`, the RBAC tables `Role,
+- Every other table (`User, Address, Order*, ShippingMethod, Inventory,
+  InventoryAdjustment, Cart, CartItem, StoreSetting, Coupon, WishlistItem`, the RBAC tables `Role,
   Permission, UserRole, RolePermission, AdminInvite, AdminAuditLog`, and the
   CMS/media tables `ContentPage, ContentBlock, MediaAsset`) has RLS on and
   **no policy** → the public API returns nothing and cannot write.
@@ -107,8 +107,9 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `ContentPage` | standalone CMS pages (slug, title, body, SEO, status) — Step 4 foundation |
 | `ContentBlock` | data-driven managed blocks (hero/banner/collection…); `type` + JSON `data` |
 | `MediaAsset` | metadata for files in Supabase **Storage** (bucket `media`) — no binary data |
-| `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Excluded from `seed.sql` |
+| `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Step 11 adds `shippingMethodId` (FK → `ShippingMethod`, `SET NULL`) + immutable `shippingMethodCode` / `shippingMethodName` snapshot alongside the existing `shippingFee`. Excluded from `seed.sql` |
 | `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; excluded from `seed.sql` |
+| `ShippingMethod` | Step 11. Configurable delivery option shown at checkout: `code` unique, `name`, `description`, `rate` (centavos), `currency`, `active`, `sortOrder`. CHECK: `rate ≥ 0`. Included in `seed.sql` (demo methods STANDARD / EXPRESS / PICKUP) |
 
 ## Authentication
 

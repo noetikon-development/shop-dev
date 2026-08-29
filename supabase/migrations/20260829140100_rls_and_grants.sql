@@ -52,6 +52,9 @@ ALTER TABLE "InventoryAdjustment" ENABLE ROW LEVEL SECURITY;
 -- checks. Same posture: RLS on, no policy.
 ALTER TABLE "Cart"               ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "CartItem"           ENABLE ROW LEVEL SECURITY;
+-- Shipping methods (Step 11, 2026-08-30). Read only by the app's direct
+-- `postgres` connection. Same posture: RLS on, no policy.
+ALTER TABLE "ShippingMethod"     ENABLE ROW LEVEL SECURITY;
 
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
@@ -84,7 +87,7 @@ END $$;
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
-  "Cart", "CartItem"
+  "Cart", "CartItem", "ShippingMethod"
 FROM anon, authenticated;
 
 -- ============================================================================
@@ -153,3 +156,10 @@ REVOKE ALL ON "Address" FROM anon, authenticated;
 --    every existing/seed order number.
 -- ============================================================================
 CREATE SEQUENCE IF NOT EXISTS "order_number_seq" AS bigint INCREMENT BY 1 MINVALUE 100001 START WITH 100001;
+
+-- ============================================================================
+-- 10. Shipping method invariants (Step 11). src/lib/shipping.ts also guards
+--     these; the DB is the final authority.
+-- ============================================================================
+ALTER TABLE "ShippingMethod" DROP CONSTRAINT IF EXISTS shippingmethod_rate_nonneg;
+ALTER TABLE "ShippingMethod" ADD  CONSTRAINT shippingmethod_rate_nonneg CHECK ("rate" >= 0);

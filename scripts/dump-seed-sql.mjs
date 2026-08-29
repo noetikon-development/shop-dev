@@ -11,7 +11,7 @@ const db = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL });
 const TABLES = [
   "Category", "Product", "ProductImage", "ProductOption",
   "ProductOptionValue", "Variant", "VariantOptionValue", "Inventory",
-  "Coupon", "StoreSetting",
+  "Coupon", "StoreSetting", "ShippingMethod",
   // RBAC catalogue (roles, permissions, grants) — reference data, not per-user.
   "Permission", "Role", "RolePermission",
 ];

@@ -321,6 +321,43 @@ billing address, server-calculated summary, review-and-confirm).
 - Order confirmation (`/order/[n]`) and account order pages
   (`/account/orders/[n]`) are ownership-checked server-side.
 
+## Shipping & delivery foundation (Step 11)
+
+A configurable delivery system that checkout and orders use now and courier APIs
+can plug into later. No payment, courier integration or tracking is included.
+
+- **`ShippingMethod` model** (`code` unique, `name`, `description`, `rate` in
+  centavos with a DB `CHECK rate >= 0`, `currency`, `active`, `sortOrder`).
+  Seeded demo methods: `STANDARD` ₱150, `EXPRESS` ₱300, `PICKUP` ₱0 — all
+  editable in the admin, nothing hardcoded in checkout.
+- **`src/lib/shipping.ts`** (server-only): `getActiveShippingMethods`,
+  `resolveActiveShippingMethod` (returns `null` for an unknown or inactive id),
+  `getSupportedShippingCountries` / `getFreeShippingThreshold` (from Store
+  Settings `shipping.countries` / `shipping.freeThreshold`),
+  `effectiveShippingFee` (free when the subtotal clears the threshold).
+- **Checkout** (`src/components/checkout/checkout-flow.tsx`) lists the active
+  methods; picking one re-asks the server for the summary. **The browser only
+  ever submits `shippingMethodId`** — never an amount. `createOrderFromCart`
+  re-resolves the method server-side, rejects an inactive/unknown one, rejects a
+  shipping address whose country isn't in `shipping.countries`, and computes
+  `grandTotal = subtotal + shippingAmount` (no fees, coupons or tax).
+- **Order snapshot.** Every order stores `shippingMethodId` (live link,
+  `SET NULL` if the method is later deleted) plus immutable `shippingMethodCode`
+  / `shippingMethodName` / `shippingFee`. Renaming or repricing a method never
+  changes historical orders.
+- **Inventory is untouched** by shipping selection — no reserve, no deduct, no
+  `SALE` adjustment. Orders still land `PENDING_PAYMENT`.
+- **Admin → Shipping** (`/admin/shipping`, permission `view_shipping` /
+  `manage_shipping` — both already in the RBAC catalogue): list, create, edit,
+  activate / deactivate, reorder. Courier accounts, tracking numbers, delivery
+  zones and fulfilment workflow are explicitly out of scope.
+- Delivery zones are prepared for, not built: the store-wide
+  `shipping.countries` list is the only destination check today.
+
+The cart page keeps its own lightweight shipping **estimate**
+(`src/lib/constants.ts` + `src/lib/pricing.ts`); the authoritative rate is always
+the `ShippingMethod` record resolved at checkout.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: `validateCoupon`

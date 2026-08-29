@@ -7,9 +7,12 @@ export const SITE = {
     "AXIARO is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.",
 };
 
+// Cart-page shipping ESTIMATE only. The authoritative rates live in the
+// ShippingMethod table (Step 11) and are applied at checkout; the cart shows
+// "calculated at checkout". Kept roughly in sync with the seeded methods.
 export const FREE_SHIPPING_THRESHOLD = 250000; // ₱2,500 in centavos
-export const STANDARD_SHIPPING_FEE = 12900; // ₱129
-export const EXPRESS_SHIPPING_FEE = 24900; // ₱249
+export const STANDARD_SHIPPING_FEE = 15000; // ₱150
+export const EXPRESS_SHIPPING_FEE = 30000; // ₱300
 
 export const SHIPPING_METHODS = [
   {

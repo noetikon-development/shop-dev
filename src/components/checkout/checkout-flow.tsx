@@ -10,7 +10,7 @@ import { useCart } from "@/lib/cart-store";
 import { placeOrder } from "@/lib/checkout-actions";
 import { countryName } from "@/lib/countries";
 import { formatPrice, cn } from "@/lib/utils";
-import type { CheckoutData, ShippingMethodId } from "@/lib/checkout";
+import type { CheckoutData } from "@/lib/checkout";
 import type { AddressDTO } from "@/lib/addresses";
 
 export function CheckoutFlow({ data }: { data: CheckoutData }) {
@@ -22,18 +22,23 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
   const [shippingId, setShippingId] = useState<string | null>(defaultShippingId);
   const [sameForBilling, setSameForBilling] = useState(true);
   const [billingId, setBillingId] = useState<string | null>(defaultBillingId);
-  const [method, setMethod] = useState<ShippingMethodId>("standard");
+  const [methodId, setMethodId] = useState<string | null>(
+    summary.shippingMethods[0]?.id ?? null,
+  );
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [backToBag, setBackToBag] = useState(false);
 
-  const shippingOption = useMemo(
-    () => summary.shippingOptions.find((o) => o.id === method) ?? summary.shippingOptions[0],
-    [summary.shippingOptions, method],
+  const shippingMethod = useMemo(
+    () =>
+      summary.shippingMethods.find((m) => m.id === methodId) ??
+      summary.shippingMethods[0] ??
+      null,
+    [summary.shippingMethods, methodId],
   );
-  const total = summary.subtotal + (shippingOption?.effectiveFee ?? 0);
+  const total = summary.subtotal + (shippingMethod?.effectiveRate ?? 0);
 
   const effectiveBillingId = sameForBilling ? shippingId : billingId;
   const shipAddr = addresses.find((a) => a.id === shippingId) ?? null;
@@ -73,6 +78,18 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
     );
   }
 
+  if (summary.shippingMethods.length === 0) {
+    return (
+      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
+        <Truck size={22} className="text-ink-faint" />
+        <p className="mt-4 font-medium">No delivery methods are available right now</p>
+        <p className="mt-1 max-w-sm text-sm text-ink-soft">
+          Please try again shortly.
+        </p>
+      </div>
+    );
+  }
+
   async function submit() {
     setError(null);
     setBackToBag(false);
@@ -84,11 +101,15 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       setError("Choose a billing address.");
       return;
     }
+    if (!methodId) {
+      setError("Choose a delivery method.");
+      return;
+    }
     setSubmitting(true);
     const res = await placeOrder({
       shippingAddressId: shippingId,
       billingAddressId: (sameForBilling ? shippingId : billingId) as string,
-      shippingMethod: method,
+      shippingMethodId: methodId,
       note,
     });
     setSubmitting(false);
@@ -104,6 +125,10 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
     setError(res.error);
     if (res.code === "STOCK" || res.code === "EMPTY" || res.code === "CART_GONE") {
       setBackToBag(true);
+    }
+    if (res.code === "SHIPPING") {
+      // The method list may be stale — reload the page's server data.
+      router.refresh();
     }
   }
 
@@ -147,29 +172,36 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
 
         <Section step={3} icon={<Truck size={15} />} title="Delivery method">
           <div className="space-y-3">
-            {summary.shippingOptions.map((o) => (
+            {summary.shippingMethods.map((m) => (
               <label
-                key={o.id}
+                key={m.id}
                 className={cn(
                   "flex cursor-pointer items-center justify-between rounded-md border p-4 transition-colors",
-                  method === o.id ? "border-ink bg-surface" : "border-line-strong",
+                  methodId === m.id ? "border-ink bg-surface" : "border-line-strong",
                 )}
               >
                 <span className="flex items-center gap-3">
                   <input
                     type="radio"
                     name="delivery"
-                    checked={method === o.id}
-                    onChange={() => setMethod(o.id)}
+                    checked={methodId === m.id}
+                    onChange={() => setMethodId(m.id)}
                     className="accent-ink"
                   />
                   <span>
-                    <span className="block text-sm font-medium">{o.label}</span>
-                    <span className="block text-xs text-ink-faint">{o.detail}</span>
+                    <span className="block text-sm font-medium">{m.name}</span>
+                    {m.description && (
+                      <span className="block text-xs text-ink-faint">{m.description}</span>
+                    )}
                   </span>
                 </span>
                 <span className="text-sm font-medium tabular-nums">
-                  {o.effectiveFee === 0 ? "Free" : formatPrice(o.effectiveFee)}
+                  {m.effectiveRate === 0 ? "Free" : formatPrice(m.effectiveRate)}
+                  {m.freeApplied && (
+                    <span className="ml-1 text-xs font-normal text-ink-faint line-through">
+                      {formatPrice(m.rate)}
+                    </span>
+                  )}
                 </span>
               </label>
             ))}
@@ -224,8 +256,8 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
           <dl className="mt-4 space-y-2 border-t border-line pt-4 text-sm">
             <Row label={`Subtotal (${summary.itemCount} item${summary.itemCount === 1 ? "" : "s"})`} value={formatPrice(summary.subtotal)} />
             <Row
-              label="Shipping"
-              value={(shippingOption?.effectiveFee ?? 0) === 0 ? "Free" : formatPrice(shippingOption!.effectiveFee)}
+              label={shippingMethod ? `Shipping · ${shippingMethod.name}` : "Shipping"}
+              value={(shippingMethod?.effectiveRate ?? 0) === 0 ? "Free" : formatPrice(shippingMethod!.effectiveRate)}
             />
             <div className="!mt-3 flex items-baseline justify-between border-t border-line pt-3">
               <dt className="font-medium">Total</dt>
@@ -251,7 +283,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <ReviewLine label="Bill to" addr={billAddr} />
               <p className="text-ink-soft">
                 {summary.itemCount} item{summary.itemCount === 1 ? "" : "s"} ·{" "}
-                {shippingOption?.label} ·{" "}
+                {shippingMethod?.name} ·{" "}
                 <span className="font-medium text-ink">{formatPrice(total)}</span>
               </p>
               <div className="flex gap-2 pt-1">

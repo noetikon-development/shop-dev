@@ -540,23 +540,55 @@ model Order {
   billingAddressId String? // billing address, live link
   shippingAddress  String // immutable JSON snapshot taken at order time
   billingAddress   String? // immutable JSON snapshot; null = billed to the shipping address
-  shippingMethod   String  @default("standard")
+
+  // Shipping method — a live link plus an immutable snapshot (Step 11). Historical
+  // totals never depend on the current ShippingMethod record.
+  shippingMethodId   String? // live link (SetNull if the method is later removed)
+  shippingMethod     String  @default("standard") // legacy id / code, kept for compatibility
+  shippingMethodCode String? // snapshot: e.g. "STANDARD"
+  shippingMethodName String? // snapshot: e.g. "Standard Delivery"
+  // shippingFee (above) is the snapshotted amount charged.
 
   note      String?
   placedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user    User?        @relation(fields: [userId], references: [id])
-  cart    Cart?        @relation(fields: [cartId], references: [id])
-  address Address?     @relation("OrderShipTo", fields: [addressId], references: [id])
-  billTo  Address?     @relation("OrderBillTo", fields: [billingAddressId], references: [id])
-  coupon  Coupon?      @relation(fields: [couponId], references: [id])
-  items   OrderItem[]
-  events  OrderEvent[]
+  user       User?           @relation(fields: [userId], references: [id])
+  cart       Cart?           @relation(fields: [cartId], references: [id])
+  address    Address?        @relation("OrderShipTo", fields: [addressId], references: [id])
+  billTo     Address?        @relation("OrderBillTo", fields: [billingAddressId], references: [id])
+  coupon     Coupon?         @relation(fields: [couponId], references: [id])
+  shipMethod ShippingMethod? @relation(fields: [shippingMethodId], references: [id])
+  items      OrderItem[]
+  events     OrderEvent[]
 
   @@index([userId])
   @@index([status])
   @@index([billingAddressId])
+  @@index([shippingMethodId])
+}
+
+// Configurable delivery option shown at checkout (Step 11). The `rate` here is
+// the CURRENT price; every order snapshots the code / name / amount it used, so
+// renaming or repricing a method never changes historical orders. Managed in
+// /admin/shipping (permission: manage_shipping). Zone rules are a later step —
+// for now the store-wide supported-country list in Store Settings
+// (`shipping.countries`) is the only destination check.
+model ShippingMethod {
+  id          String   @id @default(cuid())
+  code        String   @unique // stable machine code: STANDARD | EXPRESS | PICKUP
+  name        String
+  description String?
+  rate        Int      @default(0) // centavos; CHECK rate >= 0
+  currency    String   @default("PHP")
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  orders Order[]
+
+  @@index([active])
 }
 
 model OrderItem {

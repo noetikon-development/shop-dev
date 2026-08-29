@@ -108,9 +108,10 @@ export const ADMIN_ROUTES: AdminRoute[] = [
   {
     path: "/admin/shipping",
     label: "Shipping",
-    description: "Configure shipping methods, zones and rates.",
+    description: "Delivery methods and rates shown at checkout.",
     accepts: ["view_shipping"],
-    emptyLabel: "No shipping configuration yet.",
+    emptyLabel: "No shipping methods yet.",
+    live: true,
   },
 
   // Marketing

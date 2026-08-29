@@ -13,7 +13,8 @@
 --             Cart + CartItem (Step 7),
 --             Address firstName/lastName/company/country/updatedAt +
 --             defaultShipping/defaultBilling (Step 8),
---             Order cartId/billingAddressId/billingAddress + PENDING_PAYMENT (Step 9).
+--             Order cartId/billingAddressId/billingAddress + PENDING_PAYMENT (Step 9),
+--             ShippingMethod + Order shippingMethodId/Code/Name (Step 11).
 -- ============================================================================
 
 -- CreateSchema
@@ -359,12 +360,31 @@ CREATE TABLE "Order" (
     "billingAddressId" TEXT,
     "shippingAddress" TEXT NOT NULL,
     "billingAddress" TEXT,
+    "shippingMethodId" TEXT,
     "shippingMethod" TEXT NOT NULL DEFAULT 'standard',
+    "shippingMethodCode" TEXT,
+    "shippingMethodName" TEXT,
     "note" TEXT,
     "placedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Order_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ShippingMethod" (
+    "id" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "rate" INTEGER NOT NULL DEFAULT 0,
+    "currency" TEXT NOT NULL DEFAULT 'PHP',
+    "active" BOOLEAN NOT NULL DEFAULT true,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ShippingMethod_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -636,6 +656,15 @@ CREATE INDEX "Order_status_idx" ON "Order"("status");
 CREATE INDEX "Order_billingAddressId_idx" ON "Order"("billingAddressId");
 
 -- CreateIndex
+CREATE INDEX "Order_shippingMethodId_idx" ON "Order"("shippingMethodId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ShippingMethod_code_key" ON "ShippingMethod"("code");
+
+-- CreateIndex
+CREATE INDEX "ShippingMethod_active_idx" ON "ShippingMethod"("active");
+
+-- CreateIndex
 CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
 
 -- CreateIndex
@@ -769,6 +798,9 @@ ALTER TABLE "Order" ADD CONSTRAINT "Order_billingAddressId_fkey" FOREIGN KEY ("b
 
 -- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_couponId_fkey" FOREIGN KEY ("couponId") REFERENCES "Coupon"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Order" ADD CONSTRAINT "Order_shippingMethodId_fkey" FOREIGN KEY ("shippingMethodId") REFERENCES "ShippingMethod"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "OrderItem" ADD CONSTRAINT "OrderItem_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;

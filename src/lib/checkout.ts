@@ -6,21 +6,28 @@ import { getCurrentUser } from "@/lib/auth";
 import { adjustStock } from "@/lib/inventory";
 import { loadCart } from "@/lib/cart";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
-import { SHIPPING_METHODS, FREE_SHIPPING_THRESHOLD } from "@/lib/constants";
+import {
+  getActiveShippingMethods,
+  getFreeShippingThreshold,
+  getSupportedShippingCountries,
+  isSupportedShippingCurrency,
+  resolveActiveShippingMethod,
+  effectiveShippingFee,
+  type ShippingMethodDTO,
+} from "@/lib/shipping";
 
 /**
- * Checkout + order creation (Step 9).
+ * Checkout + order creation (Step 9, shipping added in Step 11).
  *
  * The order is created ONLY here, server-side. The browser never sends items,
- * prices or totals — `createOrderFromCart` re-reads the customer's ACTIVE cart
- * from the database, re-validates every line against the live product / variant
- * / inventory / price, recalculates the total, and does the whole thing
+ * prices, shipping amounts or totals — `createOrderFromCart` re-reads the
+ * customer's ACTIVE cart, re-validates every line against the live product /
+ * variant / inventory / price, LOADS the chosen shipping method and its rate
+ * from the database, recalculates the total, and does the whole thing
  * (cart -> CONVERTED, inventory SALE deduction, Order + OrderItems) inside one
  * transaction. Payment is a later step: orders are created PENDING_PAYMENT and
  * are never marked paid here.
  */
-
-export type ShippingMethodId = "standard" | "express";
 
 // ---------------------------------------------------------------------------
 // Checkout data for the page (server-calculated — the client only displays it)
@@ -43,12 +50,10 @@ export type CheckoutLine = {
   priceChanged: boolean;
 };
 
-export type ShippingOption = {
-  id: ShippingMethodId;
-  label: string;
-  detail: string;
-  fee: number;
-  effectiveFee: number;
+export type CheckoutShippingMethod = ShippingMethodDTO & {
+  /** Rate after the store-wide free-shipping rule for the current subtotal. */
+  effectiveRate: number;
+  freeApplied: boolean;
 };
 
 export type CheckoutSummary = {
@@ -56,8 +61,7 @@ export type CheckoutSummary = {
   itemCount: number;
   subtotal: number;
   freeShippingThreshold: number;
-  freeShippingApplied: boolean;
-  shippingOptions: ShippingOption[];
+  shippingMethods: CheckoutShippingMethod[];
   pricesChanged: boolean;
   /** Non-null = checkout can't proceed; the client sends the customer back to the cart. */
   blocked: null | "EMPTY" | "UNAVAILABLE" | "OVERSTOCK";
@@ -71,15 +75,15 @@ export type CheckoutData = {
   defaultBillingId: string | null;
 };
 
-function shippingOptionsFor(subtotal: number): ShippingOption[] {
-  const free = subtotal >= FREE_SHIPPING_THRESHOLD;
-  return SHIPPING_METHODS.map((m) => ({
-    id: m.id as ShippingMethodId,
-    label: m.label,
-    detail: m.detail,
-    fee: m.fee,
-    effectiveFee: free ? 0 : m.fee,
-  }));
+function withEffectiveRates(
+  methods: ShippingMethodDTO[],
+  subtotal: number,
+  freeThreshold: number,
+): CheckoutShippingMethod[] {
+  return methods.map((m) => {
+    const effectiveRate = effectiveShippingFee(m.rate, subtotal, freeThreshold);
+    return { ...m, effectiveRate, freeApplied: effectiveRate === 0 && m.rate > 0 };
+  });
 }
 
 export async function getCheckoutData(): Promise<CheckoutData> {
@@ -88,14 +92,19 @@ export async function getCheckoutData(): Promise<CheckoutData> {
     // The page also guards with requireUser(); this keeps the type honest.
     return {
       email: "",
-      summary: emptySummary(),
+      summary: await emptySummary(),
       addresses: [],
       defaultShippingId: null,
       defaultBillingId: null,
     };
   }
 
-  const [cart, addresses] = await Promise.all([loadCart(), getCustomerAddresses()]);
+  const [cart, addresses, methods, freeThreshold] = await Promise.all([
+    loadCart(),
+    getCustomerAddresses(),
+    getActiveShippingMethods(),
+    getFreeShippingThreshold(),
+  ]);
 
   const lines: CheckoutLine[] = cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -128,9 +137,8 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       lines,
       itemCount: purchasable.reduce((n, l) => n + Math.min(l.quantity, l.available), 0),
       subtotal,
-      freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
-      freeShippingApplied: subtotal >= FREE_SHIPPING_THRESHOLD,
-      shippingOptions: shippingOptionsFor(subtotal),
+      freeShippingThreshold: freeThreshold,
+      shippingMethods: withEffectiveRates(methods, subtotal, freeThreshold),
       pricesChanged: lines.some((l) => l.priceChanged),
       blocked,
     },
@@ -140,14 +148,17 @@ export async function getCheckoutData(): Promise<CheckoutData> {
   };
 }
 
-function emptySummary(): CheckoutSummary {
+async function emptySummary(): Promise<CheckoutSummary> {
+  const [methods, freeThreshold] = await Promise.all([
+    getActiveShippingMethods(),
+    getFreeShippingThreshold(),
+  ]);
   return {
     lines: [],
     itemCount: 0,
     subtotal: 0,
-    freeShippingThreshold: FREE_SHIPPING_THRESHOLD,
-    freeShippingApplied: false,
-    shippingOptions: shippingOptionsFor(0),
+    freeShippingThreshold: freeThreshold,
+    shippingMethods: withEffectiveRates(methods, 0, freeThreshold),
     pricesChanged: false,
     blocked: "EMPTY",
   };
@@ -160,7 +171,7 @@ function emptySummary(): CheckoutSummary {
 export type PlaceOrderInput = {
   shippingAddressId: string;
   billingAddressId: string;
-  shippingMethod: ShippingMethodId;
+  shippingMethodId: string;
   note?: string;
 };
 
@@ -170,6 +181,7 @@ export type PlaceOrderCode =
   | "EMPTY"
   | "CART_GONE"
   | "ADDRESS"
+  | "SHIPPING"
   | "STOCK"
   | "ALREADY_ORDERED";
 
@@ -267,8 +279,15 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   const user = await getCurrentUser();
   if (!user) return { ok: false, code: "AUTH", error: "Please sign in to place your order." };
 
-  const method = SHIPPING_METHODS.find((m) => m.id === input.shippingMethod);
-  if (!method) return { ok: false, code: "VALIDATION", error: "Choose a delivery method." };
+  // Shipping method — loaded fresh from the DB, must exist AND be active. The
+  // browser only names an id; the rate always comes from here.
+  const method = await resolveActiveShippingMethod(input.shippingMethodId);
+  if (!method) {
+    return { ok: false, code: "SHIPPING", error: "That delivery method isn’t available. Please choose another." };
+  }
+  if (!isSupportedShippingCurrency(method.currency)) {
+    return { ok: false, code: "SHIPPING", error: "That delivery method can’t be used right now." };
+  }
   const note = (input.note ?? "").trim().slice(0, 500);
 
   // 1. The customer's live ACTIVE cart.
@@ -310,6 +329,16 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   }
   if (!billAddr || billAddr.userId !== user.id) {
     return { ok: false, code: "ADDRESS", error: "Choose a valid billing address." };
+  }
+
+  // 2b. The shipping destination must be a country the store delivers to.
+  const supportedCountries = await getSupportedShippingCountries();
+  if (!supportedCountries.includes((shipAddr.country || "").toUpperCase())) {
+    return {
+      ok: false,
+      code: "SHIPPING",
+      error: "We don’t deliver to that address yet. Choose a different shipping address.",
+    };
   }
 
   // 3. Re-validate every line against authoritative data; build order lines.
@@ -372,9 +401,12 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     return { ok: false, code: "EMPTY", error: "Your bag has nothing available to order." };
   }
 
-  // 4. Server-authoritative totals. (Coupons/tax are deferred — Step 9 §26/§27.)
+  // 4. Server-authoritative totals. The shipping fee is the ACTIVE method's
+  //    current DB rate (after the store-wide free-shipping rule) — never a
+  //    browser value. Coupons / tax stay deferred (discountTotal = 0).
   const subtotal = lines.reduce((n, l) => n + l.lineTotal, 0);
-  const shippingFee = subtotal >= FREE_SHIPPING_THRESHOLD ? 0 : method.fee;
+  const freeThreshold = await getFreeShippingThreshold();
+  const shippingFee = effectiveShippingFee(method.rate, subtotal, freeThreshold);
   const discountTotal = 0;
   const grandTotal = subtotal + shippingFee - discountTotal;
 
@@ -432,7 +464,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           shippingFee,
           discountTotal,
           grandTotal,
-          shippingMethod: input.shippingMethod,
+          // Shipping method: live link + immutable snapshot (Step 11).
+          shippingMethodId: method.id,
+          shippingMethod: method.code,
+          shippingMethodCode: method.code,
+          shippingMethodName: method.name,
           addressId: shipAddr.id,
           billingAddressId: billAddr.id,
           shippingAddress: shippingJson,
