@@ -107,7 +107,8 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `ContentPage` | standalone CMS pages (slug, title, body, SEO, status) — Step 4 foundation |
 | `ContentBlock` | data-driven managed blocks (hero/banner/collection…); `type` + JSON `data` |
 | `MediaAsset` | metadata for files in Supabase **Storage** (bucket `media`) — no binary data |
-| `Order` / `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; out of scope, excluded from `seed.sql` |
+| `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Excluded from `seed.sql` |
+| `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; excluded from `seed.sql` |
 
 ## Authentication
 

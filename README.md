@@ -287,10 +287,45 @@ surface; `src/components/account/address-manager.tsx` is the UI.
   mutates, keeps default integrity, and returns the updated list. No admin
   permissions; no `AdminAuditLog` entries.
 
+## Checkout & order creation (Step 9)
+
+`/checkout` requires an authenticated customer (middleware + `requireUser`;
+guests are redirected to sign in and returned afterwards). `src/lib/checkout.ts`
+(server-only) owns it; `src/lib/checkout-actions.ts` is the browser surface;
+`src/components/checkout/checkout-flow.tsx` is the UI (select saved shipping +
+billing address, server-calculated summary, review-and-confirm).
+
+- **The browser never sends items, prices or totals.** `createOrderFromCart`
+  re-reads the customer's ACTIVE cart, re-validates every line (product +
+  variant `ACTIVE`, belongs to product, live inventory ≥ quantity, live price),
+  ownership-checks **both** selected addresses, and recalculates
+  subtotal / shipping / total server-side.
+- **One transaction, all-or-nothing:** atomic `Cart ACTIVE → CONVERTED`
+  (the concurrency + double-submit gate) → `adjustStock(-qty, "SALE")` per line
+  via the Step 6 primitive (row-locked, records an `InventoryAdjustment`, keeps
+  `Variant.stock` in sync, can't oversell) → `Order` + `OrderItem`s + first
+  `OrderEvent` → `soldCount`. Any failure rolls the lot back — no partial
+  order, no deduction, cart stays `ACTIVE`. A second concurrent request finds
+  the cart already converted (or hits `Order.cartId @unique`) and gets the
+  order that was actually created.
+- **No payment.** Orders are created `status: PENDING_PAYMENT`,
+  `paymentStatus: PENDING`, `paymentMethod: NONE` and are never shown as paid.
+  Payment is the next step.
+- **Address + item snapshots.** `Order.shippingAddress` / `Order.billingAddress`
+  store immutable JSON copies; editing the saved address later doesn't touch
+  historical orders. `OrderItem` keeps name / variant label / SKU / unit price /
+  line total.
+- **Order numbers** come from a Postgres sequence (`order_number_seq`) —
+  `AX-<YYMMDD>-<nnnnn>`, collision-free under concurrent checkout.
+- Coupons and tax stay deferred; the `Order` fields for them remain.
+- Order confirmation (`/order/[n]`) and account order pages
+  (`/account/orders/[n]`) are ownership-checked server-side.
+
 ## Data model
 
-`src/lib/data.ts` is the read layer (server-only); `src/lib/actions.ts` holds the
-order/coupon mutations; addresses live in `src/lib/addresses.ts`.
+`src/lib/data.ts` is the read layer (server-only). Mutations: `validateCoupon`
+in `src/lib/actions.ts`; addresses in `src/lib/addresses.ts`; cart in
+`src/lib/cart.ts`; checkout / orders in `src/lib/checkout.ts`.
 Prices are integer centavos throughout; `formatPrice` renders PHP.
 
 ## Deploying to Vercel (Supabase Postgres)
