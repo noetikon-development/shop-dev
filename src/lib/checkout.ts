@@ -277,6 +277,19 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     include: cartForOrder,
   });
   if (!cart) {
+    // No ACTIVE cart. If the customer just checked out (e.g. a double-click
+    // where the other request already converted the cart), hand back that
+    // order instead of an error.
+    const recent = await prisma.order.findFirst({
+      where: {
+        userId: user.id,
+        cart: { status: "CONVERTED" },
+        placedAt: { gte: new Date(Date.now() - 2 * 60 * 1000) },
+      },
+      orderBy: { placedAt: "desc" },
+      select: { orderNumber: true },
+    });
+    if (recent) return { ok: true, orderNumber: recent.orderNumber, duplicate: true };
     return {
       ok: false,
       code: "CART_GONE",
