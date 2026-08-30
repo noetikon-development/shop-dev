@@ -105,7 +105,7 @@ const HOMEPAGE_BLOCKS: BlockSeed[] = [
     position: 5,
     data: {
       items: [
-        { icon: "truck", title: "Free shipping over ₱2,500", body: "Flat ₱129 below that. Express available." },
+        { icon: "truck", title: "Free shipping over ₱2,500", body: "Flat ₱150 below that. Express available." },
         { icon: "returns", title: "30-day returns", body: "Changed your mind? Send it back, no fuss." },
         { icon: "shield", title: "10-year guarantee", body: "On the frame of every piece of furniture." },
         { icon: "wrench", title: "Assembly help", body: "Clear instructions, and a hand if you want one." },

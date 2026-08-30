@@ -17,6 +17,12 @@ import { Reviews } from "@/components/pdp/reviews";
 import { ProductQA } from "@/components/pdp/product-qa";
 import { ProductRail } from "@/components/product-rail";
 import { getSiteSettings } from "@/lib/site-settings";
+import {
+  FREE_SHIPPING_THRESHOLD,
+  STANDARD_SHIPPING_FEE,
+  EXPRESS_SHIPPING_FEE,
+} from "@/lib/constants";
+import { formatPrice } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -128,11 +134,14 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
               content: (
                 <div className="space-y-2">
                   <p>
-                    Standard delivery is ₱129 and takes 3–7 business days, free on orders over
-                    ₱2,500. Express (1–3 days) is ₱249.
+                    Standard delivery is {formatPrice(STANDARD_SHIPPING_FEE)} and takes 3–7 business
+                    days, free on orders over {formatPrice(FREE_SHIPPING_THRESHOLD)}. Express (1–3
+                    days) is {formatPrice(EXPRESS_SHIPPING_FEE)}. Free store pickup is also
+                    available. See <Link href="/pages/shipping">Shipping &amp; delivery</Link>.
                   </p>
                   <p>
-                    Return anything unused within 30 days for a full refund. Large furniture is
+                    Return anything unused within 30 days for a full refund — see{" "}
+                    <Link href="/pages/returns">Returns &amp; refunds</Link>. Large furniture is
                     collected from your door.
                   </p>
                 </div>

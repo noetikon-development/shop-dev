@@ -12,9 +12,14 @@ import type { SiteSettings } from "@/lib/site-settings";
  */
 export function ContactPanel({ settings }: { settings: SiteSettings }) {
   const { contact, social } = settings;
-  const addressParts = [contact.addressLine1, contact.addressLine2, contact.city, contact.country]
-    .map((p) => p.trim())
-    .filter(Boolean);
+  // Only treat it as a usable address when there's a street or city — a country
+  // on its own ("Philippines") is not an address worth showing.
+  const hasRealAddress = Boolean(contact.addressLine1.trim() || contact.city.trim());
+  const addressParts = hasRealAddress
+    ? [contact.addressLine1, contact.addressLine2, contact.city, contact.country]
+        .map((p) => p.trim())
+        .filter(Boolean)
+    : [];
 
   const rows: { icon: React.ReactNode; label: string; node: React.ReactNode }[] = [];
 
