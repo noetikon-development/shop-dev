@@ -15,6 +15,8 @@ import {
   isOrderStatus,
   orderStatusLabel,
 } from "@/lib/orders/status";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendOrderCancelled } from "@/lib/email/notifications";
 
 /**
  * Admin order mutations (Step 12; fulfilment milestones moved to
@@ -236,6 +238,11 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
 
   revalidateOrderPaths(order.orderNumber, orderId);
   revalidateTag("products", "max"); // availability + bestseller changed
+
+  // Cancellation notification — after the response; ORDER_CANCELLED:<orderId>
+  // dedupes. It does NOT claim a refund (PayMongo / refunds are deferred).
+  scheduleEmail(() => sendOrderCancelled(orderId, reason ?? null));
+
   return {
     ok: true,
     message:

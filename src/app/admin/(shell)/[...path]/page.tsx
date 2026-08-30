@@ -31,6 +31,7 @@ const RESERVED = new Set([
   "/admin/content",
   "/admin/content/homepage",
   "/admin/content/pages",
+  "/admin/email",
 ]);
 
 async function resolve(pathParam: Promise<{ path: string[] }>) {

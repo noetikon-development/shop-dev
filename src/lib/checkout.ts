@@ -7,6 +7,8 @@ import { adjustStock } from "@/lib/inventory";
 import { loadCart, activeRedemptionCount } from "@/lib/cart";
 import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendOrderConfirmation } from "@/lib/email/notifications";
 import {
   getActiveShippingMethods,
   getFreeShippingThreshold,
@@ -626,6 +628,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     revalidatePath("/cart");
     revalidatePath("/checkout");
     revalidateTag("products", "max");
+
+    // Order confirmation — after the response, isolated from this transaction.
+    // Idempotency key ORDER_CREATED:<orderId> guarantees one send per order.
+    scheduleEmail(() => sendOrderConfirmation(created.id));
+
     return { ok: true, orderNumber: created.orderNumber, duplicate: false };
   } catch (err) {
     // Cart already converted, or a unique-constraint race — return the order

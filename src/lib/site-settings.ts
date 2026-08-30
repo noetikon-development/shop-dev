@@ -181,3 +181,21 @@ const load = unstable_cache(
 export function getSiteSettings(): Promise<SiteSettings> {
   return load();
 }
+
+/**
+ * The store's display name — an UNCACHED single-column read with a safe
+ * fallback. Use this from code paths that can run outside a Next request scope
+ * (e.g. `after()` email dispatch, scripts), where `unstable_cache` is
+ * unavailable.
+ */
+export async function getStoreBrand(): Promise<string> {
+  try {
+    const row = await prisma.storeSetting.findUnique({
+      where: { key: "store.brand" },
+      select: { value: true },
+    });
+    return (row?.value ?? "").trim() || SITE.brand;
+  } catch {
+    return SITE.brand;
+  }
+}

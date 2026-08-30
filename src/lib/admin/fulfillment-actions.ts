@@ -14,6 +14,8 @@ import {
   isSafeTrackingUrl,
   isStorePickupCode,
 } from "@/lib/orders/couriers";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendOrderShipped, sendOrderDelivered } from "@/lib/email/notifications";
 
 /**
  * Fulfilment / courier / tracking actions (Step 13).
@@ -342,6 +344,10 @@ export async function markShippedAction(input: unknown): Promise<FulfillmentActi
   });
 
   revalidateOrderPaths(order.orderNumber, order.id);
+
+  // Shipment notification — after the response; ORDER_SHIPPED:<orderId> dedupes.
+  scheduleEmail(() => sendOrderShipped(order.id));
+
   return { ok: true, message: "Order marked shipped." };
 }
 
@@ -463,5 +469,9 @@ export async function markDeliveredAction(input: unknown): Promise<FulfillmentAc
   });
 
   revalidateOrderPaths(order.orderNumber, order.id);
+
+  // Delivery confirmation — after the response; ORDER_DELIVERED:<orderId> dedupes.
+  scheduleEmail(() => sendOrderDelivered(order.id));
+
   return { ok: true, message: storePickup ? "Order marked collected." : "Order marked delivered." };
 }

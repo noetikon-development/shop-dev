@@ -584,6 +584,49 @@ changes. **No new models** — everything reuses `ContentPage`, `ContentBlock`,
   FAQ, Shipping, Returns, Care + Privacy/Terms/Cookies/Cancellation clearly
   marked **demo content, not legal advice**). Non-destructive: create-if-missing.
 
+## Transactional email (Step 17)
+
+Server-side transactional email, provider-agnostic over SMTP. **All SMTP code
+lives in `src/lib/email/` — never in a route or action.**
+
+- **Provider** — nodemailer over SMTP. Works with any transactional provider
+  (Resend, SendGrid, Postmark, Mailgun, SES, plain relay). Config comes from
+  `EMAIL_HOST` / `EMAIL_PORT` / `EMAIL_USER` / `EMAIL_PASSWORD` / `EMAIL_FROM` /
+  `EMAIL_FROM_NAME` / `EMAIL_REPLY_TO` — **server-only, never `NEXT_PUBLIC_`**.
+  If host/user/password aren't all set (or `EMAIL_MODE=log`), every email is
+  **recorded in `EmailLog` with status `SKIPPED` and not sent** — no credentials
+  are invented. The AXIARO demo runs in this mode.
+- **Service** — `src/lib/email/notifications.ts`: `sendOrderConfirmation`,
+  `sendOrderShipped`, `sendOrderDelivered`, `sendOrderCancelled`,
+  `sendWelcomeEmail`, plus `sendRefundNotification` and
+  `sendEmailVerification` / `sendPasswordReset` as **foundation only** (not
+  wired — Supabase Auth owns verification/reset). Each loads the authoritative
+  record, renders a template (`src/lib/email/templates/*` — subject + HTML +
+  plain text, warm-neutral email-safe markup, every dynamic value `esc()`-aped),
+  and hands it to `dispatchEmail`.
+- **Idempotency** — `EmailLog.idempotencyKey` is UNIQUE. Keys are deterministic:
+  `ORDER_CREATED:<id>`, `ORDER_SHIPPED:<id>`, `ORDER_DELIVERED:<id>`,
+  `ORDER_CANCELLED:<id>`, `WELCOME:<userId>`. `dispatchEmail` claims the key with
+  `createMany({ skipDuplicates:true })` before sending — a retry / refresh /
+  repeated callback can never send twice.
+- **Failure isolation** — `dispatchEmail` never throws; a provider error is
+  recorded (`status FAILED`, truncated reason, no secrets) and swallowed. Order
+  creation and status transitions are already committed — email is a side effect.
+  Dispatch runs in `after()` so the customer/admin isn't blocked.
+- **Triggers** — order confirmation from `createOrderFromCart` (after commit,
+  `duplicate:false` only); shipment/delivery from the Step 13 fulfilment actions
+  after the atomic transition; cancellation from the Step 12 `cancelOrderAction`;
+  welcome from `syncAppUser` when a brand-new `User` row is created. All
+  server-side, keyed off the real business event — never a frontend click.
+- **Payment wording** — orders are `PENDING_PAYMENT`; the confirmation says
+  *"your order has been received"* and *"this is not a payment confirmation"*.
+  Nothing claims payment succeeded. Cancellation never claims a refund.
+- **Admin** — `/admin/email` (permission `view_audit_logs`) lists every attempt
+  (type, recipient, order, status, error, created/sent) — **no message bodies**.
+  A FAILED / SKIPPED row can be retried, reusing its idempotency key.
+- **Links** — built from `getSiteUrl()` (`NEXT_PUBLIC_SITE_URL` → prod domain).
+  Customer order links go to `/account/orders/<n>` (authenticated) or `/track`.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: coupons in

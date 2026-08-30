@@ -5,6 +5,8 @@ import type { User as SupabaseUser } from "@supabase/supabase-js";
 import type { User as AppUser } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendWelcomeEmail } from "@/lib/email/notifications";
 
 /**
  * The verified Supabase Auth user for this request, or null. Deduped per request.
@@ -41,7 +43,8 @@ export async function syncAppUser(supabaseUser: SupabaseUser): Promise<AppUser> 
   try {
     // Link an existing row by email, or create a new one — atomic on the
     // unique email constraint.
-    return await prisma.user.upsert({
+    const existed = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+    const user = await prisma.user.upsert({
       where: { email },
       update: { supabaseUserId: supabaseUser.id, emailVerified },
       create: {
@@ -53,6 +56,19 @@ export async function syncAppUser(supabaseUser: SupabaseUser): Promise<AppUser> 
         emailVerified,
       },
     });
+    // First time this account exists → customer welcome email. NOT sent to
+    // admin accounts: an admin is provisioned via AdminInvite (the role is
+    // applied later by claimAdminInvites), so a pending / accepted invite for
+    // this address means this is an admin onboarding, not a customer sign-up.
+    // `sendWelcomeEmail` re-checks this too (defence in depth). The
+    // WELCOME:<userId> idempotency key means it is sent at most once, ever.
+    if (!existed) {
+      const adminInvite = await prisma.adminInvite.count({
+        where: { email, status: { in: ["PENDING", "ACCEPTED"] } },
+      });
+      if (adminInvite === 0) scheduleEmail(() => sendWelcomeEmail(user.id));
+    }
+    return user;
   } catch {
     // Lost a race — the row now exists; read it back.
     const again = await prisma.user.findFirst({

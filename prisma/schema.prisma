@@ -46,6 +46,7 @@ model User {
   questions ProductQuestion[]
   answers   ProductAnswer[]
   carts     Cart[]
+  emailLogs EmailLog[]
 
   couponRedemptions CouponRedemption[]
 
@@ -664,6 +665,7 @@ model Order {
   items            OrderItem[]
   events           OrderEvent[]
   reviews          Review[]
+  emailLogs        EmailLog[]
 
   @@index([userId])
   @@index([status])
@@ -731,6 +733,44 @@ model OrderEvent {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+}
+
+// ----------------------------------------------------------------------------
+// Transactional email delivery log (Step 17)
+//
+// One row per transactional email the app tries to send. `idempotencyKey` is a
+// deterministic per-event key (e.g. "ORDER_CREATED:<orderId>") with a UNIQUE
+// constraint — the send path INSERTs first, so a retry / page refresh / repeated
+// callback can never dispatch a duplicate. Email delivery is a side effect: a
+// FAILED / SKIPPED row never rolls back the order or status change that
+// triggered it. No credentials or message bodies are stored here.
+// ----------------------------------------------------------------------------
+
+model EmailLog {
+  id                String    @id @default(cuid())
+  type              String // order_confirmation | order_shipped | order_delivered | order_cancelled | welcome | refund_notification | email_verification | password_reset
+  recipient         String // destination email address
+  subject           String
+  idempotencyKey    String    @unique
+  status            String    @default("PENDING") // PENDING | SENDING | SENT | FAILED | SKIPPED
+  provider          String? // e.g. "smtp"
+  providerMessageId String?
+  error             String? // failure reason (truncated); never contains secrets
+  attempts          Int       @default(0)
+  userId            String?
+  orderId           String?
+  createdAt         DateTime  @default(now())
+  sentAt            DateTime?
+  updatedAt         DateTime  @updatedAt
+
+  user  User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+
+  @@index([type])
+  @@index([status])
+  @@index([orderId])
+  @@index([userId])
+  @@index([createdAt])
 }
 
 // ----------------------------------------------------------------------------

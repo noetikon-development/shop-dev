@@ -61,6 +61,10 @@ ALTER TABLE "ShippingMethod"     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ProductQuestion"    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ProductAnswer"      ENABLE ROW LEVEL SECURITY;
 
+-- Transactional email delivery log (Step 17, 2026-08-30). Metadata only, read
+-- only by the app's direct `postgres` connection. RLS on, no policy.
+ALTER TABLE "EmailLog"           ENABLE ROW LEVEL SECURITY;
+
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON
@@ -92,7 +96,7 @@ END $$;
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
-  "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer"
+  "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog"
 FROM anon, authenticated;
 
 -- ============================================================================

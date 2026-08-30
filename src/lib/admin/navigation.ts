@@ -223,6 +223,14 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     live: true,
   },
   {
+    path: "/admin/email",
+    label: "Email Log",
+    description: "Transactional email delivery status.",
+    group: "admin",
+    accepts: ["view_audit_logs"],
+    live: true,
+  },
+  {
     path: "/admin/audit",
     label: "Audit Log",
     description: "A record of security-relevant admin activity.",
