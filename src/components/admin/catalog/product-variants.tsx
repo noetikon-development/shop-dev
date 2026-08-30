@@ -51,6 +51,13 @@ export function ProductVariants({
 }) {
   return (
     <div className="space-y-8">
+      <p className="rounded-md border border-line bg-surface-sunken/40 px-3 py-2 text-xs text-ink-faint">
+        <strong className="font-medium text-ink">Options</strong> (Colour, Size…) define the choices
+        a customer makes. Each saved <strong className="font-medium text-ink">Variant</strong> is one
+        purchasable combination and is the source of truth for its SKU, price and stock. A
+        combination with no Variant row cannot be bought. Specifications live on the Details tab and
+        are informational only.
+      </p>
       <OptionsEditor productId={productId} options={options} canEdit={canEdit} />
       <VariantTable
         productId={productId}

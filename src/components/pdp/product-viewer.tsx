@@ -12,6 +12,7 @@ import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import { FREE_SHIPPING_THRESHOLD, STANDARD_SHIPPING_FEE } from "@/lib/constants";
+import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
 import type { ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -32,46 +33,46 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const [qty, setQty] = useState(1);
   const [activeImage, setActiveImage] = useState(0);
 
-  // Which variant matches the current selection?
-  const matchedVariant = useMemo(() => {
-    const chosen = Object.values(selected);
-    if (product.variants.length === 1) return product.variants[0];
-    return product.variants.find((v) => {
-      const need = product.options
-        .map((o) => selected[o.id])
-        .filter(Boolean) as string[];
-      return need.every((id) => v.optionValueIds.includes(id)) && need.length === chosen.length;
-    });
-  }, [selected, product.variants, product.options]);
+  // The exact purchasable Variant for the current selection — matched on
+  // option-value ids, never on display text. `null` until every option has a
+  // value AND a Variant row exists for that precise combination.
+  const matchedVariant = useMemo(
+    () => matchVariant(product.options, product.variants, selected),
+    [selected, product.variants, product.options],
+  );
 
-  const needsSize = Boolean(sizeOption) && !selected[sizeOption!.id];
+  // Every option must be chosen before we can resolve or add a variant.
+  const missingSelection = product.options.some((o) => !selected[o.id]);
+  const missingOptionNames = product.options
+    .filter((o) => !selected[o.id])
+    .map((o) => o.name.toLowerCase());
+
+  // All options chosen, but no Variant sells that combination.
+  const comboUnavailable = !missingSelection && !matchedVariant;
+
   const activePrice = matchedVariant?.price ?? product.price;
   const activeCompareAt = matchedVariant?.compareAtPrice ?? product.compareAtPrice;
   const stock = matchedVariant?.stock ?? product.totalStock;
-  const outOfStock = matchedVariant ? matchedVariant.stock <= 0 : product.totalStock <= 0;
+  const outOfStock = Boolean(matchedVariant) && matchedVariant!.stock <= 0;
   const reorderPoint = matchedVariant?.reorderPoint ?? 0;
   const lowStock =
-    !outOfStock && !needsSize && stock > 0 && stock <= Math.max(0, reorderPoint);
+    Boolean(matchedVariant) && !outOfStock && stock > 0 && stock <= Math.max(0, reorderPoint);
 
-  // Is a given size available for the selected colour?
+  // Is a given size purchasable for the currently selected colour?
   const isSizeAvailable = (sizeValueId: string) => {
     const colourId = colourOption ? selected[colourOption.id] : undefined;
-    return product.variants.some(
-      (v) =>
-        v.optionValueIds.includes(sizeValueId) &&
-        (!colourId || v.optionValueIds.includes(colourId)) &&
-        v.stock > 0,
+    return hasPurchasableVariant(
+      product.variants,
+      [sizeValueId, ...(colourId ? [colourId] : [])],
     );
   };
 
-  // Is a given colour available (in any size, or the selected size)?
+  // Is a given colour purchasable (in any size, or the selected size)?
   const isColourAvailable = (colourValueId: string) => {
     const sizeId = sizeOption ? selected[sizeOption.id] : undefined;
-    return product.variants.some(
-      (v) =>
-        v.optionValueIds.includes(colourValueId) &&
-        (!sizeId || v.optionValueIds.includes(sizeId)) &&
-        v.stock > 0,
+    return hasPurchasableVariant(
+      product.variants,
+      [colourValueId, ...(sizeId ? [sizeId] : [])],
     );
   };
 
@@ -95,8 +96,12 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   }, [colourValueId, product.images]);
 
   async function addToBag() {
-    if (needsSize) {
-      toast.error("Please choose a size");
+    if (missingSelection) {
+      toast.error(`Please choose a ${missingOptionNames.join(" and ")}`);
+      return;
+    }
+    if (comboUnavailable) {
+      toast.error("That combination isn’t available");
       return;
     }
     if (!matchedVariant || outOfStock) {
@@ -324,15 +329,17 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
           <button
             onClick={addToBag}
-            disabled={outOfStock || adding}
+            disabled={outOfStock || comboUnavailable || adding}
             className="btn btn-primary h-12 flex-1 !py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
           >
             <ShoppingBag size={16} />
-            {outOfStock
-              ? "Out of stock"
-              : adding
-                ? "Adding…"
-                : `Add to bag · ${formatPrice(activePrice * qty)}`}
+            {comboUnavailable
+              ? "Unavailable"
+              : outOfStock
+                ? "Out of stock"
+                : adding
+                  ? "Adding…"
+                  : `Add to bag · ${formatPrice(activePrice * qty)}`}
           </button>
         </div>
 

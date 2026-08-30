@@ -29,7 +29,20 @@ type Existing = {
   weightGrams: number;
   defaultSku?: string | null;
   variantCount: number;
+  /** Informational content shown on the storefront. JSON strings; not editable here. */
+  specs?: string;
+  highlights?: string;
+  care?: string | null;
 };
+
+function safeJson<T>(raw: string | undefined, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
 
 const pesos = (centavos: number | null | undefined) =>
   centavos == null ? "" : (centavos / 100).toFixed(2);
@@ -233,6 +246,62 @@ export function ProductForm({
         </div>
         <input type="hidden" name="weightGrams" value={product?.weightGrams ?? 500} />
       </section>
+
+      {isEdit && (() => {
+        const specs = safeJson<Record<string, string>>(product!.specs, {});
+        const highlights = safeJson<string[]>(product!.highlights, []);
+        const care = product!.care ?? "";
+        const specEntries = Object.entries(specs);
+        return (
+          <section className="space-y-3">
+            <h2 className="text-sm font-semibold text-ink">Specifications &amp; details</h2>
+            <p className="text-xs text-ink-faint">
+              Informational content shown on the product page. These are{" "}
+              <strong className="font-medium text-ink">not purchasable options</strong> — they
+              never create variants and never affect price, SKU or stock. Managed outside this
+              screen.
+            </p>
+            {specEntries.length === 0 && highlights.length === 0 && !care ? (
+              <p className="rounded-sm border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
+                No specifications set.
+              </p>
+            ) : (
+              <div className="space-y-3 rounded-md border border-line bg-surface-sunken/40 p-3 text-sm">
+                {specEntries.length > 0 && (
+                  <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+                    {specEntries.map(([k, v]) => (
+                      <div key={k} className="flex justify-between gap-4 border-b border-line/60 py-1">
+                        <dt className="text-ink-faint">{k}</dt>
+                        <dd className="text-right font-medium text-ink">{v}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                )}
+                {highlights.length > 0 && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
+                      Highlights
+                    </p>
+                    <ul className="list-disc space-y-0.5 pl-4 text-ink-soft">
+                      {highlights.map((h) => (
+                        <li key={h}>{h}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {care && (
+                  <div>
+                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
+                      Care
+                    </p>
+                    <p className="text-ink-soft">{care}</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        );
+      })()}
 
       {state.error && !state.fieldErrors && (
         <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>

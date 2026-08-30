@@ -65,6 +65,9 @@ export default async function EditProductPage({
           compareAtPrice: product.compareAtPrice,
           weightGrams: product.weightGrams,
           variantCount: product.variants.length,
+          specs: product.specs,
+          highlights: product.highlights,
+          care: product.care,
         }}
         images={product.images.map((img) => ({
           id: img.id,
