@@ -7,6 +7,7 @@ import { adjustStock } from "@/lib/inventory";
 import { loadCart, activeRedemptionCount } from "@/lib/cart";
 import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
+import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendOrderConfirmation } from "@/lib/email/notifications";
 import {
@@ -288,10 +289,11 @@ const cartForOrder = {
               slug: true,
               name: true,
               status: true,
+              // All images, each group ordered so the first row is its primary;
+              // the OrderItem snapshot is resolved colour-aware from these.
               images: {
-                orderBy: [{ optionValueId: { sort: "asc", nulls: "first" } }, { sortOrder: "asc" }, { id: "asc" }],
-                take: 1,
-                select: { url: true },
+                orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+                select: { url: true, optionValueId: true },
               },
             },
           },
@@ -299,7 +301,11 @@ const cartForOrder = {
           optionValues: {
             select: {
               optionValue: {
-                select: { value: true, option: { select: { sortOrder: true } } },
+                select: {
+                  id: true,
+                  value: true,
+                  option: { select: { name: true, sortOrder: true } },
+                },
               },
             },
           },
@@ -417,7 +423,12 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       name: p.name,
       variantLabel: optionSummary || null,
       sku: v.sku,
-      imageUrl: v.imageUrl || p.images[0]?.url || `art:accessory:${p.slug}`,
+      imageUrl: resolveLineImageUrl({
+        images: p.images,
+        colourValueId: colourValueIdOf(v.optionValues),
+        variantImageUrl: v.imageUrl,
+        slug: p.slug,
+      }),
       unitPrice: v.price,
       quantity: item.quantity,
       lineTotal: v.price * item.quantity,

@@ -10,6 +10,7 @@ import {
   normalizeCouponCode,
   type EvaluableCoupon,
 } from "@/lib/coupons";
+import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
 
 /**
  * Server-authoritative shopping cart.
@@ -124,10 +125,11 @@ const cartInclude = {
               name: true,
               status: true,
               freeShipping: true,
+              // All images, each group ordered so the first row is its primary.
+              // The line image is resolved colour-aware from these (line-image.ts).
               images: {
-                orderBy: [{ optionValueId: { sort: "asc", nulls: "first" } }, { sortOrder: "asc" }, { id: "asc" }],
-                take: 1,
-                select: { url: true },
+                orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+                select: { url: true, optionValueId: true },
               },
             },
           },
@@ -136,6 +138,7 @@ const cartInclude = {
             select: {
               optionValue: {
                 select: {
+                  id: true,
                   value: true,
                   option: { select: { name: true, sortOrder: true } },
                 },
@@ -184,7 +187,12 @@ function lineDTO(item: CartItemRow): CartLineDTO {
     sku: v.sku,
     variantLabel: optionSummary,
     optionSummary,
-    imageUrl: v.imageUrl || p.images[0]?.url || `art:accessory:${p.slug}`,
+    imageUrl: resolveLineImageUrl({
+      images: p.images,
+      colourValueId: colourValueIdOf(v.optionValues),
+      variantImageUrl: v.imageUrl,
+      slug: p.slug,
+    }),
     unitPrice,
     compareAtPrice: v.compareAtPrice,
     priceSnapshot: item.priceSnapshot,
