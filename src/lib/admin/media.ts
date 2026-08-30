@@ -99,6 +99,75 @@ function sniffMimeType(buf: Buffer): string | null {
   return null;
 }
 
+/**
+ * Read the pixel dimensions straight from an image file's header bytes — no
+ * decoding, no dependencies. Supports the raster types we accept (PNG, JPEG,
+ * GIF, WebP: VP8 / VP8L / VP8X). Returns null when the format can't be read
+ * (e.g. PDF, or a truncated/odd file); the caller stores null and the admin
+ * readout shows "dimensions not recorded".
+ */
+export function imageDimensions(
+  buf: Buffer,
+  mime: string,
+): { width: number; height: number } | null {
+  try {
+    if (mime === "image/png") {
+      // IHDR is the first chunk: 8B sig + 4B len + "IHDR" + width(4) + height(4)
+      if (buf.length < 24 || buf.toString("ascii", 12, 16) !== "IHDR") return null;
+      return { width: buf.readUInt32BE(16), height: buf.readUInt32BE(20) };
+    }
+    if (mime === "image/gif") {
+      if (buf.length < 10) return null;
+      return { width: buf.readUInt16LE(6), height: buf.readUInt16LE(8) };
+    }
+    if (mime === "image/webp") {
+      if (buf.length < 30 || buf.toString("ascii", 0, 4) !== "RIFF" || buf.toString("ascii", 8, 12) !== "WEBP") {
+        return null;
+      }
+      const fourCC = buf.toString("ascii", 12, 16);
+      if (fourCC === "VP8 ") {
+        // lossy: 16-bit LE width/height (14 low bits) at offset 26/28
+        return { width: buf.readUInt16LE(26) & 0x3fff, height: buf.readUInt16LE(28) & 0x3fff };
+      }
+      if (fourCC === "VP8L") {
+        // lossless: 1 signature byte (0x2f) then 14+14 bits, little-endian bitstream
+        if (buf[20] !== 0x2f) return null;
+        const b1 = buf[21], b2 = buf[22], b3 = buf[23], b4 = buf[24];
+        return {
+          width: 1 + (((b2 & 0x3f) << 8) | b1),
+          height: 1 + (((b4 & 0x0f) << 10) | (b3 << 2) | ((b2 & 0xc0) >> 6)),
+        };
+      }
+      if (fourCC === "VP8X") {
+        // extended: 24-bit LE canvas width-1 / height-1 at offset 24 / 27
+        return {
+          width: 1 + buf.readUIntLE(24, 3),
+          height: 1 + buf.readUIntLE(27, 3),
+        };
+      }
+      return null;
+    }
+    if (mime === "image/jpeg") {
+      // Walk the marker segments to the first Start-Of-Frame.
+      let off = 2;
+      while (off + 9 < buf.length) {
+        if (buf[off] !== 0xff) return null;
+        const marker = buf[off + 1];
+        const len = buf.readUInt16BE(off + 2);
+        // SOF0..SOF15 except DHT(C4), JPG(C8), DAC(CC)
+        if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+          return { height: buf.readUInt16BE(off + 5), width: buf.readUInt16BE(off + 7) };
+        }
+        off += 2 + len;
+      }
+      return null;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Read
 // ---------------------------------------------------------------------------
@@ -205,6 +274,8 @@ export async function uploadMedia(params: {
 
   const { data: pub } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
 
+  const dims = sniffed.startsWith("image/") ? imageDimensions(buffer, sniffed) : null;
+
   const asset = await prisma.mediaAsset.create({
     data: {
       bucket: MEDIA_BUCKET,
@@ -215,6 +286,8 @@ export async function uploadMedia(params: {
       sizeBytes: file.size,
       folder,
       alt,
+      width: dims?.width ?? null,
+      height: dims?.height ?? null,
     },
     select: MEDIA_SELECT,
   });

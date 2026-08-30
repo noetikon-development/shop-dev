@@ -28,7 +28,12 @@ export async function HomepageBlocks({
   // Resolve every media id referenced across all blocks in one query.
   const ids: string[] = [];
   for (const b of blocks) {
-    if (b.type === "hero" && typeof b.data.imageMediaId === "string") ids.push(b.data.imageMediaId);
+    if (b.type === "hero") {
+      if (typeof b.data.imageMediaId === "string") ids.push(b.data.imageMediaId);
+      if (Array.isArray(b.data.heroImages)) {
+        for (const id of b.data.heroImages) if (typeof id === "string") ids.push(id);
+      }
+    }
     if (b.type === "feature_grid" && Array.isArray(b.data.items)) {
       for (const it of b.data.items as Record<string, unknown>[]) {
         if (typeof it.imageMediaId === "string") ids.push(it.imageMediaId);
@@ -43,7 +48,7 @@ export async function HomepageBlocks({
         blocks.map(async (block) => {
           switch (block.type) {
             case "hero":
-              return <HeroBlock key={block.id} data={block.data} mediaUrl={mediaUrlOf(media, block.data.imageMediaId)} />;
+              return <HeroBlock key={block.id} data={block.data} media={media} />;
             case "category_tiles":
               return <CategoryTiles key={block.id} categories={tree} />;
             case "product_rail":
@@ -63,10 +68,17 @@ export async function HomepageBlocks({
   );
 }
 
-function mediaUrlOf(map: Awaited<ReturnType<typeof resolveMediaUrls>>, id: unknown): string | null {
+type MediaMap = Awaited<ReturnType<typeof resolveMediaUrls>>;
+
+function mediaUrlOf(map: MediaMap, id: unknown): string | null {
   if (typeof id !== "string" || !id) return null;
   const asset = map.get(id);
   return asset && asset.mimeType.startsWith("image/") ? asset.url : null;
+}
+
+function mediaAltOf(map: MediaMap, id: unknown): string {
+  if (typeof id !== "string" || !id) return "";
+  return map.get(id)?.alt ?? "";
 }
 
 function str(v: unknown): string {
@@ -89,8 +101,23 @@ function SafeCta({ label, href, variant }: { label: string; href: string; varian
 
 // --- hero -----------------------------------------------------------------
 
-function HeroBlock({ data, mediaUrl }: { data: Record<string, unknown>; mediaUrl: string | null }) {
+// The four hero panels, fixed order. Kinds match the built-in illustrations so
+// an empty panel looks exactly as it did before this became editable.
+const HERO_PANEL_KINDS = ["sofa", "lighting", "tableware", "apparel-top"] as const;
+
+function HeroBlock({ data, media }: { data: Record<string, unknown>; media: MediaMap }) {
   const notes = Array.isArray(data.notes) ? (data.notes as unknown[]).map(str).filter(Boolean) : [];
+
+  const panelIds = (Array.isArray(data.heroImages) ? (data.heroImages as unknown[]) : [])
+    .map((v) => (typeof v === "string" ? v : ""))
+    .slice(0, 4);
+  while (panelIds.length < 4) panelIds.push("");
+
+  // Backward compatibility: a store that set the old single hero image and has
+  // no panel images yet keeps seeing that one image, unchanged.
+  const legacyUrl = mediaUrlOf(media, data.imageMediaId);
+  const useLegacySingle = panelIds.every((id) => !id) && Boolean(legacyUrl);
+
   return (
     <section className="container-page pt-6 sm:pt-10">
       <div className="grid overflow-hidden rounded-lg border border-line bg-surface lg:grid-cols-2">
@@ -114,15 +141,29 @@ function HeroBlock({ data, mediaUrl }: { data: Record<string, unknown>; mediaUrl
         </div>
 
         <div className="relative min-h-[280px] bg-line">
-          {mediaUrl ? (
-            <Image src={mediaUrl} alt={str(data.heading) || "Featured"} fill className="object-cover" priority sizes="(max-width: 1024px) 100vw, 50vw" />
+          {useLegacySingle ? (
+            <Image src={legacyUrl!} alt={str(data.heading) || "Featured"} fill className="object-cover" priority sizes="(max-width: 1024px) 100vw, 50vw" />
           ) : (
             <div className="grid h-full grid-cols-2 grid-rows-2 gap-px">
-              {(["sofa", "lighting", "tableware", "apparel-top"] as const).map((kind, i) => (
-                <div key={kind} className="aspect-square">
-                  <ProductArt kind={kind} seed={`hero-${i}`} />
-                </div>
-              ))}
+              {HERO_PANEL_KINDS.map((kind, i) => {
+                const url = mediaUrlOf(media, panelIds[i]);
+                return (
+                  <div key={kind} className="relative aspect-square">
+                    {url ? (
+                      <Image
+                        src={url}
+                        alt={mediaAltOf(media, panelIds[i])}
+                        fill
+                        className="object-cover"
+                        priority={i === 0}
+                        sizes="(max-width: 1024px) 50vw, 25vw"
+                      />
+                    ) : (
+                      <ProductArt kind={kind} seed={`hero-${i}`} />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

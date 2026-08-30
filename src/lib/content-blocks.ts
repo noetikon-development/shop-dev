@@ -42,9 +42,23 @@ export const heroSchema = z.object({
   ctaHref: linkHref.default(""),
   secondaryCtaLabel: shortText.default(""),
   secondaryCtaHref: linkHref.default(""),
+  // Legacy single hero image — kept for backward compatibility. The storefront
+  // only falls back to it when `heroImages` has no entries.
   imageMediaId: mediaId,
+  // The four fixed hero panels (Living / Lighting / Kitchen & Dining / Wardrobe),
+  // in order. Each entry is a MediaAsset id or "" (empty = keep the built-in
+  // illustration for that panel). Always length 4 once saved from the editor.
+  heroImages: z.array(mediaId).max(4).default([]),
   notes: z.array(shortText).max(6).default([]),
 });
+
+/** Fixed hero-panel labels — administration only, does not affect the storefront. */
+export const HERO_PANEL_LABELS = [
+  "Panel 1 — Living",
+  "Panel 2 — Lighting",
+  "Panel 3 — Kitchen & Dining",
+  "Panel 4 — Wardrobe",
+] as const;
 
 export const featureItemSchema = z.object({
   eyebrow: shortText.default(""),

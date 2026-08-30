@@ -73,8 +73,13 @@ export type AdminBlockRow = {
 
 function blockSummary(type: string, data: Record<string, unknown>): string {
   switch (type) {
-    case "hero":
-      return String(data.heading ?? "") || "—";
+    case "hero": {
+      const base = String(data.heading ?? "") || "—";
+      const imgs = Array.isArray(data.heroImages)
+        ? (data.heroImages as unknown[]).filter((v) => typeof v === "string" && v).length
+        : 0;
+      return imgs > 0 ? `${base} · ${imgs}/4 panel images` : base;
+    }
     case "product_rail":
       return `${data.title ?? ""} · ${data.source ?? ""}`.trim();
     case "feature_grid":

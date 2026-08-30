@@ -1,16 +1,20 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { ImageIcon, Loader2, Upload, X } from "lucide-react";
+import { AlertTriangle, ImageIcon, Loader2, Upload, X } from "lucide-react";
 import { Modal, notify } from "@/components/admin/ui";
 import { uploadMediaAction } from "@/lib/admin/content-actions";
-import { ALLOWED_IMAGE_ACCEPT } from "@/lib/media-constants";
+import { ALLOWED_IMAGE_ACCEPT, heroImageWarnings } from "@/lib/media-constants";
 import type { PickerAsset } from "@/lib/admin/media-picker-data";
 
 /**
  * A field that stores a MediaAsset id and shows a thumbnail. Opens a modal to
  * pick from recent uploads or upload a new image inline. `name` is submitted in
  * the surrounding form as a hidden input.
+ *
+ * `showSpecHints` adds a dimensions / file-size / type readout for the selected
+ * image plus advisory warnings against the recommended hero-image standard
+ * (1600×1600, WebP, 150–500 KB). Warnings never block a valid upload.
  */
 export function MediaPickerField({
   name,
@@ -19,6 +23,8 @@ export function MediaPickerField({
   defaultValue = "",
   error,
   hint,
+  uploadFolder = "content",
+  showSpecHints = false,
 }: {
   name: string;
   label: string;
@@ -26,6 +32,8 @@ export function MediaPickerField({
   defaultValue?: string;
   error?: string;
   hint?: string;
+  uploadFolder?: string;
+  showSpecHints?: boolean;
 }) {
   const [value, setValue] = useState(defaultValue);
   const [list, setList] = useState<PickerAsset[]>(assets);
@@ -46,7 +54,7 @@ export function MediaPickerField({
     setUploading(true);
     const fd = new FormData();
     fd.set("file", file);
-    fd.set("folder", "content");
+    fd.set("folder", uploadFolder);
     const res = await uploadMediaAction({}, fd);
     setUploading(false);
     if (res.ok && res.asset) {
@@ -64,7 +72,7 @@ export function MediaPickerField({
     <div className="space-y-1.5">
       <label className="block text-sm font-medium text-ink">{label}</label>
       <input type="hidden" name={name} value={value} />
-      <div className="flex items-center gap-3">
+      <div className="flex items-start gap-3">
         <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-md border border-line bg-surface-sunken">
           {selected ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -73,19 +81,22 @@ export function MediaPickerField({
             <ImageIcon size={18} className="text-ink-faint" />
           )}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={() => setOpen(true)} className="btn btn-outline py-1.5 text-xs">
-            {selected ? "Change image" : "Choose image"}
-          </button>
-          {value && (
-            <button
-              type="button"
-              onClick={() => setValue("")}
-              className="btn btn-ghost py-1.5 text-xs text-ink-faint"
-            >
-              <X size={12} /> Clear
+        <div className="min-w-0 space-y-1">
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => setOpen(true)} className="btn btn-outline py-1.5 text-xs">
+              {selected ? "Change image" : "Choose image"}
             </button>
-          )}
+            {value && (
+              <button
+                type="button"
+                onClick={() => setValue("")}
+                className="btn btn-ghost py-1.5 text-xs text-ink-faint"
+              >
+                <X size={12} /> Clear
+              </button>
+            )}
+          </div>
+          {showSpecHints && selected && <SpecReadout asset={selected} />}
         </div>
       </div>
       {error ? <p className="text-xs text-clay">{error}</p> : hint && <p className="text-xs text-ink-faint">{hint}</p>}
@@ -111,6 +122,12 @@ export function MediaPickerField({
               Upload
             </button>
           </div>
+          {showSpecHints && (
+            <p className="text-[11px] text-ink-faint">
+              Recommended: 1600×1600px, 1:1, sRGB, WebP, quality 82–85, 150–500&nbsp;KB. Off-spec
+              images still upload — you&apos;ll just see a note.
+            </p>
+          )}
           {filtered.length === 0 ? (
             <p className="py-8 text-center text-sm text-ink-faint">No images match.</p>
           ) : (
@@ -132,6 +149,7 @@ export function MediaPickerField({
                       <img src={a.url} alt={a.alt ?? a.filename} className="h-full w-full object-contain" loading="lazy" />
                     </span>
                     <span className="block truncate px-1 py-1 text-[10px] text-ink-faint">{a.filename}</span>
+                    <span className="block truncate px-1 pb-1 text-[10px] text-ink-faint">{dimText(a)}</span>
                   </button>
                 </li>
               ))}
@@ -139,6 +157,42 @@ export function MediaPickerField({
           )}
         </div>
       </Modal>
+    </div>
+  );
+}
+
+function humanKB(bytes: number | null | undefined) {
+  if (typeof bytes !== "number") return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function typeLabel(mime: string | null | undefined) {
+  if (!mime) return "";
+  return mime.replace("image/", "").toUpperCase();
+}
+
+function dimText(a: PickerAsset) {
+  const dims = typeof a.width === "number" && typeof a.height === "number" ? `${a.width}×${a.height}` : "size n/a";
+  return `${dims} · ${humanKB(a.sizeBytes)} · ${typeLabel(a.mimeType)}`;
+}
+
+function SpecReadout({ asset }: { asset: PickerAsset }) {
+  const warnings = heroImageWarnings(asset);
+  const recorded = typeof asset.width === "number" && typeof asset.height === "number";
+  return (
+    <div className="text-[11px] leading-tight">
+      <p className="text-ink-faint">
+        {recorded ? `${asset.width}×${asset.height}px` : "dimensions not recorded"} ·{" "}
+        {humanKB(asset.sizeBytes)} · {typeLabel(asset.mimeType)}
+      </p>
+      {warnings.length > 0 && (
+        <p className="mt-0.5 flex items-start gap-1 text-[#8a5a1f]">
+          <AlertTriangle size={11} className="mt-px shrink-0" />
+          <span>{warnings.join(" · ")}</span>
+        </p>
+      )}
     </div>
   );
 }

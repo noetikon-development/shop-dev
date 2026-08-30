@@ -39,7 +39,14 @@ function revalidate() {
 function referencedIds(type: BlockTypeKey, data: Record<string, unknown>) {
   const media: string[] = [];
   const products: string[] = [];
-  if (type === "hero" && typeof data.imageMediaId === "string" && data.imageMediaId) media.push(data.imageMediaId);
+  if (type === "hero") {
+    if (typeof data.imageMediaId === "string" && data.imageMediaId) media.push(data.imageMediaId);
+    if (Array.isArray(data.heroImages)) {
+      for (const id of data.heroImages as unknown[]) {
+        if (typeof id === "string" && id) media.push(id);
+      }
+    }
+  }
   if (type === "feature_grid" && Array.isArray(data.items)) {
     for (const it of data.items as Record<string, unknown>[]) {
       if (typeof it.imageMediaId === "string" && it.imageMediaId) media.push(it.imageMediaId);

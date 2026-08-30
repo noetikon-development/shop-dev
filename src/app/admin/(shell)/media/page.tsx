@@ -72,6 +72,8 @@ export default async function AdminMediaPage({ searchParams }: PageProps<"/admin
           filename: a.filename,
           mimeType: a.mimeType,
           sizeBytes: a.sizeBytes,
+          width: a.width,
+          height: a.height,
           folder: a.folder,
           alt: a.alt,
           createdAt: a.createdAt.toISOString(),

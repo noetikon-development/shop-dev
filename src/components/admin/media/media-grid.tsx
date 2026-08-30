@@ -21,6 +21,8 @@ type Asset = {
   filename: string;
   mimeType: string;
   sizeBytes: number;
+  width: number | null;
+  height: number | null;
   folder: string;
   alt: string | null;
   createdAt: string;
@@ -76,7 +78,13 @@ export function MediaGrid({ assets, canManage }: { assets: Asset[]; canManage: b
                 </p>
                 {a.alt && <p className="truncate text-[11px] text-ink-faint" title={a.alt}>{a.alt}</p>}
                 <div className="flex items-center justify-between text-[11px] text-ink-faint">
-                  <span>{humanSize(a.sizeBytes)}</span>
+                  <span>
+                    {typeof a.width === "number" && typeof a.height === "number"
+                      ? `${a.width}×${a.height} · `
+                      : ""}
+                    {humanSize(a.sizeBytes)}
+                    {isImage && ` · ${a.mimeType.replace("image/", "").toUpperCase()}`}
+                  </span>
                   {a.folder && <StatusBadge tone="neutral">{a.folder}</StatusBadge>}
                 </div>
                 <div className="flex flex-wrap gap-2 pt-1 text-[11px]">

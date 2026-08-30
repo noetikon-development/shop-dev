@@ -16,7 +16,17 @@ export type MediaUploadState = {
   error?: string;
   ok?: boolean;
   message?: string;
-  asset?: { id: string; url: string; filename: string; folder: string; alt: string | null };
+  asset?: {
+    id: string;
+    url: string;
+    filename: string;
+    folder: string;
+    alt: string | null;
+    mimeType: string;
+    sizeBytes: number;
+    width: number | null;
+    height: number | null;
+  };
 };
 
 export async function uploadMediaAction(
@@ -56,6 +66,10 @@ export async function uploadMediaAction(
       filename: result.asset.filename,
       folder: result.asset.folder,
       alt: result.asset.alt,
+      mimeType: result.asset.mimeType,
+      sizeBytes: result.asset.sizeBytes,
+      width: result.asset.width,
+      height: result.asset.height,
     },
   };
 }

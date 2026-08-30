@@ -14,6 +14,7 @@ import {
   BLOCK_TYPES,
   BLOCK_TYPE_KEYS,
   PRODUCT_RAIL_SOURCES,
+  HERO_PANEL_LABELS,
   type BlockTypeKey,
 } from "@/lib/content-blocks";
 import type { PickerAsset } from "@/lib/admin/media-picker-data";
@@ -79,6 +80,7 @@ export function BlockEditor({
   );
   const [railSource, setRailSource] = useState<string>(typeof d.source === "string" ? d.source : "bestsellers");
   const heroImage = typeof d.imageMediaId === "string" ? d.imageMediaId : "";
+  const heroImagesData = Array.isArray(d.heroImages) ? (d.heroImages as unknown[]).map(String) : [];
   const featureImages = initialItems.map((it) =>
     typeof it.imageMediaId === "string" ? (it.imageMediaId as string) : "",
   );
@@ -97,7 +99,10 @@ export function BlockEditor({
           ctaHref: g("hero-ctaHref"),
           secondaryCtaLabel: g("hero-secondaryCtaLabel"),
           secondaryCtaHref: g("hero-secondaryCtaHref"),
-          imageMediaId: g("__heroImage") || heroImage,
+          // Legacy single image — preserved untouched, no longer edited here.
+          imageMediaId: heroImage,
+          // The four fixed panels, in order. "" = keep the built-in illustration.
+          heroImages: [0, 1, 2, 3].map((i) => g(`__heroImage-${i}`)),
           notes: g("hero-notes").split("\n").map((s) => s.trim()).filter(Boolean).slice(0, 6),
         };
       case "product_rail":
@@ -192,13 +197,26 @@ export function BlockEditor({
             <Text id="hero-secondaryCtaHref" label="Secondary button link" d={d.secondaryCtaHref} placeholder="/c/new" />
           </div>
           <Area id="hero-notes" label="Reassurance notes (one per line)" d={(d.notes as string[] | undefined)?.join("\n")} />
-          <MediaPickerField
-            name="__heroImage"
-            label="Hero image (optional)"
-            assets={mediaAssets}
-            defaultValue={heroImage}
-            hint="Leave blank to use the built-in illustration grid."
-          />
+          <div className="space-y-3 rounded-md border border-line p-3">
+            <div>
+              <p className="text-sm font-medium text-ink">Hero panels</p>
+              <p className="text-xs text-ink-faint">
+                The four visuals in the hero, in fixed order. Upload, replace or clear each one
+                independently. An empty panel keeps its built-in illustration until you add an image.
+              </p>
+            </div>
+            {HERO_PANEL_LABELS.map((panelLabel, i) => (
+              <MediaPickerField
+                key={i}
+                name={`__heroImage-${i}`}
+                label={panelLabel}
+                assets={mediaAssets}
+                defaultValue={heroImagesData[i] ?? ""}
+                uploadFolder="hero"
+                showSpecHints
+              />
+            ))}
+          </div>
         </Card>
       )}
 
