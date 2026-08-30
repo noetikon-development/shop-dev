@@ -393,6 +393,50 @@ new permission, no new status system.
 - Not in scope: PayMongo, payments, refunds, courier APIs, tracking numbers,
   fulfilment automation, `PACKED` / `REFUNDED` statuses.
 
+## Fulfilment, courier & tracking (Step 13)
+
+Extends order management with a courier / tracking foundation. Still no second
+status system — the "fulfilment status" is `Order.status`
+(`SHIPPED → OUT_FOR_DELIVERY → DELIVERED`) — and still `view_orders` /
+`manage_orders`, no new permission.
+
+- **`Order` fields:** `courier` (a code from `src/lib/orders/couriers.ts`),
+  `courierName` (display snapshot / custom text for "Other"), `trackingNumber`,
+  `trackingUrl` (HTTPS-only), `shippedAt`, `deliveredAt` (both server-set),
+  `fulfillmentNote` (internal — never shown to the customer or on public
+  tracking).
+- **`src/lib/orders/couriers.ts`** — plain config, not a model: J&T, LBC, Ninja
+  Van, Flash, Lalamove, Store Pickup, Other. Optional `trackingUrlTemplate`
+  (used only to auto-fill a URL when the admin gives a tracking number and no
+  URL). `isSafeTrackingUrl` rejects anything but a plain `https:` URL
+  (`javascript:` / `data:` / `http:` / relative all fail). A future courier-API
+  layer attaches by `code` — no schema change.
+- **`src/lib/admin/fulfillment-actions.ts`** — `updateFulfillmentAction` (edit
+  courier / tracking / URL / internal note, no status change),
+  `markShippedAction` (PROCESSING → SHIPPED, requires courier + tracking unless
+  Store Pickup, sets `shippedAt`), `markOutForDeliveryAction` (SHIPPED →
+  OUT_FOR_DELIVERY), `markDeliveredAction` (→ DELIVERED, sets `deliveredAt`;
+  rejects an already-delivered order). Each: `manage_orders`, re-reads the real
+  status, atomic status-guarded `updateMany`, `OrderEvent` + `AdminAuditLog`.
+  Timestamps are always `new Date()` on the server.
+- **PENDING_PAYMENT can't ship** — `canTransition` has no path into a fulfilment
+  status from it, and `markShippedAction` refuses it explicitly. Payment stays
+  deferred; no order is marked `PAID` by hand.
+- **Store Pickup** (`shippingMethodCode === "PICKUP"`) skips SHIPPED /
+  OUT_FOR_DELIVERY entirely: PROCESSING → DELIVERED ("Mark as collected"). No
+  courier or tracking fields are shown or required. The timeline uses a shorter
+  ladder.
+- **Customer tracking** (`/account/orders/[n]`, confirmation page) gains a
+  Delivery / Pickup card: courier, tracking number, safe tracking link, shipped
+  / delivered dates. Ownership checks unchanged.
+- **Public tracking** (`/track`) now requires the order number **and** the
+  checkout email, and renders a dedicated PII-free view
+  (`src/components/order/public-tracking.tsx` + `getPublicTracking`): status,
+  fulfilment, item names + quantities, timeline. No email, phone, address,
+  billing, prices, internal note, or free-text event detail.
+- The admin order list shows courier + tracking under the status badge (no extra
+  column) and search matches the tracking number.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: `validateCoupon`

@@ -1,27 +1,32 @@
 "use server";
 
-import { revalidatePath, revalidateTag } from "next/cache";
+import { revalidateTag } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock } from "@/lib/inventory";
+import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import {
   canTransition,
   isCancellable,
+  isFulfillmentStatus,
   isOrderStatus,
   orderStatusLabel,
 } from "@/lib/orders/status";
 
 /**
- * Admin order mutations (Step 12).
+ * Admin order mutations (Step 12; fulfilment milestones moved to
+ * src/lib/admin/fulfillment-actions.ts in Step 13).
  *
  * - Status changes and cancellation both require `manage_orders` (existing Step 3
  *   permission — nothing new introduced).
+ * - `updateOrderStatusAction` only drives the pre-fulfilment transition
+ *   (… → PROCESSING). SHIPPED / OUT_FOR_DELIVERY / DELIVERED go through the
+ *   Step 13 fulfilment actions so courier / tracking / timestamps are captured.
  * - Every transition is validated server-side against `canTransition`; the client
- *   cannot post an arbitrary status, and an admin can NEVER set PAID by hand
- *   (payment confirmation is the deferred payment step).
+ *   cannot post an arbitrary status, and an admin can NEVER set PAID by hand.
  * - Cancellation reverses the order's SALE inventory effect through the existing
  *   row-locked `adjustStock` primitive — it never touches `Variant.stock`
  *   directly and never creates a duplicate adjustment (the atomic status gate
@@ -34,24 +39,12 @@ export type OrderActionState = { ok: boolean; message?: string; error?: string }
 /** Thrown inside the cancel transaction when the atomic status gate matches 0 rows. */
 class StaleOrderError extends Error {}
 
-function revalidateOrder(orderNumber: string, orderId: string) {
-  revalidatePath("/admin/orders");
-  revalidatePath(`/admin/orders/${orderId}`);
-  revalidatePath("/admin");
-  revalidatePath("/account/orders");
-  revalidatePath(`/account/orders/${orderNumber}`);
-  revalidatePath(`/order/${orderNumber}`);
-}
-
 // ---------------------------------------------------------------------------
 // Status transition
 // ---------------------------------------------------------------------------
 
 const EVENT_TITLE: Record<string, string> = {
   PROCESSING: "Preparing your order",
-  SHIPPED: "Shipped",
-  OUT_FOR_DELIVERY: "Out for delivery",
-  DELIVERED: "Delivered",
 };
 
 const statusSchema = z.object({
@@ -70,6 +63,9 @@ export async function updateOrderStatusAction(input: unknown): Promise<OrderActi
   if (!isOrderStatus(to)) return { ok: false, error: "Unknown order status." };
   if (to === "CANCELLED") {
     return { ok: false, error: "Use “Cancel order” — it also reverses inventory." };
+  }
+  if (isFulfillmentStatus(to)) {
+    return { ok: false, error: "Use the fulfilment actions to ship or deliver an order." };
   }
 
   const order = await prisma.order.findUnique({
@@ -115,7 +111,7 @@ export async function updateOrderStatusAction(input: unknown): Promise<OrderActi
     meta: { orderNumber: order.orderNumber, from: order.status, to, note: note || null },
   });
 
-  revalidateOrder(order.orderNumber, orderId);
+  revalidateOrderPaths(order.orderNumber, orderId);
   return { ok: true, message: `Order marked ${orderStatusLabel(to)}.` };
 }
 
@@ -238,7 +234,7 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
     },
   });
 
-  revalidateOrder(order.orderNumber, orderId);
+  revalidateOrderPaths(order.orderNumber, orderId);
   revalidateTag("products", "max"); // availability + bestseller changed
   return {
     ok: true,

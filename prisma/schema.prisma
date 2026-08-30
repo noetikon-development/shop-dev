@@ -549,6 +549,19 @@ model Order {
   shippingMethodName String? // snapshot: e.g. "Standard Delivery"
   // shippingFee (above) is the snapshotted amount charged.
 
+  // Fulfilment / courier / tracking (Step 13). Operational order data — NOT part
+  // of the historical price/address snapshot, and no second status system: the
+  // fulfilment status IS `status` (SHIPPED / OUT_FOR_DELIVERY / DELIVERED).
+  // Courier API integration is a later step; `courier` is a code from
+  // src/lib/orders/couriers.ts so an API layer can attach without a schema change.
+  courier         String? // courier code, e.g. "JT_EXPRESS" | "LBC" | "PICKUP" | "OTHER"
+  courierName     String? // display-name snapshot (also holds custom text for "OTHER")
+  trackingNumber  String?
+  trackingUrl     String? // HTTPS only; auto-built from the courier config or entered by hand
+  shippedAt       DateTime? // server-set when the order is marked SHIPPED
+  deliveredAt     DateTime? // server-set when the order is marked DELIVERED
+  fulfillmentNote String? // internal — never shown to the customer or on public tracking
+
   note      String?
   placedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -570,6 +583,8 @@ model Order {
   // list facet.
   @@index([placedAt])
   @@index([paymentStatus])
+  // Fulfilment reporting / filtering by courier (Step 13).
+  @@index([courier])
 }
 
 // Configurable delivery option shown at checkout (Step 11). The `rate` here is

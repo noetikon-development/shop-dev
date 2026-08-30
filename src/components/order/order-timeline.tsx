@@ -2,14 +2,26 @@ import { Check } from "lucide-react";
 import { ORDER_STATUS_FLOW, ORDER_STATUS_META } from "@/lib/constants";
 import { formatDate, cn } from "@/lib/utils";
 
-type Event = { status: string; title: string; detail: string | null; location: string | null; createdAt: Date | string };
+type Event = {
+  status: string;
+  title: string;
+  detail?: string | null;
+  location?: string | null;
+  createdAt: Date | string;
+};
+
+// Store-pickup orders skip the courier stages — PROCESSING goes straight to
+// DELIVERED (collected). Same status vocabulary, shorter ladder.
+const PICKUP_STATUS_FLOW = ["PENDING", "PAID", "PROCESSING", "DELIVERED"] as const;
 
 export function OrderTimeline({
   status,
   events,
+  pickup = false,
 }: {
   status: string;
   events: Event[];
+  pickup?: boolean;
 }) {
   if (status === "CANCELLED") {
     return (
@@ -31,19 +43,20 @@ export function OrderTimeline({
     );
   }
 
-  const currentIndex = ORDER_STATUS_FLOW.indexOf(status as (typeof ORDER_STATUS_FLOW)[number]);
+  const flow: readonly string[] = pickup ? PICKUP_STATUS_FLOW : ORDER_STATUS_FLOW;
+  const currentIndex = flow.indexOf(status);
   const eventByStatus = new Map(events.map((e) => [e.status, e]));
 
   return (
     <ol className="relative space-y-6">
-      {ORDER_STATUS_FLOW.map((s, i) => {
+      {flow.map((s, i) => {
         const meta = ORDER_STATUS_META[s];
         const done = i <= currentIndex;
         const active = i === currentIndex;
         const ev = eventByStatus.get(s);
         return (
           <li key={s} className="relative flex gap-4 pl-1">
-            {i < ORDER_STATUS_FLOW.length - 1 && (
+            {i < flow.length - 1 && (
               <span
                 className={cn(
                   "absolute left-[13px] top-6 h-[calc(100%+0.5rem)] w-px",

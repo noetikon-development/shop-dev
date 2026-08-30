@@ -1,7 +1,9 @@
 import Link from "next/link";
+import { ExternalLink, Truck } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { OrderTimeline } from "@/components/order/order-timeline";
 import { ORDER_STATUS_META, PAYMENT_METHODS } from "@/lib/constants";
+import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
 import { formatPrice, formatDate, cn } from "@/lib/utils";
 import type { OrderView } from "@/lib/data";
 
@@ -9,6 +11,12 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
   const meta = ORDER_STATUS_META[order.status] ?? ORDER_STATUS_META.PENDING;
   const addr = order.shippingAddress;
   const billing = order.billingAddress;
+  const pickup = isStorePickupCode(order.shippingMethodCode);
+  const trackingLink =
+    order.trackingUrl && isSafeTrackingUrl(order.trackingUrl) ? order.trackingUrl : null;
+  const showFulfilment =
+    Boolean(order.courier || order.trackingNumber || order.shippedAt || order.deliveredAt) &&
+    order.status !== "CANCELLED";
   const payment = PAYMENT_METHODS.find((p) => p.id === order.paymentMethod);
   const paymentLabel =
     order.paymentStatus === "PAID"
@@ -44,7 +52,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
           </div>
 
           <div className="mt-6">
-            <OrderTimeline status={order.status} events={order.events} />
+            <OrderTimeline status={order.status} events={order.events} pickup={pickup} />
           </div>
         </div>
 
@@ -100,8 +108,52 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
           </dl>
         </div>
 
+        {showFulfilment && (
+          <div className="card-surface p-5 text-sm">
+            <h3 className="flex items-center gap-1.5 font-medium">
+              <Truck size={15} className="text-ink-soft" /> {pickup ? "Pickup" : "Delivery"}
+            </h3>
+            <dl className="mt-3 space-y-2">
+              {order.courier && !pickup && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-faint">Courier</dt>
+                  <dd className="text-right">{courierLabel(order.courier, order.courierName)}</dd>
+                </div>
+              )}
+              {order.trackingNumber && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-faint">Tracking number</dt>
+                  <dd className="text-right font-mono">{order.trackingNumber}</dd>
+                </div>
+              )}
+              {order.shippedAt && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-faint">Shipped</dt>
+                  <dd className="text-right">{formatDate(order.shippedAt)}</dd>
+                </div>
+              )}
+              {order.deliveredAt && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-ink-faint">{pickup ? "Collected" : "Delivered"}</dt>
+                  <dd className="text-right">{formatDate(order.deliveredAt)}</dd>
+                </div>
+              )}
+            </dl>
+            {trackingLink && (
+              <a
+                href={trackingLink}
+                target="_blank"
+                rel="noopener noreferrer nofollow"
+                className="btn btn-outline mt-4 w-full py-2 text-sm"
+              >
+                Track parcel <ExternalLink size={13} />
+              </a>
+            )}
+          </div>
+        )}
+
         <div className="card-surface p-5 text-sm">
-          <h3 className="font-medium">Delivery address</h3>
+          <h3 className="font-medium">{pickup ? "Pickup contact" : "Delivery address"}</h3>
           <SnapshotAddress a={addr} />
 
           {billing && (

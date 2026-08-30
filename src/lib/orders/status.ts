@@ -1,12 +1,13 @@
 /**
  * Order status — the single source of truth for the admin fulfilment workflow
- * (Step 12). Pure data + pure functions, safe to import from server, client and
- * edge code.
+ * (Step 12; fulfilment/courier/tracking added in Step 13). Pure data + pure
+ * functions, safe to import from server, client and edge code.
  *
  * This does NOT introduce a new status system. The values below are exactly the
  * ones already used by the schema (`Order.status`), the checkout flow and the
  * storefront timeline (`ORDER_STATUS_FLOW` / `ORDER_STATUS_META` in
- * `@/lib/constants`). Step 12 only adds the transition rules an admin may drive.
+ * `@/lib/constants`). The "fulfilment status" IS `Order.status` — there is no
+ * separate fulfilment enum.
  *
  * Payment stays deferred (Step 10): an admin can NOT move an order to PAID —
  * there is no manual payment mechanism, and we never fake one.
@@ -71,19 +72,51 @@ export const CANCELLABLE_STATUSES: OrderStatus[] = [
   "PROCESSING",
 ];
 
-/** Whole set of moves offered in the admin UI (forward + cancel where valid). */
-export function allowedNextStatuses(from: string): OrderStatus[] {
-  if (!isOrderStatus(from)) return [];
-  const forward = ORDER_STATUS_TRANSITIONS[from];
-  const canCancel = CANCELLABLE_STATUSES.includes(from);
-  return canCancel ? [...forward, "CANCELLED"] : [...forward];
+/**
+ * The fulfilment milestones. Transitions INTO these go through the dedicated
+ * Step 13 fulfilment actions (which capture courier / tracking / timestamps),
+ * never the generic status action.
+ */
+export const FULFILLMENT_STATUSES: OrderStatus[] = [
+  "SHIPPED",
+  "OUT_FOR_DELIVERY",
+  "DELIVERED",
+];
+
+export function isFulfillmentStatus(status: string): boolean {
+  return (FULFILLMENT_STATUSES as string[]).includes(status);
 }
 
-/** Server-side guard for a status change request. */
-export function canTransition(from: string, to: string): boolean {
+/** Whole set of moves offered in the admin UI (forward + cancel where valid). */
+export function allowedNextStatuses(
+  from: string,
+  opts?: { storePickup?: boolean },
+): OrderStatus[] {
+  if (!isOrderStatus(from)) return [];
+  const forward = [...ORDER_STATUS_TRANSITIONS[from]];
+  // Store-pickup orders never go through SHIPPED / OUT_FOR_DELIVERY — they go
+  // straight from PROCESSING to DELIVERED (collected).
+  if (opts?.storePickup && from === "PROCESSING" && !forward.includes("DELIVERED")) {
+    forward.push("DELIVERED");
+  }
+  const canCancel = CANCELLABLE_STATUSES.includes(from);
+  return canCancel ? [...forward, "CANCELLED"] : forward;
+}
+
+/**
+ * Server-side guard for a status change request. `storePickup` allows the single
+ * extra transition PROCESSING → DELIVERED (a collected pickup order); it never
+ * relaxes anything else.
+ */
+export function canTransition(
+  from: string,
+  to: string,
+  opts?: { storePickup?: boolean },
+): boolean {
   if (!isOrderStatus(from) || !isOrderStatus(to)) return false;
   if (to === "PAID") return false; // payment confirmation is deferred — never by hand
   if (to === "CANCELLED") return CANCELLABLE_STATUSES.includes(from);
+  if (opts?.storePickup && from === "PROCESSING" && to === "DELIVERED") return true;
   return ORDER_STATUS_TRANSITIONS[from].includes(to);
 }
 

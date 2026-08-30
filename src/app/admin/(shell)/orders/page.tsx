@@ -59,7 +59,7 @@ export default async function AdminOrdersPage({ searchParams }: PageProps<"/admi
       />
 
       <FilterBar>
-        <SearchInput placeholder="Order number, customer name or email…" />
+        <SearchInput placeholder="Order #, customer, email or tracking #…" />
         <FilterSelect
           label="Status"
           paramKey="status"

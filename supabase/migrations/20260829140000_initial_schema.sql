@@ -15,7 +15,9 @@
 --             defaultShipping/defaultBilling (Step 8),
 --             Order cartId/billingAddressId/billingAddress + PENDING_PAYMENT (Step 9),
 --             ShippingMethod + Order shippingMethodId/Code/Name (Step 11),
---             Order placedAt + paymentStatus indexes for admin order list (Step 12).
+--             Order placedAt + paymentStatus indexes for admin order list (Step 12),
+--             Order courier/courierName/trackingNumber/trackingUrl/shippedAt/
+--             deliveredAt/fulfillmentNote + courier index (Step 13).
 -- ============================================================================
 
 -- CreateSchema
@@ -365,6 +367,13 @@ CREATE TABLE "Order" (
     "shippingMethod" TEXT NOT NULL DEFAULT 'standard',
     "shippingMethodCode" TEXT,
     "shippingMethodName" TEXT,
+    "courier" TEXT,
+    "courierName" TEXT,
+    "trackingNumber" TEXT,
+    "trackingUrl" TEXT,
+    "shippedAt" TIMESTAMP(3),
+    "deliveredAt" TIMESTAMP(3),
+    "fulfillmentNote" TEXT,
     "note" TEXT,
     "placedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -664,6 +673,9 @@ CREATE INDEX "Order_placedAt_idx" ON "Order"("placedAt");
 
 -- CreateIndex
 CREATE INDEX "Order_paymentStatus_idx" ON "Order"("paymentStatus");
+
+-- CreateIndex
+CREATE INDEX "Order_courier_idx" ON "Order"("courier");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ShippingMethod_code_key" ON "ShippingMethod"("code");

@@ -6,7 +6,13 @@ import { getCurrentAdmin, requirePermission } from "@/lib/admin/rbac";
 import { getAdminOrder } from "@/lib/admin/orders";
 import { PageHeader } from "@/components/admin/ui";
 import { OrderDetailView } from "@/components/admin/orders/order-detail-view";
-import { ORDER_STATUS_TRANSITIONS, isCancellable, isOrderStatus } from "@/lib/orders/status";
+import {
+  ORDER_STATUS_TRANSITIONS,
+  isCancellable,
+  isFulfillmentStatus,
+  isOrderStatus,
+} from "@/lib/orders/status";
+import { isStorePickupCode } from "@/lib/orders/couriers";
 
 export async function generateMetadata({
   params,
@@ -30,10 +36,12 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
   if (!order) notFound();
 
   const canManage = admin.isSuperAdmin || admin.permissions.has("manage_orders");
-  const forwardStatuses = isOrderStatus(order.status)
-    ? ORDER_STATUS_TRANSITIONS[order.status]
-    : [];
+  // The generic "Move to" control only handles the pre-fulfilment step
+  // (… → PROCESSING). Ship / out-for-delivery / deliver are the fulfilment panel.
+  const forwardStatuses = (isOrderStatus(order.status) ? ORDER_STATUS_TRANSITIONS[order.status] : [])
+    .filter((s) => !isFulfillmentStatus(s));
   const cancellable = isCancellable(order.status);
+  const storePickup = isStorePickupCode(order.shippingMethodCode);
 
   return (
     <div>
@@ -54,6 +62,7 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
         forwardStatuses={forwardStatuses}
         cancellable={cancellable}
         canManage={canManage}
+        storePickup={storePickup}
       />
     </div>
   );

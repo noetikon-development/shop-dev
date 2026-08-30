@@ -114,9 +114,11 @@ export function OrderAdminActions({
         </div>
       ) : (
         <p className="mt-2 text-sm text-ink-soft">
-          No forward status change is available from{" "}
-          <span className="font-medium text-ink">{orderStatusLabel(status)}</span>
-          {status === "PENDING_PAYMENT" && " — the next step is payment, which isn’t enabled yet"}.
+          {status === "PENDING_PAYMENT"
+            ? "The next step is payment, which isn’t enabled yet."
+            : status === "PROCESSING" || status === "SHIPPED" || status === "OUT_FOR_DELIVERY"
+              ? "Use the Fulfilment panel below to ship, update tracking and mark the order delivered."
+              : `No status change is available from ${orderStatusLabel(status)}.`}
         </p>
       )}
 

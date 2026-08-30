@@ -10,6 +10,7 @@ import {
   paymentStatusTone,
   PAYMENT_STATUS_LABEL,
 } from "@/lib/orders/status";
+import { courierLabel } from "@/lib/orders/couriers";
 import type { AdminOrderRow } from "@/lib/admin/orders";
 
 export function OrdersTable({ rows, searching }: { rows: AdminOrderRow[]; searching: boolean }) {
@@ -42,7 +43,16 @@ export function OrdersTable({ rows, searching }: { rows: AdminOrderRow[]; search
       key: "status",
       header: "Status",
       cell: (r) => (
-        <StatusBadge tone={orderStatusTone(r.status)}>{orderStatusLabel(r.status)}</StatusBadge>
+        <div className="min-w-0">
+          <StatusBadge tone={orderStatusTone(r.status)}>{orderStatusLabel(r.status)}</StatusBadge>
+          {(r.courier || r.trackingNumber) && (
+            <p className="mt-1 truncate text-xs text-ink-faint">
+              {[r.courier ? courierLabel(r.courier, r.courierName) : null, r.trackingNumber]
+                .filter(Boolean)
+                .join(" · ")}
+            </p>
+          )}
+        </div>
       ),
     },
     {

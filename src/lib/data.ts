@@ -587,6 +587,46 @@ export async function getOrderByNumber(orderNumber: string) {
   };
 }
 
+/**
+ * Public order tracking (Step 13). Looked up by order number + the email used at
+ * checkout. Returns ONLY information that is safe to show on the public /track
+ * page — no customer email/phone, no address, no billing, no prices, no internal
+ * fulfilment note, and no free-text event detail (which could carry an admin's
+ * cancellation reason). Returns null when the order number or email don't match.
+ */
+export async function getPublicTracking(orderNumber: string, email: string) {
+  const order = await prisma.order.findUnique({
+    where: { orderNumber },
+    select: {
+      orderNumber: true,
+      email: true,
+      status: true,
+      placedAt: true,
+      shippingMethodCode: true,
+      shippingMethodName: true,
+      courier: true,
+      courierName: true,
+      trackingNumber: true,
+      trackingUrl: true,
+      shippedAt: true,
+      deliveredAt: true,
+      items: { select: { name: true, variantLabel: true, quantity: true }, orderBy: { id: "asc" } },
+      events: {
+        orderBy: { createdAt: "asc" },
+        select: { status: true, title: true, location: true, createdAt: true },
+      },
+    },
+  });
+  if (!order) return null;
+  if (!email || order.email.trim().toLowerCase() !== email.trim().toLowerCase()) return null;
+
+  const { email: _omit, ...safe } = order;
+  void _omit;
+  return safe;
+}
+
+export type PublicTracking = NonNullable<Awaited<ReturnType<typeof getPublicTracking>>>;
+
 export async function getUserOrders(userId: string) {
   const orders = await prisma.order.findMany({
     where: { userId },

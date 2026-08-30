@@ -44,6 +44,9 @@ export type AdminOrderRow = {
   paymentStatus: string;
   paymentMethod: string;
   shippingMethodLabel: string;
+  courier: string | null;
+  courierName: string | null;
+  trackingNumber: string | null;
   itemCount: number;
   grandTotal: number;
 };
@@ -77,6 +80,7 @@ export async function listAdminOrders(filters: AdminOrderListFilters) {
         OR: [
           { orderNumber: { contains: q, mode: "insensitive" } },
           { email: { contains: q, mode: "insensitive" } },
+          { trackingNumber: { contains: q, mode: "insensitive" } },
           { user: { is: { name: { contains: q, mode: "insensitive" } } } },
           { user: { is: { email: { contains: q, mode: "insensitive" } } } },
         ],
@@ -114,6 +118,9 @@ export async function listAdminOrders(filters: AdminOrderListFilters) {
         paymentMethod: true,
         shippingMethod: true,
         shippingMethodName: true,
+        courier: true,
+        courierName: true,
+        trackingNumber: true,
         grandTotal: true,
         user: { select: { name: true, email: true } },
         _count: { select: { items: true } },
@@ -133,6 +140,9 @@ export async function listAdminOrders(filters: AdminOrderListFilters) {
     paymentStatus: o.paymentStatus,
     paymentMethod: o.paymentMethod,
     shippingMethodLabel: shippingLabel(o),
+    courier: o.courier,
+    courierName: o.courierName,
+    trackingNumber: o.trackingNumber,
     itemCount: o._count.items,
     grandTotal: o.grandTotal,
   }));
@@ -185,6 +195,13 @@ export async function getAdminOrder(id: string) {
       shippingMethodName: true,
       shippingAddress: true,
       billingAddress: true,
+      courier: true,
+      courierName: true,
+      trackingNumber: true,
+      trackingUrl: true,
+      shippedAt: true,
+      deliveredAt: true,
+      fulfillmentNote: true,
       user: { select: { id: true, name: true, email: true, phone: true } },
       items: {
         orderBy: { id: "asc" },
@@ -227,6 +244,8 @@ export async function getAdminOrder(id: string) {
     ...order,
     placedAt: order.placedAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
+    shippedAt: order.shippedAt?.toISOString() ?? null,
+    deliveredAt: order.deliveredAt?.toISOString() ?? null,
     events: order.events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
     shippingAddress,
     billingAddress: parseAddress(order.billingAddress),

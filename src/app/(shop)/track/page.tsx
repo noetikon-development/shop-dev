@@ -1,20 +1,21 @@
 import type { Metadata } from "next";
 import { Package, Search } from "lucide-react";
-import { getOrderByNumber } from "@/lib/data";
-import { OrderDetail } from "@/components/order/order-detail";
+import { getPublicTracking } from "@/lib/data";
+import { PublicOrderTracking } from "@/components/order/public-tracking";
 
-export const metadata: Metadata = { title: "Track your order" };
+export const metadata: Metadata = { title: "Track your order", robots: { index: false } };
 
 export default async function TrackPage({ searchParams }: PageProps<"/track">) {
   const sp = await searchParams;
   const orderNumber = typeof sp.order === "string" ? sp.order.trim() : "";
-  const email = typeof sp.email === "string" ? sp.email.trim().toLowerCase() : "";
+  const email = typeof sp.email === "string" ? sp.email.trim() : "";
 
-  const order = orderNumber ? await getOrderByNumber(orderNumber) : null;
-  const emailMatches = order && (!email || order.email.toLowerCase() === email);
-  const showResult = order && emailMatches;
+  // The lookup requires BOTH the order number and the checkout email — the
+  // tracking view exposes courier / tracking data, so a guessable order number
+  // alone must not unlock it. getPublicTracking returns null unless both match.
+  const order = orderNumber && email ? await getPublicTracking(orderNumber, email) : null;
   const notFoundMsg =
-    orderNumber && (!order || !emailMatches)
+    orderNumber && email && !order
       ? "We couldn’t find an order with those details. Check the order number and the email used at checkout."
       : null;
 
@@ -34,7 +35,7 @@ export default async function TrackPage({ searchParams }: PageProps<"/track">) {
             name="order"
             defaultValue={orderNumber}
             required
-            placeholder="AX-XXXXXX-XXXX"
+            placeholder="AX-XXXXXX-XXXXX"
             className="field"
             aria-label="Order number"
           />
@@ -42,6 +43,7 @@ export default async function TrackPage({ searchParams }: PageProps<"/track">) {
             name="email"
             type="email"
             defaultValue={email}
+            required
             placeholder="Email address"
             className="field"
             aria-label="Email address"
@@ -56,9 +58,9 @@ export default async function TrackPage({ searchParams }: PageProps<"/track">) {
         )}
       </div>
 
-      {showResult && (
-        <div className="mx-auto mt-12 max-w-4xl">
-          <OrderDetail order={order} />
+      {order && (
+        <div className="mx-auto mt-12 max-w-3xl">
+          <PublicOrderTracking order={order} />
         </div>
       )}
     </div>

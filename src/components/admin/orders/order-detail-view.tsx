@@ -11,6 +11,7 @@ import {
 } from "@/lib/orders/status";
 import type { AdminOrderDetail } from "@/lib/admin/orders";
 import { OrderAdminActions } from "./order-admin-actions";
+import { FulfillmentPanel } from "./fulfillment-panel";
 
 type Order = NonNullable<AdminOrderDetail>;
 
@@ -49,11 +50,13 @@ export function OrderDetailView({
   forwardStatuses,
   cancellable,
   canManage,
+  storePickup,
 }: {
   order: Order;
   forwardStatuses: string[];
   cancellable: boolean;
   canManage: boolean;
+  storePickup: boolean;
 }) {
   const paymentMethod = PAYMENT_METHODS.find((p) => p.id === order.paymentMethod);
   const shippingMethodName =
@@ -191,6 +194,22 @@ export function OrderDetailView({
           forwardStatuses={forwardStatuses}
           cancellable={cancellable}
           canManage={canManage}
+        />
+
+        <FulfillmentPanel
+          canManage={canManage}
+          f={{
+            orderId: order.id,
+            status: order.status,
+            storePickup,
+            courier: order.courier,
+            courierName: order.courierName,
+            trackingNumber: order.trackingNumber,
+            trackingUrl: order.trackingUrl,
+            shippedAt: order.shippedAt,
+            deliveredAt: order.deliveredAt,
+            fulfillmentNote: order.fulfillmentNote,
+          }}
         />
 
         <Card>
