@@ -3,16 +3,25 @@ import { CategoryTiles } from "@/components/home/category-tiles";
 import { FeatureBand } from "@/components/home/feature-band";
 import { ValueProps } from "@/components/home/value-props";
 import { ProductRail } from "@/components/product-rail";
+import { HomepageBlocks } from "@/components/home/homepage-blocks";
 import {
   getBestSellers,
   getCategoryTree,
   getNewArrivals,
   getOnSale,
 } from "@/lib/data";
+import { getHomepageBlocks } from "@/lib/content";
 
 export default async function HomePage() {
-  const [tree, newArrivals, bestSellers, onSale] = await Promise.all([
-    getCategoryTree(),
+  const [tree, blocks] = await Promise.all([getCategoryTree(), getHomepageBlocks()]);
+
+  // CMS-driven homepage when an admin has published blocks; otherwise the
+  // original built-in layout (so the storefront always renders).
+  if (blocks.length > 0) {
+    return <HomepageBlocks blocks={blocks} tree={tree} />;
+  }
+
+  const [newArrivals, bestSellers, onSale] = await Promise.all([
     getNewArrivals(10),
     getBestSellers(10),
     getOnSale(10),

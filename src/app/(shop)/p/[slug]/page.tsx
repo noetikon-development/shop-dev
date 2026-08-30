@@ -16,7 +16,7 @@ import { DetailsAccordion } from "@/components/pdp/details-accordion";
 import { Reviews } from "@/components/pdp/reviews";
 import { ProductQA } from "@/components/pdp/product-qa";
 import { ProductRail } from "@/components/product-rail";
-import { SITE } from "@/lib/constants";
+import { getSiteSettings } from "@/lib/site-settings";
 
 export async function generateMetadata({
   params,
@@ -24,11 +24,12 @@ export async function generateMetadata({
   const { slug } = await params;
   const product = await getProductBySlug(slug);
   if (!product) return { title: "Not found" };
+  const settings = await getSiteSettings();
   return {
     title: product.name,
     description: product.shortDescription,
     openGraph: {
-      title: `${product.name} | ${SITE.brand}`,
+      title: `${product.name} | ${settings.brand}`,
       description: product.shortDescription,
     },
   };

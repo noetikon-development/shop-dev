@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { getCategoryTree } from "@/lib/data";
+import { getSiteSettings } from "@/lib/site-settings";
 import { Logo } from "@/components/logo";
 import { MegaMenu } from "@/components/header/mega-menu";
 import { MobileMenu } from "@/components/header/mobile-menu";
@@ -17,7 +18,11 @@ const ANNOUNCEMENTS = [
 ];
 
 export async function SiteHeader() {
-  const [tree, user] = await Promise.all([getCategoryTree(), getCurrentUser()]);
+  const [tree, user, settings] = await Promise.all([
+    getCategoryTree(),
+    getCurrentUser(),
+    getSiteSettings(),
+  ]);
   const featured = tree.filter((c) => c.featured);
   const displayName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0];
 
@@ -39,7 +44,7 @@ export async function SiteHeader() {
         <div className="container-page">
           <div className="flex h-16 items-center gap-4">
             <MenuTrigger />
-            <Logo className="h-10 shrink-0" />
+            <Logo className="h-10 shrink-0" src={settings.logoUrl} alt={settings.brand} />
 
             <div className="ml-4 hidden flex-1 md:block lg:ml-8">
               <HeaderSearch />

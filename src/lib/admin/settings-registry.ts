@@ -18,6 +18,7 @@ export type SettingType =
   | "boolean"
   | "url"
   | "email"
+  | "media" // a MediaAsset id (picked from the media library)
   | "json";
 
 export type SettingGroupKey =
@@ -69,8 +70,8 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "store.tagline", label: "Tagline", type: "string", group: "identity", default: "" },
   { key: "store.description", label: "Description", type: "text", group: "identity", default: "" },
   { key: "store.status", label: "Store status", type: "string", group: "identity", default: "open", help: "open | maintenance | closed" },
-  { key: "store.logoMediaId", label: "Logo", type: "string", group: "identity", default: "", help: "MediaAsset id, set from the media library later." },
-  { key: "store.faviconMediaId", label: "Favicon", type: "string", group: "identity", default: "" },
+  { key: "store.logoMediaId", label: "Logo", type: "media", group: "identity", default: "", help: "Storefront logo. Leave blank to use the built-in AXIARO mark." },
+  { key: "store.faviconMediaId", label: "Favicon", type: "media", group: "identity", default: "", help: "Browser-tab icon (square PNG recommended). Blank uses the built-in icon." },
 
   // Contact
   { key: "contact.email", label: "Support email", type: "email", group: "contact", default: "" },
@@ -79,6 +80,7 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "contact.addressLine2", label: "Address line 2", type: "string", group: "contact", default: "" },
   { key: "contact.city", label: "City", type: "string", group: "contact", default: "" },
   { key: "contact.country", label: "Country", type: "string", group: "contact", default: "" },
+  { key: "contact.hours", label: "Operating hours", type: "text", group: "contact", default: "", help: "Shown on the contact page. Free text, e.g. 'Mon–Fri 9am–6pm'." },
 
   // Business
   { key: "business.legalName", label: "Legal name", type: "string", group: "business", default: "" },
@@ -93,6 +95,7 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   // Social
   { key: "social.facebook", label: "Facebook", type: "url", group: "social", default: "" },
   { key: "social.instagram", label: "Instagram", type: "url", group: "social", default: "" },
+  { key: "social.x", label: "X / Twitter", type: "url", group: "social", default: "" },
   { key: "social.tiktok", label: "TikTok", type: "url", group: "social", default: "" },
   { key: "social.youtube", label: "YouTube", type: "url", group: "social", default: "" },
 
@@ -100,7 +103,8 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "seo.titleTemplate", label: "Title template", type: "string", group: "seo", default: "%s", help: "%s is replaced by the page title." },
   { key: "seo.defaultTitle", label: "Default title", type: "string", group: "seo", default: "" },
   { key: "seo.defaultDescription", label: "Default meta description", type: "text", group: "seo", default: "" },
-  { key: "seo.ogImageMediaId", label: "Default share image", type: "string", group: "seo", default: "" },
+  { key: "seo.ogImageMediaId", label: "Default share image", type: "media", group: "seo", default: "", help: "Media library image used when a page has no image of its own." },
+  { key: "seo.indexable", label: "Allow search engine indexing", type: "boolean", group: "seo", default: true, help: "When off, robots.txt disallows all crawlers (use for staging)." },
 
   // Payments (non-sensitive)
   { key: "payments.enabledMethods", label: "Enabled methods", type: "json", group: "payments", default: ["COD", "CARD", "GCASH"] },
@@ -137,3 +141,8 @@ export function decodeSettingValue(raw: string, type: SettingType): unknown {
   }
   return raw;
 }
+
+/** Registry field keyed by its setting key. */
+export const SETTING_FIELD_BY_KEY: Record<string, SettingField> = Object.fromEntries(
+  SETTINGS_REGISTRY.map((f) => [f.key, f]),
+);

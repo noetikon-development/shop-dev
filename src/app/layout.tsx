@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 import { Fraunces, Inter } from "next/font/google";
 import { Toaster } from "sonner";
-import { SITE } from "@/lib/constants";
 import { getSiteUrl } from "@/lib/site-url";
+import { getSiteSettings } from "@/lib/site-settings";
 import { Providers } from "@/components/providers";
 import "./globals.css";
 
@@ -19,21 +19,25 @@ const inter = Inter({
   display: "swap",
 });
 
-export const metadata: Metadata = {
-  metadataBase: new URL(getSiteUrl()),
-  title: {
-    default: `${SITE.brand} — ${SITE.tagline}`,
-    template: `%s | ${SITE.brand}`,
-  },
-  description: SITE.description,
-  applicationName: SITE.brand,
-  openGraph: {
-    siteName: SITE.brand,
-    title: `${SITE.brand} — ${SITE.tagline}`,
-    description: SITE.description,
-    type: "website",
-  },
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const s = await getSiteSettings();
+  const template = s.seo.titleTemplate.includes("%s") ? s.seo.titleTemplate : `%s · ${s.brand}`;
+  return {
+    metadataBase: new URL(getSiteUrl()),
+    title: { default: s.seo.defaultTitle, template },
+    description: s.seo.defaultDescription,
+    applicationName: s.brand,
+    ...(s.faviconUrl ? { icons: { icon: s.faviconUrl } } : {}),
+    robots: s.seo.indexable ? undefined : { index: false, follow: false },
+    openGraph: {
+      siteName: s.brand,
+      title: s.seo.defaultTitle,
+      description: s.seo.defaultDescription,
+      type: "website",
+      ...(s.seo.ogImageUrl ? { images: [{ url: s.seo.ogImageUrl }] } : {}),
+    },
+  };
+}
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (

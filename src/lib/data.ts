@@ -610,6 +610,38 @@ export async function getProductCardsBySlugs(slugs: string[]): Promise<ProductCa
   return cards.sort((a, b) => (order.get(a.slug) ?? 0) - (order.get(b.slug) ?? 0));
 }
 
+/** For CMS product rails with a hand-picked list. Preserves the given order. */
+export const getProductCardsByIds = unstable_cache(
+  async (ids: string[]): Promise<ProductCardView[]> => {
+    if (!ids.length) return [];
+    const rows = await prisma.product.findMany({
+      where: { id: { in: ids }, status: "ACTIVE" },
+      select: cardSelect,
+    });
+    const cards = (rows as unknown as CardRow[]).map(toCard);
+    const order = new Map(ids.map((s, i) => [s, i]));
+    return cards.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
+  },
+  ["cms-product-cards-by-id"],
+  { revalidate: 120, tags: ["products", "content"] },
+);
+
+/** For CMS product rails scoped to a category. */
+export const getCategoryRail = unstable_cache(
+  async (categorySlug: string, take = 10): Promise<ProductCardView[]> => {
+    if (!categorySlug) return [];
+    const rows = await prisma.product.findMany({
+      where: { status: "ACTIVE", category: { slug: categorySlug } },
+      orderBy: { soldCount: "desc" },
+      take,
+      select: cardSelect,
+    });
+    return (rows as unknown as CardRow[]).map(toCard);
+  },
+  ["cms-category-rail"],
+  { revalidate: 120, tags: ["products", "content"] },
+);
+
 export async function getAllProductSlugs() {
   const rows = await prisma.product.findMany({ select: { slug: true } });
   return rows.map((r) => r.slug);

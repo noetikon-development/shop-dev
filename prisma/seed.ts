@@ -1,6 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { seedRbac } from "../scripts/seed-rbac";
 import { seedAdminFoundation } from "../scripts/seed-admin-foundation";
+import { seedCms } from "../scripts/seed-cms";
 
 // Seeding is a one-off admin task — use the direct / session-pooler connection
 // so bulk writes and transactions aren't affected by the pgbouncer pooler.
@@ -1473,6 +1474,9 @@ async function main() {
     });
     console.log("Orders: 2 sample orders for demo@axiaro.test");
   }
+
+  // CMS — homepage blocks + demo content pages (Step 16)
+  await seedCms(prisma, (m) => console.log(`  ${m}`));
 
   console.log("Done.");
 }

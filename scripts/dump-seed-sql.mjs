@@ -12,6 +12,8 @@ const TABLES = [
   "Category", "Product", "ProductImage", "ProductOption",
   "ProductOptionValue", "Variant", "VariantOptionValue", "Inventory",
   "Coupon", "StoreSetting", "ShippingMethod",
+  // CMS demo content (Step 16) — homepage blocks + standalone pages.
+  "ContentPage", "ContentBlock",
   // RBAC catalogue (roles, permissions, grants) — reference data, not per-user.
   "Permission", "Role", "RolePermission",
 ];

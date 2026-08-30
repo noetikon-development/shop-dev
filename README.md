@@ -42,6 +42,7 @@ npm run db:seed:config       # inventory + store settings
 npm run db:seed:auth         # demo accounts in Supabase Auth + link to User rows
 npm run db:seed:rbac         # roles + permissions + link admin@axiaro.test -> SUPER_ADMIN
 npm run db:seed:settings     # store-settings registry defaults (StoreSetting rows)
+npm run db:seed:cms          # homepage blocks + demo content pages (create-if-missing)
 npm run storage:setup        # create the Supabase Storage "media" bucket
 npm run dev                  # http://localhost:3400
 ```
@@ -530,6 +531,58 @@ author, or another customer's order.
   `.archived`, `question.*`, `answer.created` / `.updated` / `.archived`).
 - **Not in scope**: review/question notification emails (Step 17), review photos,
   helpful-votes, seller responses to reviews, spam scoring.
+
+## Full CMS & store settings (Step 16)
+
+Completes the Step 4 foundation so a store admin can run AXIARO without code
+changes. **No new models** — everything reuses `ContentPage`, `ContentBlock`,
+`MediaAsset`, `StoreSetting` and Supabase Storage.
+
+- **Store settings** (`/admin/settings`) — editable grouped forms (identity,
+  contact, business, regional, social, SEO). Keys + types live in
+  `src/lib/admin/settings-registry.ts`; `src/lib/admin/settings-actions.ts`
+  validates every value by its declared type (https-only URLs, valid emails,
+  numeric bounds, media ids must exist) and writes **only registered keys**.
+  Reads for the storefront go through `src/lib/site-settings.ts` (cached, tag
+  `settings`). Sensitive credentials stay in env vars — never in the table.
+- **Branding** — `store.logoMediaId` / `store.faviconMediaId` (blank = the
+  built-in AXIARO mark / icon, so the demo is unchanged). `<Logo>` takes an
+  optional `src`; the root layout sets `<link rel=icon>` from the favicon
+  setting.
+- **Homepage** (`/admin/content/homepage`) — the homepage is a list of typed
+  `ContentBlock`s (`hero`, `category_tiles`, `product_rail`, `feature_grid`,
+  `value_props`, `rich_text`) with reorder / publish / draft. Product rails
+  reference **product IDs / category slugs only** — names and prices always come
+  from `Product`. Block payloads are Zod-validated on write and on read (a bad
+  row is skipped, never rendered). If no blocks are published the storefront
+  falls back to the built-in homepage.
+- **Content pages** (`/admin/content/pages`) — standalone pages at
+  `/pages/<slug>` with title / slug / Markdown body / SEO fields /
+  draft·published. Body is rendered by `src/lib/markdown.tsx` **to React
+  elements** — no `dangerouslySetInnerHTML`, no HTML passthrough, link schemes
+  restricted to internal / https / mailto. The footer links to these pages when
+  they're published.
+- **Media library** (`/admin/media`) — search / folder / type filters,
+  pagination, alt-text editing, copy-URL, and a reusable `<MediaPickerField>`.
+  Uploads are validated server-side by **magic bytes** (not the browser's MIME
+  type); **SVG is rejected**; PNG/JPG/WEBP/GIF/PDF only; ≤ 8 MB; object paths are
+  slug + time-prefixed with `upsert:false` (no overwrite / traversal). Deletes
+  are blocked while an asset is referenced by a product, category, content block
+  or setting.
+- **SEO** — `seo.indexable` drives `robots.txt`; `seo.defaultTitle` /
+  `titleTemplate` / `defaultDescription` / `ogImageMediaId` feed the root
+  `generateMetadata`. `sitemap.xml` now includes published content pages.
+- **Caching** — settings writes `revalidateTag("settings")`; content writes
+  `revalidateTag("content")`. Storefront updates within a minute, no redeploy.
+- **RBAC** — reuses `view_content` / `manage_content` (content + media) and
+  `view_settings` / `manage_settings` (settings). ADMIN has `view_settings` but
+  **not** `manage_settings` — settings writes require `manage_settings`
+  server-side. Every mutation is audited (`settings.updated`, `content.page_*`,
+  `content.block_*`, `media.*`).
+- **Seed** — `scripts/seed-cms.ts` (`npm run db:seed:cms`) creates the homepage
+  blocks (reproducing the built-in homepage) and demo pages (About, Contact,
+  FAQ, Shipping, Returns, Care + Privacy/Terms/Cookies/Cancellation clearly
+  marked **demo content, not legal advice**). Non-destructive: create-if-missing.
 
 ## Data model
 

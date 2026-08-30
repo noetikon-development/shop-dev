@@ -18,16 +18,26 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   ];
 
   try {
-    const [products, categories] = await Promise.all([
+    const [products, categories, pages] = await Promise.all([
       prisma.product.findMany({
         where: { status: "ACTIVE" },
         select: { slug: true, updatedAt: true },
       }),
       prisma.category.findMany({ where: { active: true }, select: { slug: true } }),
+      prisma.contentPage.findMany({
+        where: { status: "PUBLISHED" },
+        select: { slug: true, updatedAt: true },
+      }),
     ]);
 
     return [
       ...staticRoutes,
+      ...pages.map((p) => ({
+        url: `${base}/pages/${p.slug}`,
+        lastModified: p.updatedAt,
+        changeFrequency: "monthly" as const,
+        priority: 0.4,
+      })),
       ...categories.map((c) => ({
         url: `${base}/c/${c.slug}`,
         changeFrequency: "weekly" as const,
