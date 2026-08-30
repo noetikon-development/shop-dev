@@ -3,17 +3,16 @@ import {
   SHIPPING_METHODS,
 } from "@/lib/constants";
 
+/**
+ * Cart-page display maths. NOT authoritative — the server recalculates every
+ * monetary value at checkout (`src/lib/checkout.ts`). The coupon discount passed
+ * in here has already been computed server-side by `evaluateCoupon`
+ * (`src/lib/coupons.ts`); this function never derives a discount itself.
+ */
+
 export type PricedLine = {
   unitPrice: number;
   quantity: number;
-};
-
-export type CouponInput = {
-  code: string;
-  type: string; // PERCENT | FIXED | FREESHIP
-  value: number;
-  minSubtotal: number;
-  maxDiscount: number | null;
 };
 
 export type OrderTotals = {
@@ -26,41 +25,18 @@ export type OrderTotals = {
   discountTotal: number;
   grandTotal: number;
   couponApplied: string | null;
-  couponError: string | null;
 };
 
 export function calcSubtotal(lines: PricedLine[]) {
   return lines.reduce((sum, l) => sum + l.unitPrice * l.quantity, 0);
 }
 
-export function couponDiscount(
-  coupon: CouponInput | null,
-  subtotal: number,
-): { discount: number; freeShip: boolean; error: string | null } {
-  if (!coupon) return { discount: 0, freeShip: false, error: null };
-  if (subtotal < coupon.minSubtotal) {
-    return {
-      discount: 0,
-      freeShip: false,
-      error: `Add ${((coupon.minSubtotal - subtotal) / 100).toLocaleString("en-PH", {
-        style: "currency",
-        currency: "PHP",
-        maximumFractionDigits: 0,
-      })} more to use ${coupon.code}`,
-    };
-  }
-  if (coupon.type === "FREESHIP") return { discount: 0, freeShip: true, error: null };
-  let discount =
-    coupon.type === "PERCENT" ? Math.round((subtotal * coupon.value) / 100) : coupon.value;
-  if (coupon.maxDiscount != null) discount = Math.min(discount, coupon.maxDiscount);
-  discount = Math.min(discount, subtotal);
-  return { discount, freeShip: false, error: null };
-}
-
 export function computeTotals(opts: {
   lines: PricedLine[];
   shippingMethodId?: string;
-  coupon?: CouponInput | null;
+  /** Server-computed discount amount (centavos). Never derived on the client. */
+  discount?: number;
+  couponCode?: string | null;
 }): OrderTotals {
   const { lines } = opts;
   const method =
@@ -68,12 +44,10 @@ export function computeTotals(opts: {
   const subtotal = calcSubtotal(lines);
   const itemCount = lines.reduce((n, l) => n + l.quantity, 0);
 
-  const { discount, freeShip, error } = couponDiscount(opts.coupon ?? null, subtotal);
+  // Clamp defensively even though the server already did.
+  const discount = Math.max(0, Math.min(opts.discount ?? 0, subtotal));
 
-  const qualifiesFreeByThreshold = subtotal >= FREE_SHIPPING_THRESHOLD;
-  const freeShippingApplied =
-    itemCount > 0 && (qualifiesFreeByThreshold || freeShip);
-
+  const freeShippingApplied = itemCount > 0 && subtotal >= FREE_SHIPPING_THRESHOLD;
   const shippingFee = itemCount === 0 ? 0 : freeShippingApplied ? 0 : method.fee;
 
   const grandTotal = Math.max(0, subtotal - discount + shippingFee);
@@ -87,7 +61,6 @@ export function computeTotals(opts: {
     amountToFreeShipping: Math.max(0, FREE_SHIPPING_THRESHOLD - subtotal),
     discountTotal: discount,
     grandTotal,
-    couponApplied: opts.coupon && !error ? opts.coupon.code : null,
-    couponError: error,
+    couponApplied: discount > 0 ? (opts.couponCode ?? null) : null,
   };
 }

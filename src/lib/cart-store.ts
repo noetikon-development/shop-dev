@@ -2,8 +2,7 @@
 
 import { create } from "zustand";
 import { toast } from "sonner";
-import type { CouponInput } from "@/lib/pricing";
-import type { CartDTO, CartLineDTO } from "@/lib/cart";
+import type { CartCouponDTO, CartDTO, CartLineDTO } from "@/lib/cart";
 import {
   getCart,
   addToCart,
@@ -11,6 +10,8 @@ import {
   removeCartItem,
   clearCart,
   syncCart,
+  applyCoupon as applyCouponAction,
+  removeCoupon as removeCouponAction,
 } from "@/lib/cart-actions";
 
 /**
@@ -19,8 +20,9 @@ import {
  * its state with whatever the server returns. <CartProvider> drives hydration
  * and the guest→customer merge.
  *
- * The applied coupon lives here in memory only (it is display maths, not cart
- * persistence — see Step 7 notes). It resets on a full page reload.
+ * The applied coupon (Step 14) is persisted server-side on `Cart.couponCode`;
+ * this store just mirrors the server-evaluated `CartCouponDTO` returned with
+ * every cart payload, so it survives reloads and carries through to checkout.
  */
 
 export type CartLine = CartLineDTO;
@@ -30,7 +32,7 @@ type CartState = {
   subtotal: number;
   itemCount: number;
   hasIssues: boolean;
-  coupon: CouponInput | null;
+  coupon: CartCouponDTO | null;
   hydrated: boolean;
   pending: boolean;
 
@@ -45,7 +47,8 @@ type CartState = {
   setQuantity: (variantId: string, quantity: number) => Promise<void>;
   removeItem: (variantId: string) => Promise<void>;
   clear: () => Promise<void>;
-  setCoupon: (coupon: CouponInput | null) => void;
+  applyCoupon: (code: string) => Promise<{ ok: boolean; error?: string }>;
+  removeCoupon: () => Promise<void>;
   totalItems: () => number;
 };
 
@@ -64,6 +67,7 @@ export const useCart = create<CartState>()((set, get) => ({
       subtotal: dto.subtotal,
       itemCount: dto.itemCount,
       hasIssues: dto.hasIssues,
+      coupon: dto.coupon,
       hydrated: true,
     }),
 
@@ -127,6 +131,27 @@ export const useCart = create<CartState>()((set, get) => ({
     }
   },
 
-  setCoupon: (coupon) => set({ coupon }),
+  applyCoupon: async (code) => {
+    set({ pending: true });
+    try {
+      const res = await applyCouponAction({ code });
+      get().apply(res.cart);
+      if (res.ok && res.notice) toast.success(res.notice);
+      if (!res.ok && res.error) toast.error(res.error);
+      return { ok: res.ok, error: res.error };
+    } finally {
+      set({ pending: false });
+    }
+  },
+
+  removeCoupon: async () => {
+    set({ pending: true });
+    try {
+      get().apply((await removeCouponAction()).cart);
+    } finally {
+      set({ pending: false });
+    }
+  },
+
   totalItems: () => get().itemCount,
 }));

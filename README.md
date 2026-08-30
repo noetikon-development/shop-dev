@@ -437,11 +437,59 @@ status system — the "fulfilment status" is `Order.status`
 - The admin order list shows courier + tracking under the status badge (no extra
   column) and search matches the tracking number.
 
+## Coupons & discounts (Step 14)
+
+A reusable coupon system. **The discount is always calculated server-side** — the
+browser only ever submits a coupon *code*; validity, the discount amount, the
+subtotal and the total are recomputed on the server at cart-apply and again at
+checkout.
+
+- **`Coupon` model** (extended): `code` (canonical UPPERCASE, unique),
+  `description`, `type` (`PERCENT` / `FIXED`), `value`, `minSubtotal`,
+  `maxDiscount` (caps a %), `startsAt` / `expiresAt`, `usageLimit` (global),
+  `perCustomerLimit`, `active`, `archivedAt`, `createdAt` / `updatedAt`. The
+  lifecycle **state** (Draft / Scheduled / Active / Expired / Disabled /
+  Archived) is *derived* — no second status column.
+- **`CouponRedemption` model** (new): one row per successful application
+  (`couponId`, `userId`, `orderId` unique, `code` + `amount` snapshot). This is
+  the authoritative record for usage limits — `Coupon.usedCount` is just a loose
+  mirror.
+- **`src/lib/coupons.ts`** (pure): `normalizeCouponCode`, `COUPON_CODE_RE`,
+  `couponState`, and `evaluateCoupon(coupon, subtotal, now)` — the one discount
+  evaluator. It clamps: never negative, never more than the subtotal (so the
+  final subtotal can’t go below zero); the discount applies to the **merchandise
+  subtotal only** — shipping is untouched (Step 11 rules unchanged).
+- **Cart** (`Cart.couponCode`): the applied code is persisted server-side so it
+  survives reloads and carries to checkout. `loadCart` returns a server-evaluated
+  `coupon` (code, discount, valid, error). `applyCartCouponCore` /
+  `removeCartCouponCore` back the existing promo field on the cart page and a new
+  one on checkout.
+- **Checkout** (`createOrderFromCart`): re-reads `Cart.couponCode`, re-evaluates
+  against the recalculated subtotal + server clock, then — **inside the order
+  transaction** — takes `SELECT … FOR UPDATE` on the `Coupon` row and COUNTs
+  `CouponRedemption`s whose order isn’t `CANCELLED`, enforcing the global and
+  per-customer limits **race-safely** (two concurrent last-use checkouts: one
+  succeeds, one is rejected and rolled back). It writes the redemption row + the
+  order snapshot in the same locked section.
+- **Order snapshot** (§13): every order keeps `couponCode`, `discountType`,
+  `discountValue` and `discountTotal`. Editing, disabling or deleting the coupon
+  later never changes a historical order.
+- **Cancellation** (Step 12, unchanged): a cancelled order’s redemption row stays
+  for audit but stops counting toward the limits — the customer’s entitlement is
+  freed, not lost.
+- **Admin** `/admin/marketing/coupons` (list / create / edit / activate /
+  deactivate / archive / detail with redemption history) — `view_coupons` /
+  `manage_coupons`, no new permission.
+- **Not in scope**: free-shipping coupons (`FREESHIP`-type coupons are rejected
+  this step), product/category targeting, BOGO, tiered promotions, loyalty
+  points.
+
 ## Data model
 
-`src/lib/data.ts` is the read layer (server-only). Mutations: `validateCoupon`
-in `src/lib/actions.ts`; addresses in `src/lib/addresses.ts`; cart in
-`src/lib/cart.ts`; checkout / orders in `src/lib/checkout.ts`.
+`src/lib/data.ts` is the read layer (server-only). Mutations: coupons in
+`src/lib/coupons.ts` + `src/lib/admin/coupon-actions.ts`; addresses in
+`src/lib/addresses.ts`; cart in `src/lib/cart.ts`; checkout / orders in
+`src/lib/checkout.ts`.
 Prices are integer centavos throughout; `formatPrice` renders PHP.
 
 ## Deploying to Vercel (Supabase Postgres)

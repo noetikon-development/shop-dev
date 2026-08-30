@@ -8,6 +8,8 @@ import {
   removeCartItemCore,
   clearCartCore,
   mergeGuestCartCore,
+  applyCartCouponCore,
+  removeCartCouponCore,
   MAX_QTY_PER_LINE,
   type CartDTO,
   type MergeNotice,
@@ -95,6 +97,26 @@ export async function removeCartItem(input: unknown): Promise<CartActionResult> 
 export async function clearCart(): Promise<CartActionResult> {
   await clearCartCore();
   return { ok: true, cart: await loadCart() };
+}
+
+// --- Coupon (Step 14) -----------------------------------------------------
+// The browser submits only the code. The discount, validity and totals are all
+// resolved server-side; the client just replaces its cart state with the result.
+
+const couponSchema = z.object({ code: z.string().min(1).max(32) });
+
+export async function applyCoupon(input: unknown): Promise<CartActionResult> {
+  const parsed = couponSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Invalid coupon code.", cart: await loadCart() };
+  }
+  const res = await applyCartCouponCore(parsed.data.code);
+  if (!res.ok) return { ok: false, error: res.error, cart: await loadCart() };
+  return { ok: true, notice: res.message, cart: res.cart };
+}
+
+export async function removeCoupon(): Promise<CartActionResult> {
+  return { ok: true, cart: await removeCartCouponCore() };
 }
 
 export type CartSyncResult = {

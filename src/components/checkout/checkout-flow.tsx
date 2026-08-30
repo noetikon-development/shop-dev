@@ -3,11 +3,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Lock, ShoppingBag, MapPin, Truck, CreditCard, Check } from "lucide-react";
+import { Loader2, Lock, ShoppingBag, MapPin, Truck, CreditCard, Check, Tag, X } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { useCart } from "@/lib/cart-store";
 import { placeOrder } from "@/lib/checkout-actions";
+import { applyCoupon, removeCoupon } from "@/lib/cart-actions";
 import { countryName } from "@/lib/countries";
 import { formatPrice, cn } from "@/lib/utils";
 import type { CheckoutData } from "@/lib/checkout";
@@ -38,7 +39,8 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       null,
     [summary.shippingMethods, methodId],
   );
-  const total = summary.subtotal + (shippingMethod?.effectiveRate ?? 0);
+  const discount = summary.discountTotal;
+  const total = Math.max(0, summary.subtotal - discount + (shippingMethod?.effectiveRate ?? 0));
 
   const effectiveBillingId = sameForBilling ? shippingId : billingId;
   const shipAddr = addresses.find((a) => a.id === shippingId) ?? null;
@@ -126,8 +128,8 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
     if (res.code === "STOCK" || res.code === "EMPTY" || res.code === "CART_GONE") {
       setBackToBag(true);
     }
-    if (res.code === "SHIPPING") {
-      // The method list may be stale — reload the page's server data.
+    if (res.code === "SHIPPING" || res.code === "COUPON") {
+      // The method list / coupon may be stale — reload the page's server data.
       router.refresh();
     }
   }
@@ -253,8 +255,18 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             ))}
           </ul>
 
+          <div className="mt-4 border-t border-line pt-4">
+            <CheckoutCouponField coupon={summary.coupon} />
+          </div>
+
           <dl className="mt-4 space-y-2 border-t border-line pt-4 text-sm">
             <Row label={`Subtotal (${summary.itemCount} item${summary.itemCount === 1 ? "" : "s"})`} value={formatPrice(summary.subtotal)} />
+            {discount > 0 && (
+              <div className="flex items-baseline justify-between text-sage">
+                <dt>Discount{summary.coupon ? ` · ${summary.coupon.code}` : ""}</dt>
+                <dd className="tabular-nums">−{formatPrice(discount)}</dd>
+              </div>
+            )}
             <Row
               label={shippingMethod ? `Shipping · ${shippingMethod.name}` : "Shipping"}
               value={(shippingMethod?.effectiveRate ?? 0) === 0 ? "Free" : formatPrice(shippingMethod!.effectiveRate)}
@@ -444,6 +456,81 @@ function Row({ label, value }: { label: string; value: string }) {
     <div className="flex items-baseline justify-between">
       <dt className="text-ink-soft">{label}</dt>
       <dd className="tabular-nums">{value}</dd>
+    </div>
+  );
+}
+
+function CheckoutCouponField({
+  coupon,
+}: {
+  coupon: CheckoutData["summary"]["coupon"];
+}) {
+  const router = useRouter();
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function apply() {
+    if (!code.trim() || busy) return;
+    setBusy(true);
+    const res = await applyCoupon({ code });
+    setBusy(false);
+    if (res.ok) {
+      setCode("");
+      toast.success(res.notice ?? "Coupon applied");
+    } else {
+      toast.error(res.error ?? "That code isn’t valid");
+    }
+    router.refresh();
+  }
+
+  async function remove() {
+    setBusy(true);
+    await removeCoupon();
+    setBusy(false);
+    router.refresh();
+  }
+
+  if (coupon?.valid) {
+    return (
+      <div className="flex items-center justify-between rounded-sm border border-sage/40 bg-sage-50 px-3 py-2 text-sm">
+        <span className="inline-flex items-center gap-2 font-medium text-sage">
+          <Tag size={13} /> {coupon.code} · −{formatPrice(coupon.discount)}
+        </span>
+        <button onClick={remove} disabled={busy} className="text-ink-faint hover:text-ink" aria-label="Remove coupon">
+          <X size={14} />
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex gap-2">
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value.toUpperCase())}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              apply();
+            }
+          }}
+          placeholder="Promo code"
+          className="field !py-2 text-sm uppercase"
+          aria-label="Promo code"
+        />
+        <button type="button" onClick={apply} disabled={busy} className="btn btn-outline shrink-0 !py-2 text-sm">
+          {busy ? <Loader2 size={13} className="animate-spin" /> : "Apply"}
+        </button>
+      </div>
+      {coupon && !coupon.valid && coupon.error && (
+        <p className="text-xs text-clay">
+          {coupon.code}: {coupon.error}{" "}
+          <button onClick={remove} className="underline">
+            Remove
+          </button>
+        </p>
+      )}
     </div>
   );
 }

@@ -93,10 +93,11 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `VariantOptionValue` | join: variant ↔ option value |
 | `Inventory` | 1:1 with `Variant`; `quantity`, `reserved`, `reorderPoint`. CHECK: `quantity ≥ 0`, `reserved ≥ 0`, `quantity ≥ reserved`, `reorderPoint ≥ 0` |
 | `InventoryAdjustment` | append-only stock-change history (Step 6): `previousQuantity`, signed `delta`, `newQuantity`, open-string `reason`, `note`, `actorUserId`. Excluded from `seed.sql` |
-| `Cart` | Step 7. Guest (`token`, httpOnly cookie) or customer (`userId`) cart; `status` ACTIVE/CONVERTED/ABANDONED. Partial unique index = one ACTIVE cart per user. CHECK: has an owner. Excluded from `seed.sql` |
+| `Cart` | Step 7. Guest (`token`, httpOnly cookie) or customer (`userId`) cart; `status` ACTIVE/CONVERTED/ABANDONED. Partial unique index = one ACTIVE cart per user. CHECK: has an owner. Step 14 adds `couponCode` (applied promo code — not authoritative). Excluded from `seed.sql` |
 | `CartItem` | Step 7. `@@unique([cartId, variantId])`; `priceSnapshot` is a display cache, not authoritative. CHECK: `0 < quantity ≤ 99`, `priceSnapshot ≥ 0`. Excluded from `seed.sql` |
 | `StoreSetting` | key/value store config, seeded from `src/lib/constants.ts` |
-| `Coupon` | promo codes |
+| `Coupon` | promo codes. Step 14 adds `perCustomerLimit` / `updatedAt` / `archivedAt`. Lifecycle state (Draft/Scheduled/Active/Expired/Disabled/Archived) is derived. Included in `seed.sql` |
+| `CouponRedemption` | Step 14. One row per successful coupon application (`orderId` unique); authoritative for global + per-customer usage limits (checkout locks the parent `Coupon` row, counts rows whose order isn't `CANCELLED`). Excluded from `seed.sql` |
 | `User` | application record only — **no password**; `supabaseUserId` unique link to `auth.users`; `role` is a coarse mirror of the RBAC tables |
 | `Address` | FK → `User` (cascade). Step 8: firstName/lastName/company/country + independent `defaultShipping`/`defaultBilling`. Partial unique indexes = at most one default of each type per user. CHECK: names non-empty. Excluded from `seed.sql` |
 | `Role` / `Permission` | RBAC catalogue; seeded from `src/lib/rbac/catalog.ts` — included in `seed.sql` |
@@ -107,7 +108,7 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `ContentPage` | standalone CMS pages (slug, title, body, SEO, status) — Step 4 foundation |
 | `ContentBlock` | data-driven managed blocks (hero/banner/collection…); `type` + JSON `data` |
 | `MediaAsset` | metadata for files in Supabase **Storage** (bucket `media`) — no binary data |
-| `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Step 11 adds `shippingMethodId` (FK → `ShippingMethod`, `SET NULL`) + immutable `shippingMethodCode` / `shippingMethodName` snapshot alongside the existing `shippingFee`. Step 12 adds `placedAt` + `paymentStatus` indexes for the admin order list. Step 13 adds fulfilment columns `courier` / `courierName` / `trackingNumber` / `trackingUrl` / `shippedAt` / `deliveredAt` / `fulfillmentNote` + a `courier` index. Excluded from `seed.sql` |
+| `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Step 11 adds `shippingMethodId` (FK → `ShippingMethod`, `SET NULL`) + immutable `shippingMethodCode` / `shippingMethodName` snapshot alongside the existing `shippingFee`. Step 12 adds `placedAt` + `paymentStatus` indexes for the admin order list. Step 13 adds fulfilment columns `courier` / `courierName` / `trackingNumber` / `trackingUrl` / `shippedAt` / `deliveredAt` / `fulfillmentNote` + a `courier` index. Step 14 adds `discountType` / `discountValue` (coupon snapshot, alongside the existing `couponCode` / `discountTotal`). Excluded from `seed.sql` |
 | `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; excluded from `seed.sql` |
 | `ShippingMethod` | Step 11. Configurable delivery option shown at checkout: `code` unique, `name`, `description`, `rate` (centavos), `currency`, `active`, `sortOrder`. CHECK: `rate ≥ 0`. Included in `seed.sql` (demo methods STANDARD / EXPRESS / PICKUP) |
 

@@ -4,7 +4,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { adjustStock } from "@/lib/inventory";
-import { loadCart } from "@/lib/cart";
+import { loadCart, activeRedemptionCount } from "@/lib/cart";
+import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
 import {
   getActiveShippingMethods,
@@ -56,12 +57,22 @@ export type CheckoutShippingMethod = ShippingMethodDTO & {
   freeApplied: boolean;
 };
 
+export type CheckoutCoupon = {
+  code: string;
+  description: string | null;
+  discount: number;
+  valid: boolean;
+  error: string | null;
+};
+
 export type CheckoutSummary = {
   lines: CheckoutLine[];
   itemCount: number;
   subtotal: number;
   freeShippingThreshold: number;
   shippingMethods: CheckoutShippingMethod[];
+  coupon: CheckoutCoupon | null;
+  discountTotal: number;
   pricesChanged: boolean;
   /** Non-null = checkout can't proceed; the client sends the customer back to the cart. */
   blocked: null | "EMPTY" | "UNAVAILABLE" | "OVERSTOCK";
@@ -131,6 +142,18 @@ export async function getCheckoutData(): Promise<CheckoutData> {
   else if (lines.some((l) => l.unavailable)) blocked = "UNAVAILABLE";
   else if (lines.some((l) => l.overStock)) blocked = "OVERSTOCK";
 
+  // The coupon is server-evaluated by loadCart() against this same subtotal.
+  const coupon: CheckoutCoupon | null = cart.coupon
+    ? {
+        code: cart.coupon.code,
+        description: cart.coupon.description,
+        discount: cart.coupon.discount,
+        valid: cart.coupon.valid,
+        error: cart.coupon.error,
+      }
+    : null;
+  const discountTotal = coupon?.valid ? coupon.discount : 0;
+
   return {
     email: user.email,
     summary: {
@@ -139,6 +162,8 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       subtotal,
       freeShippingThreshold: freeThreshold,
       shippingMethods: withEffectiveRates(methods, subtotal, freeThreshold),
+      coupon,
+      discountTotal,
       pricesChanged: lines.some((l) => l.priceChanged),
       blocked,
     },
@@ -159,6 +184,8 @@ async function emptySummary(): Promise<CheckoutSummary> {
     subtotal: 0,
     freeShippingThreshold: freeThreshold,
     shippingMethods: withEffectiveRates(methods, 0, freeThreshold),
+    coupon: null,
+    discountTotal: 0,
     pricesChanged: false,
     blocked: "EMPTY",
   };
@@ -182,6 +209,7 @@ export type PlaceOrderCode =
   | "CART_GONE"
   | "ADDRESS"
   | "SHIPPING"
+  | "COUPON"
   | "STOCK"
   | "ALREADY_ORDERED";
 
@@ -403,12 +431,63 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
 
   // 4. Server-authoritative totals. The shipping fee is the ACTIVE method's
   //    current DB rate (after the store-wide free-shipping rule) — never a
-  //    browser value. Coupons / tax stay deferred (discountTotal = 0).
+  //    browser value.
   const subtotal = lines.reduce((n, l) => n + l.lineTotal, 0);
   const freeThreshold = await getFreeShippingThreshold();
   const shippingFee = effectiveShippingFee(method.rate, subtotal, freeThreshold);
-  const discountTotal = 0;
-  const grandTotal = subtotal + shippingFee - discountTotal;
+
+  // 4b. Coupon — re-read the code stored on the cart, re-validate against the
+  //     recalculated subtotal and the server clock. The browser never sends a
+  //     discount. Usage limits are checked under a row lock inside the
+  //     transaction below. The discount applies to the merchandise subtotal
+  //     only — shipping is untouched (Step 14 §16).
+  const now = new Date();
+  let coupon: {
+    id: string;
+    code: string;
+    type: string;
+    value: number;
+    usageLimit: number | null;
+    perCustomerLimit: number | null;
+  } | null = null;
+  let discountTotal = 0;
+  if (cart.couponCode) {
+    const c = await prisma.coupon.findUnique({
+      where: { code: cart.couponCode },
+      select: {
+        id: true,
+        code: true,
+        type: true,
+        value: true,
+        minSubtotal: true,
+        maxDiscount: true,
+        startsAt: true,
+        expiresAt: true,
+        active: true,
+        archivedAt: true,
+        usageLimit: true,
+        perCustomerLimit: true,
+      },
+    });
+    if (!c) {
+      return { ok: false, code: "COUPON", error: "The coupon on your bag is no longer valid. Remove it and try again." };
+    }
+    const evaln = evaluateCoupon(c as EvaluableCoupon, subtotal, now);
+    if (!evaln.ok) {
+      return { ok: false, code: "COUPON", error: `${c.code}: ${evaln.error} Remove it and try again.` };
+    }
+    coupon = {
+      id: c.id,
+      code: c.code,
+      type: c.type,
+      value: c.value,
+      usageLimit: c.usageLimit,
+      perCustomerLimit: c.perCustomerLimit,
+    };
+    discountTotal = evaln.discount;
+  }
+
+  const grandTotal = Math.max(0, subtotal + shippingFee - discountTotal);
 
   const orderNumber = await nextOrderNumber();
   const sameAddress = input.shippingAddressId === input.billingAddressId;
@@ -424,6 +503,26 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         WHERE "id" = ${cart.id} AND "status" = 'ACTIVE'`;
       if (converted === 0) {
         throw new CheckoutError("ALREADY_ORDERED", "This bag has already been checked out.");
+      }
+
+      // 4a-ii. Coupon usage limits — race-safe. Lock the Coupon row for the rest
+      //   of this transaction, then COUNT redemptions whose order isn't
+      //   CANCELLED. Two concurrent checkouts of a last-use coupon serialise
+      //   here: the second sees the first's redemption and is rejected.
+      if (coupon) {
+        await tx.$queryRaw`SELECT "id" FROM "Coupon" WHERE "id" = ${coupon.id} FOR UPDATE`;
+        if (coupon.usageLimit != null) {
+          const usedGlobal = await activeRedemptionCount(coupon.id, null, tx);
+          if (usedGlobal >= coupon.usageLimit) {
+            throw new CheckoutError("COUPON", `${coupon.code}: this coupon is no longer available. Remove it and try again.`);
+          }
+        }
+        if (coupon.perCustomerLimit != null) {
+          const usedMine = await activeRedemptionCount(coupon.id, user.id, tx);
+          if (usedMine >= coupon.perCustomerLimit) {
+            throw new CheckoutError("COUPON", `${coupon.code}: you have already used this coupon. Remove it and try again.`);
+          }
+        }
       }
 
       // 4b. Deduct inventory through the Step 6 primitive: records a SALE
@@ -464,6 +563,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           shippingFee,
           discountTotal,
           grandTotal,
+          // Coupon: live link + immutable snapshot (Step 14).
+          couponId: coupon?.id ?? null,
+          couponCode: coupon?.code ?? null,
+          discountType: coupon?.type ?? null,
+          discountValue: coupon?.value ?? null,
           // Shipping method: live link + immutable snapshot (Step 11).
           shippingMethodId: method.id,
           shippingMethod: method.code,
@@ -485,10 +589,29 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
             ],
           },
         },
-        select: { orderNumber: true },
+        select: { id: true, orderNumber: true },
       });
 
-      // 4d. Existing behaviour: bump the sold counter.
+      // 4d. Record the coupon redemption (authoritative for usage limits) and
+      //     bump the loose display mirror. The row is written inside the same
+      //     locked section, so the count a concurrent checkout sees is correct.
+      if (coupon) {
+        await tx.couponRedemption.create({
+          data: {
+            couponId: coupon.id,
+            userId: user.id,
+            orderId: order.id,
+            code: coupon.code,
+            amount: discountTotal,
+          },
+        });
+        await tx.coupon.update({
+          where: { id: coupon.id },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+
+      // 4e. Existing behaviour: bump the sold counter.
       for (const l of lines) {
         await tx.product.update({
           where: { id: l.productId },

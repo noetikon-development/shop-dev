@@ -961,10 +961,10 @@ const PRODUCTS: ProdSeed[] = [
 // ---------------------------------------------------------------------------
 
 const COUPONS = [
-  { code: "WELCOME10", description: "10% off your first order", type: "PERCENT", value: 10, minSubtotal: 100000, maxDiscount: 100000 },
-  { code: "AXIARO500", description: "₱500 off orders over ₱5,000", type: "FIXED", value: 50000, minSubtotal: 500000 },
-  { code: "FREESHIP", description: "Free standard shipping, no minimum", type: "FREESHIP", value: 0, minSubtotal: 0 },
-  { code: "HOME15", description: "15% off furniture & lighting", type: "PERCENT", value: 15, minSubtotal: 300000, maxDiscount: 300000 },
+  { code: "WELCOME10", description: "10% off your first order", type: "PERCENT", value: 10, minSubtotal: 100000, maxDiscount: 100000, perCustomerLimit: 1 },
+  { code: "AXIARO500", description: "₱500 off orders over ₱5,000", type: "FIXED", value: 50000, minSubtotal: 500000, perCustomerLimit: null },
+  { code: "FREESHIP", description: "Free standard shipping, no minimum", type: "FREESHIP", value: 0, minSubtotal: 0, perCustomerLimit: null },
+  { code: "HOME15", description: "15% off furniture & lighting", type: "PERCENT", value: 15, minSubtotal: 300000, maxDiscount: 300000, perCustomerLimit: null },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1249,7 +1249,8 @@ async function main() {
         type: c.type,
         value: c.value,
         minSubtotal: c.minSubtotal,
-        maxDiscount: c.maxDiscount ?? null,
+        maxDiscount: "maxDiscount" in c ? (c.maxDiscount as number) : null,
+        perCustomerLimit: c.perCustomerLimit,
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 120),
         active: true,
       },

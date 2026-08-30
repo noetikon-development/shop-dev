@@ -45,6 +45,8 @@ model User {
   wishlist  WishlistItem[]
   carts     Cart[]
 
+  couponRedemptions CouponRedemption[]
+
   // RBAC / admin
   userRoles            UserRole[]
   invitesSent          AdminInvite[]         @relation("AdminInviteInvitedBy")
@@ -450,12 +452,13 @@ model WishlistItem {
 // ----------------------------------------------------------------------------
 
 model Cart {
-  id        String   @id @default(cuid())
-  userId    String?
-  token     String?  @unique // opaque guest identifier (httpOnly cookie), null for customer carts
-  status    String   @default("ACTIVE") // ACTIVE | CONVERTED | ABANDONED
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(cuid())
+  userId     String?
+  token      String?  @unique // opaque guest identifier (httpOnly cookie), null for customer carts
+  status     String   @default("ACTIVE") // ACTIVE | CONVERTED | ABANDONED
+  couponCode String? // applied promo code (canonical form); NOT authoritative — re-validated at checkout (Step 14)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   user  User?      @relation(fields: [userId], references: [id], onDelete: Cascade)
   items CartItem[]
@@ -490,20 +493,50 @@ model CartItem {
 
 model Coupon {
   id          String    @id @default(cuid())
-  code        String    @unique
+  code        String    @unique // canonical, UPPERCASE alphanumeric
   description String?
-  type        String // PERCENT | FIXED | FREESHIP
-  value       Int       @default(0) // percent (0-100) or centavos
-  minSubtotal Int       @default(0)
-  maxDiscount Int?
+  type        String // PERCENT | FIXED  (FREESHIP kept in data; free-shipping coupons are a later step)
+  value       Int       @default(0) // percent (1-100) or centavos
+  minSubtotal Int       @default(0) // centavos; 0 = no minimum
+  maxDiscount Int? // centavos; caps a PERCENT discount
   startsAt    DateTime?
   expiresAt   DateTime?
-  usageLimit  Int?
-  usedCount   Int       @default(0)
-  active      Boolean   @default(true)
-  createdAt   DateTime  @default(now())
+  usageLimit       Int? // global redemption cap
+  perCustomerLimit Int? // per-customer redemption cap (Step 14)
+  usedCount        Int      @default(0) // loose display mirror — CouponRedemption is the source of truth
+  active           Boolean  @default(true)
+  archivedAt       DateTime? // soft archive (Step 14); distinct from active/inactive
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  orders Order[]
+  orders      Order[]
+  redemptions CouponRedemption[]
+
+  @@index([active])
+  @@index([archivedAt])
+}
+
+// One row per successful coupon application (Step 14). This is the authoritative
+// record for enforcing global + per-customer usage limits: the checkout
+// transaction takes `SELECT ... FOR UPDATE` on the parent Coupon row, then
+// COUNTs redemptions whose Order is not CANCELLED. Cancelling an order therefore
+// frees the entitlement without deleting the audit row.
+model CouponRedemption {
+  id        String   @id @default(cuid())
+  couponId  String
+  userId    String?
+  orderId   String   @unique // exactly one redemption per order
+  code      String // snapshot of the coupon code
+  amount    Int // discount amount applied, centavos
+  createdAt DateTime @default(now())
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([couponId])
+  @@index([userId])
+  @@index([couponId, userId])
 }
 
 // ----------------------------------------------------------------------------
@@ -526,8 +559,13 @@ model Order {
   discountTotal Int @default(0)
   grandTotal    Int
 
-  couponId   String?
-  couponCode String?
+  // Coupon / discount — a live link plus an immutable snapshot (Step 14).
+  // Historical totals never depend on the current Coupon record.
+  couponId      String?
+  couponCode    String? // snapshot of the code used
+  discountType  String? // snapshot: "PERCENT" | "FIXED"
+  discountValue Int? // snapshot: the coupon's value at order time (percent or centavos)
+  // discountTotal (above) is the snapshotted discount amount applied.
 
   paymentMethod String @default("COD") // COD | CARD | GCASH | NONE (no method until the payment step)
   paymentStatus String @default("UNPAID") // PENDING | UNPAID | PAID | REFUNDED
@@ -570,10 +608,11 @@ model Order {
   cart       Cart?           @relation(fields: [cartId], references: [id])
   address    Address?        @relation("OrderShipTo", fields: [addressId], references: [id])
   billTo     Address?        @relation("OrderBillTo", fields: [billingAddressId], references: [id])
-  coupon     Coupon?         @relation(fields: [couponId], references: [id])
-  shipMethod ShippingMethod? @relation(fields: [shippingMethodId], references: [id])
-  items      OrderItem[]
-  events     OrderEvent[]
+  coupon           Coupon?           @relation(fields: [couponId], references: [id])
+  couponRedemption CouponRedemption?
+  shipMethod       ShippingMethod?   @relation(fields: [shippingMethodId], references: [id])
+  items            OrderItem[]
+  events           OrderEvent[]
 
   @@index([userId])
   @@index([status])

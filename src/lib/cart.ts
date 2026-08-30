@@ -4,6 +4,12 @@ import { cookies } from "next/headers";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  evaluateCoupon,
+  isValidCouponCode,
+  normalizeCouponCode,
+  type EvaluableCoupon,
+} from "@/lib/coupons";
 
 /**
  * Server-authoritative shopping cart.
@@ -50,11 +56,27 @@ export type CartLineDTO = {
   overStock: boolean; // quantity > available (still fixable)
 };
 
+/**
+ * The applied promo code, evaluated server-side against the current subtotal.
+ * `discount` is 0 and `valid` is false when the code exists on the cart but no
+ * longer applies (expired, minimum not met, …). The browser never sends this —
+ * it comes from `Cart.couponCode` + `evaluateCoupon`.
+ */
+export type CartCouponDTO = {
+  code: string;
+  description: string | null;
+  type: string;
+  discount: number;
+  valid: boolean;
+  error: string | null;
+};
+
 export type CartDTO = {
   lines: CartLineDTO[];
   subtotal: number; // purchasable lines only
   itemCount: number; // sum of purchasable, buyable quantities
   hasIssues: boolean; // any line unavailable or over stock
+  coupon: CartCouponDTO | null;
 };
 
 export const EMPTY_CART: CartDTO = {
@@ -62,6 +84,7 @@ export const EMPTY_CART: CartDTO = {
   subtotal: 0,
   itemCount: 0,
   hasIssues: false,
+  coupon: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -172,7 +195,7 @@ function lineDTO(item: CartItemRow): CartLineDTO {
   };
 }
 
-function buildDTO(cart: CartWithItems | null): CartDTO {
+function buildDTO(cart: CartWithItems | null, coupon: CartCouponDTO | null = null): CartDTO {
   if (!cart) return EMPTY_CART;
   const lines = cart.items.map(lineDTO);
   const purchasable = lines.filter((l) => !l.unavailable);
@@ -181,7 +204,82 @@ function buildDTO(cart: CartWithItems | null): CartDTO {
     subtotal: purchasable.reduce((n, l) => n + l.lineTotal, 0),
     itemCount: purchasable.reduce((n, l) => n + Math.min(l.quantity, l.available), 0),
     hasIssues: lines.some((l) => l.unavailable || l.overStock),
+    coupon,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Coupon evaluation for the cart / checkout display (NOT the usage-limit check —
+// that happens under a row lock inside the checkout transaction).
+// ---------------------------------------------------------------------------
+
+const COUPON_EVAL_SELECT = {
+  id: true,
+  code: true,
+  description: true,
+  type: true,
+  value: true,
+  minSubtotal: true,
+  maxDiscount: true,
+  startsAt: true,
+  expiresAt: true,
+  active: true,
+  archivedAt: true,
+  usageLimit: true,
+  perCustomerLimit: true,
+} as const;
+
+/** Count redemptions of a coupon that still "count" — the order is not cancelled. */
+export async function activeRedemptionCount(
+  couponId: string,
+  userId: string | null,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<number> {
+  return client.couponRedemption.count({
+    where: {
+      couponId,
+      ...(userId ? { userId } : {}),
+      order: { status: { not: "CANCELLED" } },
+    },
+  });
+}
+
+export async function evaluateCartCoupon(
+  couponCode: string | null,
+  subtotal: number,
+): Promise<CartCouponDTO | null> {
+  if (!couponCode) return null;
+  const coupon = await prisma.coupon.findUnique({
+    where: { code: couponCode },
+    select: COUPON_EVAL_SELECT,
+  });
+  if (!coupon) {
+    return { code: couponCode, description: null, type: "", discount: 0, valid: false, error: "Invalid coupon code." };
+  }
+
+  const evaln = evaluateCoupon(coupon as EvaluableCoupon, subtotal);
+  const base = { code: coupon.code, description: coupon.description, type: coupon.type };
+  if (!evaln.ok) {
+    return { ...base, discount: 0, valid: false, error: evaln.error };
+  }
+
+  // Best-effort usage check for the display (the authoritative, race-safe check
+  // is at checkout). Only surfaces an obvious "already used / gone" state.
+  if (coupon.usageLimit != null) {
+    const used = await activeRedemptionCount(coupon.id, null);
+    if (used >= coupon.usageLimit) {
+      return { ...base, discount: 0, valid: false, error: "This coupon is no longer available." };
+    }
+  }
+  const user = await getCurrentUser();
+  if (user && coupon.perCustomerLimit != null) {
+    const mine = await activeRedemptionCount(coupon.id, user.id);
+    if (mine >= coupon.perCustomerLimit) {
+      return { ...base, discount: 0, valid: false, error: "You have already used this coupon." };
+    }
+  }
+
+  return { ...base, discount: evaln.discount, valid: true, error: null };
 }
 
 // ---------------------------------------------------------------------------
@@ -196,7 +294,10 @@ export async function loadCart(): Promise<CartDTO> {
       ? { userId: owner.userId, status: "ACTIVE" }
       : { token: owner.token, status: "ACTIVE" };
   const cart = await prisma.cart.findFirst({ where, include: cartInclude });
-  return buildDTO(cart);
+  if (!cart) return EMPTY_CART;
+  const dto = buildDTO(cart);
+  const coupon = await evaluateCartCoupon(cart.couponCode, dto.subtotal);
+  return { ...dto, coupon };
 }
 
 // ---------------------------------------------------------------------------
@@ -461,7 +562,81 @@ export async function clearCartCore(): Promise<void> {
   });
   if (!cart) return;
   await prisma.cartItem.deleteMany({ where: { cartId: cart.id } });
-  await touchCart(prisma, cart.id);
+  await prisma.cart.update({ where: { id: cart.id }, data: { couponCode: null, updatedAt: new Date() } });
+}
+
+// ---------------------------------------------------------------------------
+// Coupon apply / remove (Step 14)
+// ---------------------------------------------------------------------------
+
+export type CouponMutationResult =
+  | { ok: true; cart: CartDTO; message: string }
+  | { ok: false; error: string };
+
+async function activeCartFor(owner: Owner): Promise<{ id: string } | null> {
+  if (!owner) return null;
+  return prisma.cart.findFirst({
+    where:
+      owner.kind === "user"
+        ? { userId: owner.userId, status: "ACTIVE" }
+        : { token: owner.token, status: "ACTIVE" },
+    select: { id: true },
+  });
+}
+
+export async function applyCartCouponCore(rawCode: string): Promise<CouponMutationResult> {
+  const code = normalizeCouponCode(rawCode);
+  if (!isValidCouponCode(code)) return { ok: false, error: "Invalid coupon code." };
+
+  const owner = await resolveOwner();
+  const cart = await activeCartFor(owner);
+  if (!cart) return { ok: false, error: "Add items to your bag before applying a coupon." };
+
+  // Evaluate against the CURRENT purchasable subtotal, server-side.
+  const current = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude });
+  const subtotal = buildDTO(current).subtotal;
+  if (subtotal <= 0) return { ok: false, error: "Add items to your bag before applying a coupon." };
+
+  const coupon = await prisma.coupon.findUnique({
+    where: { code },
+    select: COUPON_EVAL_SELECT,
+  });
+  if (!coupon) return { ok: false, error: "Invalid coupon code." };
+
+  const evaln = evaluateCoupon(coupon as EvaluableCoupon, subtotal);
+  if (!evaln.ok) return { ok: false, error: evaln.error };
+
+  // Best-effort usage check (checkout re-checks under a lock).
+  if (coupon.usageLimit != null && (await activeRedemptionCount(coupon.id, null)) >= coupon.usageLimit) {
+    return { ok: false, error: "This coupon is no longer available." };
+  }
+  const user = await getCurrentUser();
+  if (
+    user &&
+    coupon.perCustomerLimit != null &&
+    (await activeRedemptionCount(coupon.id, user.id)) >= coupon.perCustomerLimit
+  ) {
+    return { ok: false, error: "You have already used this coupon." };
+  }
+
+  await prisma.cart.update({
+    where: { id: cart.id },
+    data: { couponCode: code, updatedAt: new Date() },
+  });
+
+  return { ok: true, cart: await loadCart(), message: coupon.description ?? "Coupon applied" };
+}
+
+export async function removeCartCouponCore(): Promise<CartDTO> {
+  const owner = await resolveOwner();
+  const cart = await activeCartFor(owner);
+  if (cart) {
+    await prisma.cart.update({
+      where: { id: cart.id },
+      data: { couponCode: null, updatedAt: new Date() },
+    });
+  }
+  return loadCart();
 }
 
 // ---------------------------------------------------------------------------

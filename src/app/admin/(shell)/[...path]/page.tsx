@@ -25,6 +25,7 @@ const RESERVED = new Set([
   "/admin/inventory",
   "/admin/shipping",
   "/admin/orders",
+  "/admin/marketing/coupons",
 ]);
 
 async function resolve(pathParam: Promise<{ path: string[] }>) {

@@ -23,7 +23,8 @@ export function CartDrawer() {
       unitPrice: l.unitPrice,
       quantity: Math.min(l.quantity, l.available),
     })),
-    coupon,
+    discount: coupon?.valid ? coupon.discount : 0,
+    couponCode: coupon?.code ?? null,
   });
 
   const freeShipPct = Math.min(

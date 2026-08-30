@@ -17,7 +17,9 @@
 --             ShippingMethod + Order shippingMethodId/Code/Name (Step 11),
 --             Order placedAt + paymentStatus indexes for admin order list (Step 12),
 --             Order courier/courierName/trackingNumber/trackingUrl/shippedAt/
---             deliveredAt/fulfillmentNote + courier index (Step 13).
+--             deliveredAt/fulfillmentNote + courier index (Step 13),
+--             Coupon perCustomerLimit/updatedAt/archivedAt + CouponRedemption +
+--             Order discountType/discountValue + Cart.couponCode (Step 14).
 -- ============================================================================
 
 -- CreateSchema
@@ -304,6 +306,7 @@ CREATE TABLE "Cart" (
     "userId" TEXT,
     "token" TEXT,
     "status" TEXT NOT NULL DEFAULT 'ACTIVE',
+    "couponCode" TEXT,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 
@@ -335,11 +338,27 @@ CREATE TABLE "Coupon" (
     "startsAt" TIMESTAMP(3),
     "expiresAt" TIMESTAMP(3),
     "usageLimit" INTEGER,
+    "perCustomerLimit" INTEGER,
     "usedCount" INTEGER NOT NULL DEFAULT 0,
     "active" BOOLEAN NOT NULL DEFAULT true,
+    "archivedAt" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Coupon_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "CouponRedemption" (
+    "id" TEXT NOT NULL,
+    "couponId" TEXT NOT NULL,
+    "userId" TEXT,
+    "orderId" TEXT NOT NULL,
+    "code" TEXT NOT NULL,
+    "amount" INTEGER NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "CouponRedemption_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -356,6 +375,8 @@ CREATE TABLE "Order" (
     "grandTotal" INTEGER NOT NULL,
     "couponId" TEXT,
     "couponCode" TEXT,
+    "discountType" TEXT,
+    "discountValue" INTEGER,
     "paymentMethod" TEXT NOT NULL DEFAULT 'COD',
     "paymentStatus" TEXT NOT NULL DEFAULT 'UNPAID',
     "cartId" TEXT,
@@ -651,6 +672,24 @@ CREATE UNIQUE INDEX "CartItem_cartId_variantId_key" ON "CartItem"("cartId", "var
 CREATE UNIQUE INDEX "Coupon_code_key" ON "Coupon"("code");
 
 -- CreateIndex
+CREATE INDEX "Coupon_active_idx" ON "Coupon"("active");
+
+-- CreateIndex
+CREATE INDEX "Coupon_archivedAt_idx" ON "Coupon"("archivedAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "CouponRedemption_orderId_key" ON "CouponRedemption"("orderId");
+
+-- CreateIndex
+CREATE INDEX "CouponRedemption_couponId_idx" ON "CouponRedemption"("couponId");
+
+-- CreateIndex
+CREATE INDEX "CouponRedemption_userId_idx" ON "CouponRedemption"("userId");
+
+-- CreateIndex
+CREATE INDEX "CouponRedemption_couponId_userId_idx" ON "CouponRedemption"("couponId", "userId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Order_orderNumber_key" ON "Order"("orderNumber");
 
 -- CreateIndex
@@ -802,6 +841,15 @@ ALTER TABLE "CartItem" ADD CONSTRAINT "CartItem_cartId_fkey" FOREIGN KEY ("cartI
 
 -- AddForeignKey
 ALTER TABLE "CartItem" ADD CONSTRAINT "CartItem_variantId_fkey" FOREIGN KEY ("variantId") REFERENCES "Variant"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CouponRedemption" ADD CONSTRAINT "CouponRedemption_couponId_fkey" FOREIGN KEY ("couponId") REFERENCES "Coupon"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CouponRedemption" ADD CONSTRAINT "CouponRedemption_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "CouponRedemption" ADD CONSTRAINT "CouponRedemption_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Order" ADD CONSTRAINT "Order_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;

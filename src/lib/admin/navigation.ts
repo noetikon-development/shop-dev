@@ -131,6 +131,7 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     group: "marketing",
     accepts: ["view_coupons"],
     emptyLabel: "No coupons to manage here yet.",
+    live: true,
   },
   {
     path: "/admin/marketing/promotions",

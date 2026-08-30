@@ -12,7 +12,8 @@ export function useOrderTotals(shippingMethodId?: string) {
       .filter((l) => !l.unavailable)
       .map((l) => ({ unitPrice: l.unitPrice, quantity: Math.min(l.quantity, l.available) })),
     shippingMethodId,
-    coupon,
+    discount: coupon?.valid ? coupon.discount : 0,
+    couponCode: coupon?.code ?? null,
   });
 }
 
@@ -51,7 +52,6 @@ export function OrderSummaryLines({
         <dt className="font-medium">Total</dt>
         <dd className="font-display text-xl">{formatPrice(totals.grandTotal)}</dd>
       </div>
-      {totals.couponError && <p className="text-xs text-clay">{totals.couponError}</p>}
     </dl>
   );
 }

@@ -12,8 +12,20 @@ export const metadata: Metadata = {
 };
 
 export default async function PromotionsPage() {
+  const now = new Date();
   const [coupons, onSale] = await Promise.all([
-    prisma.coupon.findMany({ where: { active: true }, orderBy: { value: "desc" } }),
+    prisma.coupon.findMany({
+      where: {
+        active: true,
+        archivedAt: null,
+        type: { in: ["PERCENT", "FIXED"] }, // free-shipping coupons are a later step
+        AND: [
+          { OR: [{ startsAt: null }, { startsAt: { lte: now } }] },
+          { OR: [{ expiresAt: null }, { expiresAt: { gt: now } }] },
+        ],
+      },
+      orderBy: { value: "desc" },
+    }),
     getOnSale(12),
   ]);
 
