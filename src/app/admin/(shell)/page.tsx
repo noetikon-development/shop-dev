@@ -157,7 +157,11 @@ export default async function AdminDashboard() {
                 <tbody>
                   {recentOrders.map((o) => (
                     <tr key={o.id} className="border-b border-line/60 last:border-0">
-                      <td className="py-2.5 pr-4 font-medium text-ink">{o.orderNumber}</td>
+                      <td className="py-2.5 pr-4 font-medium text-ink">
+                        <Link href={`/admin/orders/${o.id}`} className="hover:underline">
+                          {o.orderNumber}
+                        </Link>
+                      </td>
                       <td className="py-2.5 pr-4 text-ink-soft">{o.email}</td>
                       <td className="py-2.5 pr-4 text-ink-soft">{o.status}</td>
                       <td className="py-2.5 pr-4 text-right text-ink-soft">

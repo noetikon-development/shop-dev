@@ -66,4 +66,5 @@ export const ADJUSTMENT_REASON_LABEL: Record<string, string> = {
   CORRECTION: "Correction",
   INITIAL_STOCK: "Initial stock",
   SALE: "Sale",
+  CANCELLATION: "Order cancellation", // Step 12 — reverses a SALE when an order is cancelled
 };

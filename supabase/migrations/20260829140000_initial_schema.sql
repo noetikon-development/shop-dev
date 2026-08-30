@@ -14,7 +14,8 @@
 --             Address firstName/lastName/company/country/updatedAt +
 --             defaultShipping/defaultBilling (Step 8),
 --             Order cartId/billingAddressId/billingAddress + PENDING_PAYMENT (Step 9),
---             ShippingMethod + Order shippingMethodId/Code/Name (Step 11).
+--             ShippingMethod + Order shippingMethodId/Code/Name (Step 11),
+--             Order placedAt + paymentStatus indexes for admin order list (Step 12).
 -- ============================================================================
 
 -- CreateSchema
@@ -657,6 +658,12 @@ CREATE INDEX "Order_billingAddressId_idx" ON "Order"("billingAddressId");
 
 -- CreateIndex
 CREATE INDEX "Order_shippingMethodId_idx" ON "Order"("shippingMethodId");
+
+-- CreateIndex
+CREATE INDEX "Order_placedAt_idx" ON "Order"("placedAt");
+
+-- CreateIndex
+CREATE INDEX "Order_paymentStatus_idx" ON "Order"("paymentStatus");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ShippingMethod_code_key" ON "ShippingMethod"("code");

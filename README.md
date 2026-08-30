@@ -358,6 +358,41 @@ The cart page keeps its own lightweight shipping **estimate**
 (`src/lib/constants.ts` + `src/lib/pricing.ts`); the authoritative rate is always
 the `ShippingMethod` record resolved at checkout.
 
+## Admin order management (Step 12)
+
+`/admin/orders` (list) and `/admin/orders/[id]` (detail), built on the Step 4 UI
+kit and guarded by the Step 3 `view_orders` / `manage_orders` permissions — no
+new permission, no new status system.
+
+- **List** (`src/lib/admin/orders.ts` → `listAdminOrders`): server-side paginated
+  (20/page), searchable by order number / customer name / email, filterable by
+  order status, payment status and date range, sortable by date / total /
+  recently-updated. The browser never receives the full order set.
+- **Detail** (`getAdminOrder`): order info, customer, items, totals, shipping and
+  billing — all from the **immutable snapshots** on `Order` / `OrderItem`
+  (name, SKU, unit price, line total, address JSON, shipping method code/name/fee,
+  totals). The current Product / ShippingMethod / Address records are never read
+  to represent a historical order. Plus the full `OrderEvent` timeline.
+- **Status transitions** (`src/lib/admin/order-actions.ts` → `updateOrderStatusAction`,
+  `src/lib/orders/status.ts`): every move is validated server-side against
+  `canTransition`; the client can only post a status, and the guard re-loads the
+  order's real status before an atomic conditional `UPDATE`. **An admin can never
+  set `PAID`** — payment confirmation is the deferred payment step and there is
+  no manual payment mechanism. `PENDING_PAYMENT` therefore has no forward move in
+  the admin today (only cancellation).
+- **Cancellation** (`cancelOrderAction`): confirmation dialog → `manage_orders`
+  check → atomic status gate (`PENDING_PAYMENT` / `PENDING` / `PROCESSING` only)
+  → for every `SALE` `InventoryAdjustment` the order recorded, one reversing
+  `CANCELLATION` adjustment through the existing row-locked `adjustStock` (never
+  `Variant.stock` directly, never a duplicate) → `soldCount` decremented (never
+  below zero) → `OrderEvent`. Pre-Step-9 orders have no `SALE` rows, so nothing is
+  restocked for them.
+- Every status change and cancellation writes both an `OrderEvent` (customer
+  timeline) and an `AdminAuditLog` entry (acting admin, previous/new status,
+  reason). `paymentStatus` is display-only and is never modified here.
+- Not in scope: PayMongo, payments, refunds, courier APIs, tracking numbers,
+  fulfilment automation, `PACKED` / `REFUNDED` statuses.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: `validateCoupon`

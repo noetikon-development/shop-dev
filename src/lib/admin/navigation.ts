@@ -90,6 +90,7 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     description: "Review and fulfil customer orders.",
     accepts: ["view_orders"],
     emptyLabel: "No orders to manage here yet.",
+    live: true,
   },
   {
     path: "/admin/customers",

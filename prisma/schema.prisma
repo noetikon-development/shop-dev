@@ -566,6 +566,10 @@ model Order {
   @@index([status])
   @@index([billingAddressId])
   @@index([shippingMethodId])
+  // Admin order list (Step 12): default sort is by placedAt; payment status is a
+  // list facet.
+  @@index([placedAt])
+  @@index([paymentStatus])
 }
 
 // Configurable delivery option shown at checkout (Step 11). The `rate` here is
