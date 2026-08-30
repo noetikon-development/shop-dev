@@ -137,6 +137,8 @@ type CategoryRow = {
   slug: string;
   description: string | null;
   heroColor: string | null;
+  /** Denormalised public URL of the configured Category image (CMS). */
+  imageUrl: string | null;
   featured: boolean;
   sortOrder: number;
   parentId: string | null;
@@ -154,6 +156,7 @@ const loadCategoryRows = unstable_cache(
         slug: true,
         description: true,
         heroColor: true,
+        imageUrl: true,
         featured: true,
         sortOrder: true,
         parentId: true,
@@ -177,6 +180,7 @@ export async function getCategoryTree(): Promise<CategoryNode[]> {
         slug: c.slug,
         description: c.description,
         heroColor: c.heroColor,
+        imageUrl: c.imageUrl,
         featured: c.featured,
         productCount: c.productCount,
         children: [] as CategoryNode[],
@@ -216,6 +220,7 @@ export async function getCategoryBySlug(slug: string) {
     slug: cat.slug,
     description: cat.description,
     heroColor: cat.heroColor,
+    imageUrl: cat.imageUrl,
     parentId: cat.parentId,
     parent: parent ? { name: parent.name, slug: parent.slug } : null,
     children,

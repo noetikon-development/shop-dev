@@ -1,17 +1,19 @@
 "use client";
 
-import { useActionState, useEffect, useState } from "react";
+import { startTransition, useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Upload, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { slugify } from "@/lib/utils";
 import { FormField, Select, notify, usePersistentAction } from "@/components/admin/ui";
+import { MediaPickerField } from "@/components/admin/media/media-picker";
+import { CATEGORY_IMAGE_SPEC } from "@/lib/media-constants";
 import {
   createCategory,
   updateCategory,
-  uploadCategoryImage,
-  removeCategoryImage,
+  setCategoryImage,
   type CatalogState,
 } from "@/lib/admin/catalog-actions";
+import type { PickerAsset } from "@/lib/admin/media-picker-data";
 
 type ParentOption = { id: string; label: string };
 
@@ -26,16 +28,19 @@ type Existing = {
   featured: boolean;
   active: boolean;
   imageUrl: string | null;
+  imageMediaId: string | null;
 };
 
 export function CategoryForm({
   parents,
   category,
   canEdit,
+  mediaAssets = [],
 }: {
   parents: ParentOption[];
   category?: Existing;
   canEdit: boolean;
+  mediaAssets?: PickerAsset[];
 }) {
   const router = useRouter();
   const isEdit = Boolean(category);
@@ -180,7 +185,11 @@ export function CategoryForm({
       </form>
 
       {isEdit && canEdit && (
-        <CategoryImage categoryId={category!.id} imageUrl={category!.imageUrl} />
+        <CategoryImage
+          categoryId={category!.id}
+          imageMediaId={category!.imageMediaId}
+          mediaAssets={mediaAssets}
+        />
       )}
     </div>
   );
@@ -188,67 +197,61 @@ export function CategoryForm({
 
 function CategoryImage({
   categoryId,
-  imageUrl,
+  imageMediaId,
+  mediaAssets,
 }: {
   categoryId: string;
-  imageUrl: string | null;
+  imageMediaId: string | null;
+  mediaAssets: PickerAsset[];
 }) {
-  const [upState, upAction, uploading] = useActionState<CatalogState, FormData>(
-    uploadCategoryImage,
-    {},
-  );
-  const [rmState, rmAction, removing] = useActionState<CatalogState, FormData>(
-    removeCategoryImage,
-    {},
-  );
+  const router = useRouter();
+  const [state, dispatch, pending] = useActionState<CatalogState, FormData>(setCategoryImage, {});
+  const [value, setValue] = useState(imageMediaId ?? "");
 
   useEffect(() => {
-    if (upState.ok) notify.success(upState.message ?? "Image updated");
-    if (upState.error) notify.error(upState.error);
-  }, [upState]);
-  useEffect(() => {
-    if (rmState.ok) notify.success("Image removed");
-    if (rmState.error) notify.error(rmState.error);
-  }, [rmState]);
+    if (state.ok) {
+      notify.success(state.message ?? "Category image updated");
+      router.refresh();
+    }
+    if (state.error) notify.error(state.error);
+  }, [state, router]);
+
+  function save() {
+    const fd = new FormData();
+    fd.set("id", categoryId);
+    fd.set("mediaAssetId", value);
+    startTransition(() => dispatch(fd));
+  }
 
   return (
-    <div className="rounded-md border border-line bg-surface p-5">
-      <h3 className="text-sm font-semibold text-ink">Category image</h3>
-      <p className="text-xs text-ink-faint">Optional. Stored in Supabase Storage.</p>
-      <div className="mt-3 flex items-center gap-4">
-        {imageUrl ? (
-          <div className="h-16 w-24 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={imageUrl} alt="Category" className="h-full w-full object-cover" />
-          </div>
-        ) : (
-          <div className="grid h-16 w-24 shrink-0 place-items-center rounded-sm border border-dashed border-line-strong text-xs text-ink-faint">
-            None
-          </div>
-        )}
-        <form action={upAction} className="flex items-end gap-2">
-          <input type="hidden" name="id" value={categoryId} />
-          <input
-            name="file"
-            type="file"
-            required
-            accept="image/png,image/jpeg,image/webp"
-            className="field text-sm file:mr-3 file:rounded-sm file:border-0 file:bg-ink file:px-3 file:py-1.5 file:text-xs file:text-paper"
-          />
-          <button type="submit" disabled={uploading} className="btn btn-primary py-2 text-sm">
-            {uploading ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
-            {imageUrl ? "Replace" : "Upload"}
-          </button>
-        </form>
-        {imageUrl && (
-          <form action={rmAction}>
-            <input type="hidden" name="id" value={categoryId} />
-            <button type="submit" disabled={removing} className="btn btn-ghost py-2 text-sm text-ink-faint hover:text-clay">
-              <Trash2 size={14} /> Remove
-            </button>
-          </form>
-        )}
+    <div className="space-y-3 rounded-md border border-line bg-surface p-5">
+      <div>
+        <h3 className="text-sm font-semibold text-ink">Category image</h3>
+        <p className="text-xs text-ink-faint">
+          One optional image, shown on the homepage &ldquo;shop by category&rdquo; tiles and category
+          cards. An empty category keeps its built-in illustration. Stored in Supabase Storage;
+          separate from product images.
+        </p>
       </div>
+      <MediaPickerField
+        name="__categoryImage"
+        label="Image"
+        assets={mediaAssets}
+        defaultValue={imageMediaId ?? ""}
+        uploadFolder="categories"
+        showSpecHints
+        spec={CATEGORY_IMAGE_SPEC}
+        onValueChange={setValue}
+      />
+      <button
+        type="button"
+        onClick={save}
+        disabled={pending}
+        className="btn btn-primary py-2 text-sm"
+      >
+        {pending && <Loader2 size={14} className="animate-spin" />}
+        Save image
+      </button>
     </div>
   );
 }

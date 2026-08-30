@@ -24,6 +24,8 @@ export type SiteSettings = {
   tagline: string;
   description: string;
   status: "open" | "maintenance" | "closed" | string;
+  /** Scrolling announcement-bar messages; empty = hide the bar. Plain text. */
+  announcements: string[];
   logoUrl: string | null;
   faviconUrl: string | null;
   contact: {
@@ -79,6 +81,7 @@ function fallbackSettings(): SiteSettings {
     tagline: SITE.tagline,
     description: SITE.description,
     status: "open",
+    announcements: [],
     logoUrl: null,
     faviconUrl: null,
     contact: { email: "", phone: "", addressLine1: "", addressLine2: "", city: "", country: "", hours: "" },
@@ -137,12 +140,19 @@ const load = unstable_cache(
       .map((key) => ({ key, label: SOCIAL_LABELS[key], url: str(val(key)) }))
       .filter((s) => isSafeHttpsUrl(s.url));
 
+    const announcements = str(val("storefront.announcements"))
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 12);
+
     return {
       name: str(val("store.name")) || SITE.name,
       brand,
       tagline: str(val("store.tagline")) || SITE.tagline,
       description: str(val("store.description")) || SITE.description,
       status: str(val("store.status")) || "open",
+      announcements,
       logoUrl: mediaUrl("store.logoMediaId"),
       faviconUrl: mediaUrl("store.faviconMediaId"),
       contact: {

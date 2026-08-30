@@ -25,6 +25,12 @@ const INITIAL: Record<string, unknown> = {
   "seo.defaultDescription": SITE.description,
   "seo.titleTemplate": `%s · ${SITE.brand}`,
   "contact.country": "Philippines",
+  "storefront.announcements": [
+    "Free shipping on orders over ₱2,500",
+    "New: Autumn textiles collection",
+    "30-day returns, always",
+    "Use WELCOME10 for 10% off your first order",
+  ].join("\n"),
 };
 
 export async function seedAdminFoundation(

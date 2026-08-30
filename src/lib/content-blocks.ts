@@ -103,6 +103,7 @@ export const richTextSchema = z.object({
 });
 
 export const categoryTilesSchema = z.object({
+  eyebrow: shortText.default(""),
   heading: shortText.default(""),
 });
 

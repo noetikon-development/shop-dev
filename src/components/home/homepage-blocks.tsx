@@ -50,7 +50,14 @@ export async function HomepageBlocks({
             case "hero":
               return <HeroBlock key={block.id} data={block.data} media={media} />;
             case "category_tiles":
-              return <CategoryTiles key={block.id} categories={tree} />;
+              return (
+                <CategoryTiles
+                  key={block.id}
+                  categories={tree}
+                  eyebrow={str(block.data.eyebrow) || undefined}
+                  heading={str(block.data.heading) || undefined}
+                />
+              );
             case "product_rail":
               return <ProductRailBlock key={block.id} data={block.data} />;
             case "feature_grid":

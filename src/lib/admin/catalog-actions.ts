@@ -716,60 +716,61 @@ export async function deleteCategory(
   redirect("/admin/categories");
 }
 
-export async function uploadCategoryImage(
+/**
+ * Set (or clear) a category's image from a MediaAsset chosen in the media
+ * picker. `mediaAssetId` empty / "__none" = clear. The denormalised `imageUrl`
+ * is kept in sync so the cached storefront read needs no MediaAsset join. When
+ * the previously-attached asset is left unreferenced it is deleted (Storage +
+ * row) through the shared reference-checked `deleteMedia`.
+ */
+export async function setCategoryImage(
   _prev: CatalogState,
   formData: FormData,
 ): Promise<CatalogState> {
   const admin = await requirePermission("edit_categories");
   const id = String(formData.get("id") ?? "");
-  const file = formData.get("file");
-  if (!(file instanceof File) || file.size === 0) return { error: "Choose an image." };
-  if (file.size > CATALOG_MEDIA_MAX) return { error: "Image is too large (max 8 MB)." };
+  const raw = String(formData.get("mediaAssetId") ?? "").trim();
+  const next = raw === "" || raw === "__none" ? null : raw;
 
-  const cat = await prisma.category.findUnique({ where: { id }, select: { name: true, imageMediaId: true } });
+  const cat = await prisma.category.findUnique({
+    where: { id },
+    select: { name: true, imageMediaId: true },
+  });
   if (!cat) return { error: "That category no longer exists." };
 
-  const result = await uploadMedia({ file, folder: "categories" });
-  if (!result.ok) return { error: result.error };
+  if (next === cat.imageMediaId) return { ok: true, message: "Category image updated." };
+
+  let imageUrl: string | null = null;
+  if (next) {
+    const asset = await prisma.mediaAsset.findUnique({
+      where: { id: next },
+      select: { url: true, mimeType: true },
+    });
+    if (!asset || !asset.mimeType.startsWith("image/")) {
+      return { error: "That image is no longer in the media library." };
+    }
+    imageUrl = asset.url;
+  }
 
   const previous = cat.imageMediaId;
   await prisma.category.update({
     where: { id },
-    data: { imageMediaId: result.asset.id, imageUrl: result.asset.url },
+    data: { imageMediaId: next, imageUrl },
   });
-  if (previous) await deleteMedia(previous).catch(() => {});
+  if (previous && previous !== next) await deleteMedia(previous).catch(() => {});
 
   await writeAudit({
     actorUserId: admin.user.id,
     action: "catalog.category.updated",
     targetType: "category",
     targetId: id,
-    summary: `${admin.user.email} set the image for category “${cat.name}”`,
+    summary: next
+      ? `${admin.user.email} set the image for category “${cat.name}”`
+      : `${admin.user.email} removed the image from category “${cat.name}”`,
+    meta: { mediaAssetId: next },
   });
   revalidateStorefront();
-  return { ok: true, message: "Category image updated." };
-}
-
-export async function removeCategoryImage(
-  _prev: CatalogState,
-  formData: FormData,
-): Promise<CatalogState> {
-  const admin = await requirePermission("edit_categories");
-  const id = String(formData.get("id") ?? "");
-  const cat = await prisma.category.findUnique({ where: { id }, select: { name: true, imageMediaId: true } });
-  if (!cat) return { error: "That category no longer exists." };
-
-  await prisma.category.update({ where: { id }, data: { imageMediaId: null, imageUrl: null } });
-  if (cat.imageMediaId) await deleteMedia(cat.imageMediaId).catch(() => {});
-  await writeAudit({
-    actorUserId: admin.user.id,
-    action: "catalog.category.updated",
-    targetType: "category",
-    targetId: id,
-    summary: `${admin.user.email} removed the image from category “${cat.name}”`,
-  });
-  revalidateStorefront();
-  return { ok: true };
+  return { ok: true, message: next ? "Category image updated." : "Category image removed." };
 }
 
 // ===========================================================================

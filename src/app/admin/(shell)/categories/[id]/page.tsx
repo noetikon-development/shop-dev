@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { ExternalLink } from "lucide-react";
 import { requirePermission } from "@/lib/admin/rbac";
 import { getAdminCategory, categorySelectOptions } from "@/lib/admin/catalog";
+import { getPickerAssets } from "@/lib/admin/media-picker-data";
 import { PageHeader } from "@/components/admin/ui";
 import { CategoryForm } from "@/components/admin/catalog/category-form";
 import { CategoryDelete } from "@/components/admin/catalog/category-delete";
@@ -21,9 +22,10 @@ export default async function EditCategoryPage({
 }: PageProps<"/admin/categories/[id]">) {
   const admin = await requirePermission("view_categories");
   const { id } = await params;
-  const [category, parents] = await Promise.all([
+  const [category, parents, mediaAssets] = await Promise.all([
     getAdminCategory(id),
     categorySelectOptions(id),
+    getPickerAssets(),
   ]);
   if (!category) notFound();
 
@@ -47,6 +49,7 @@ export default async function EditCategoryPage({
       <CategoryForm
         parents={parents}
         canEdit={canEdit}
+        mediaAssets={mediaAssets}
         category={{
           id: category.id,
           name: category.name,
@@ -58,6 +61,7 @@ export default async function EditCategoryPage({
           featured: category.featured,
           active: category.active,
           imageUrl: category.imageMedia?.url ?? category.imageUrl,
+          imageMediaId: category.imageMediaId,
         }}
       />
 

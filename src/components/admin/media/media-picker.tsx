@@ -4,7 +4,12 @@ import { useMemo, useRef, useState } from "react";
 import { AlertTriangle, ImageIcon, Loader2, Upload, X } from "lucide-react";
 import { Modal, notify } from "@/components/admin/ui";
 import { uploadMediaAction } from "@/lib/admin/content-actions";
-import { ALLOWED_IMAGE_ACCEPT, heroImageWarnings } from "@/lib/media-constants";
+import {
+  ALLOWED_IMAGE_ACCEPT,
+  imageSpecWarnings,
+  HERO_IMAGE_SPEC,
+  type ImageSpec,
+} from "@/lib/media-constants";
 import type { PickerAsset } from "@/lib/admin/media-picker-data";
 
 /**
@@ -13,8 +18,8 @@ import type { PickerAsset } from "@/lib/admin/media-picker-data";
  * the surrounding form as a hidden input.
  *
  * `showSpecHints` adds a dimensions / file-size / type readout for the selected
- * image plus advisory warnings against the recommended hero-image standard
- * (1600×1600, WebP, 150–500 KB). Warnings never block a valid upload.
+ * image plus advisory warnings against `spec` (defaults to the hero standard).
+ * Warnings never block a valid upload.
  */
 export function MediaPickerField({
   name,
@@ -25,6 +30,8 @@ export function MediaPickerField({
   hint,
   uploadFolder = "content",
   showSpecHints = false,
+  spec = HERO_IMAGE_SPEC,
+  onValueChange,
 }: {
   name: string;
   label: string;
@@ -34,8 +41,15 @@ export function MediaPickerField({
   hint?: string;
   uploadFolder?: string;
   showSpecHints?: boolean;
+  spec?: ImageSpec;
+  /** Called whenever the selected MediaAsset id changes ("" = cleared). */
+  onValueChange?: (id: string) => void;
 }) {
-  const [value, setValue] = useState(defaultValue);
+  const [value, setValueState] = useState(defaultValue);
+  const setValue = (v: string) => {
+    setValueState(v);
+    onValueChange?.(v);
+  };
   const [list, setList] = useState<PickerAsset[]>(assets);
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
@@ -96,7 +110,7 @@ export function MediaPickerField({
               </button>
             )}
           </div>
-          {showSpecHints && selected && <SpecReadout asset={selected} />}
+          {showSpecHints && selected && <SpecReadout asset={selected} spec={spec} />}
         </div>
       </div>
       {error ? <p className="text-xs text-clay">{error}</p> : hint && <p className="text-xs text-ink-faint">{hint}</p>}
@@ -124,8 +138,8 @@ export function MediaPickerField({
           </div>
           {showSpecHints && (
             <p className="text-[11px] text-ink-faint">
-              Recommended: 1600×1600px, 1:1, sRGB, WebP, quality 82–85, 150–500&nbsp;KB. Off-spec
-              images still upload — you&apos;ll just see a note.
+              Recommended: {spec.recommendation}. Off-spec images still upload — you&apos;ll just
+              see a note.
             </p>
           )}
           {filtered.length === 0 ? (
@@ -178,8 +192,8 @@ function dimText(a: PickerAsset) {
   return `${dims} · ${humanKB(a.sizeBytes)} · ${typeLabel(a.mimeType)}`;
 }
 
-function SpecReadout({ asset }: { asset: PickerAsset }) {
-  const warnings = heroImageWarnings(asset);
+function SpecReadout({ asset, spec }: { asset: PickerAsset; spec: ImageSpec }) {
+  const warnings = imageSpecWarnings(asset, spec);
   const recorded = typeof asset.width === "number" && typeof asset.height === "number";
   return (
     <div className="text-[11px] leading-tight">

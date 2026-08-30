@@ -10,13 +10,6 @@ import { HeaderSearch } from "@/components/header/search";
 import { AccountMenu } from "@/components/header/account-menu";
 import { CartButton, WishlistButton } from "@/components/header/cart-button";
 
-const ANNOUNCEMENTS = [
-  "Free shipping on orders over ₱2,500",
-  "New: Autumn textiles collection",
-  "30-day returns, always",
-  "Use WELCOME10 for 10% off your first order",
-];
-
 export async function SiteHeader() {
   const [tree, user, settings] = await Promise.all([
     getCategoryTree(),
@@ -25,20 +18,23 @@ export async function SiteHeader() {
   ]);
   const featured = tree.filter((c) => c.featured);
   const displayName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0];
+  const announcements = settings.announcements;
 
   return (
     <>
-      <div className="bg-ink text-paper">
-        <div className="container-page flex h-9 items-center overflow-hidden">
-          <div className="flex animate-marquee gap-16 whitespace-nowrap text-[11px] tracking-wide">
-            {[...ANNOUNCEMENTS, ...ANNOUNCEMENTS].map((a, i) => (
-              <span key={i} className="text-paper/80">
-                {a}
-              </span>
-            ))}
+      {announcements.length > 0 && (
+        <div className="bg-ink text-paper">
+          <div className="container-page flex h-9 items-center overflow-hidden">
+            <div className="flex animate-marquee gap-16 whitespace-nowrap text-[11px] tracking-wide">
+              {[...announcements, ...announcements].map((a, i) => (
+                <span key={i} className="text-paper/80">
+                  {a}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <header className="sticky top-0 z-40 border-b border-line bg-paper/95 backdrop-blur">
         <div className="container-page">

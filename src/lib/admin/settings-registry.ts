@@ -23,6 +23,7 @@ export type SettingType =
 
 export type SettingGroupKey =
   | "identity"
+  | "storefront"
   | "contact"
   | "business"
   | "regional"
@@ -47,6 +48,10 @@ export const SETTING_GROUPS: Record<
   { label: string; description: string }
 > = {
   identity: { label: "Store identity", description: "Name, description and status." },
+  storefront: {
+    label: "Storefront content",
+    description: "Global marketing copy shown across the storefront (not per-page).",
+  },
   contact: { label: "Contact", description: "How customers and couriers reach the store." },
   business: { label: "Business", description: "Legal entity and registration details." },
   regional: { label: "Regional", description: "Currency, time zone and locale." },
@@ -72,6 +77,16 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "store.status", label: "Store status", type: "string", group: "identity", default: "open", help: "open | maintenance | closed" },
   { key: "store.logoMediaId", label: "Logo", type: "media", group: "identity", default: "", help: "Storefront logo. Leave blank to use the built-in AXIARO mark." },
   { key: "store.faviconMediaId", label: "Favicon", type: "media", group: "identity", default: "", help: "Browser-tab icon (square PNG recommended). Blank uses the built-in icon." },
+
+  // Storefront content
+  {
+    key: "storefront.announcements",
+    label: "Announcement bar messages",
+    type: "text",
+    group: "storefront",
+    default: "",
+    help: "One message per line for the scrolling bar at the top of every page. Leave blank to hide the bar. Plain text only — no HTML.",
+  },
 
   // Contact
   { key: "contact.email", label: "Support email", type: "email", group: "contact", default: "" },

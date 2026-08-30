@@ -138,7 +138,7 @@ export function BlockEditor({
       case "rich_text":
         return { heading: g("rt-heading"), body: g("rt-body") };
       case "category_tiles":
-        return { heading: g("ct-heading") };
+        return { eyebrow: g("ct-eyebrow"), heading: g("ct-heading") };
       default:
         return {};
     }
@@ -348,8 +348,15 @@ export function BlockEditor({
       )}
 
       {type === "category_tiles" && (
-        <Card>
-          <Text id="ct-heading" label="Heading (optional)" d={d.heading} />
+        <Card className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Text id="ct-eyebrow" label="Eyebrow (optional)" d={d.eyebrow} />
+            <Text id="ct-heading" label="Heading (optional)" d={d.heading} />
+          </div>
+          <p className="text-xs text-ink-faint">
+            The tiles themselves come from your categories. Set each category&apos;s image in
+            Products → Categories.
+          </p>
         </Card>
       )}
 

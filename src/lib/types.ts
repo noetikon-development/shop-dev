@@ -78,6 +78,8 @@ export type CategoryNode = {
   slug: string;
   description: string | null;
   heroColor: string | null;
+  /** Public URL of the CMS-configured Category image; null = use the illustration. */
+  imageUrl: string | null;
   featured: boolean;
   children: CategoryNode[];
   productCount?: number;

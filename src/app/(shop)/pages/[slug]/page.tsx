@@ -26,6 +26,16 @@ export async function generateMetadata({ params }: PageProps<"/pages/[slug]">): 
   };
 }
 
+/** Slugs whose content is a general template, not vetted legal advice. */
+const LEGAL_SLUGS = new Set([
+  "privacy",
+  "terms",
+  "cookies",
+  "cancellation",
+  "returns",
+  "shipping",
+]);
+
 export default async function ContentPageView({ params }: PageProps<"/pages/[slug]">) {
   const { slug } = await params;
   const page = await getPublishedPage(slug);
@@ -44,6 +54,12 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
         <div className="mt-8 border-t border-line pt-8 text-[15px]">
           <Markdown source={page.body} />
         </div>
+        {LEGAL_SLUGS.has(slug) && (
+          <p className="mt-10 rounded-md border border-line bg-surface-sunken/50 p-3 text-xs text-ink-faint">
+            This page is a general template. Have the final wording reviewed by a qualified
+            professional for your business before relying on it commercially.
+          </p>
+        )}
         {settings && <ContactPanel settings={settings} />}
       </div>
     </article>
