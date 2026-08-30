@@ -31,12 +31,19 @@ export async function generateMetadata({
   params,
 }: PageProps<"/c/[slug]">): Promise<Metadata> {
   const { slug } = await params;
-  if (SPECIAL[slug]) return { title: SPECIAL[slug].title, description: SPECIAL[slug].description };
+  if (SPECIAL[slug]) {
+    return {
+      title: SPECIAL[slug].title,
+      description: SPECIAL[slug].description,
+      alternates: { canonical: `/c/${slug}` },
+    };
+  }
   const cat = await getCategoryBySlug(slug);
   if (!cat) return { title: "Not found" };
   return {
     title: cat.name,
     description: cat.description ?? `Shop ${cat.name} at AXIARO.`,
+    alternates: { canonical: `/c/${slug}` },
   };
 }
 

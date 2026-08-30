@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { getPublishedPage } from "@/lib/content";
 import { getSiteSettings } from "@/lib/site-settings";
 import { Markdown } from "@/lib/markdown";
+import { ContactPanel } from "@/components/content/contact-panel";
 import { formatDate } from "@/lib/utils";
 
 export async function generateMetadata({ params }: PageProps<"/pages/[slug]">): Promise<Metadata> {
@@ -10,13 +11,17 @@ export async function generateMetadata({ params }: PageProps<"/pages/[slug]">): 
   const page = await getPublishedPage(slug);
   if (!page) return { title: "Not found" };
   const settings = await getSiteSettings();
+  const title = page.seoTitle || page.title;
+  const description = page.seoDescription || page.excerpt || settings.seo.defaultDescription;
   return {
-    title: page.seoTitle || page.title,
-    description: page.seoDescription || page.excerpt || settings.seo.defaultDescription,
+    title,
+    description,
+    alternates: { canonical: `/pages/${slug}` },
     openGraph: {
-      title: page.seoTitle || page.title,
-      description: page.seoDescription || page.excerpt || undefined,
+      title,
+      description: description || undefined,
       type: "article",
+      url: `/pages/${slug}`,
     },
   };
 }
@@ -25,6 +30,8 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
   const { slug } = await params;
   const page = await getPublishedPage(slug);
   if (!page) notFound();
+
+  const settings = slug === "contact" ? await getSiteSettings() : null;
 
   return (
     <article className="container-page py-10 sm:py-16">
@@ -37,6 +44,7 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
         <div className="mt-8 border-t border-line pt-8 text-[15px]">
           <Markdown source={page.body} />
         </div>
+        {settings && <ContactPanel settings={settings} />}
       </div>
     </article>
   );

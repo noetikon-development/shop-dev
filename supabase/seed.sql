@@ -62,7 +62,7 @@ INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "descr
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx653009rkg5kl1qprflj', 'Fold Dining Chair', 'fold-dining-chair', 'AXIARO', 'A stackable moulded chair with a solid wood base.', 'A single-piece moulded seat with a subtle lumbar curve, on a solid beech base. Stacks four high. Felt glides included.', 'cmtdrx3d4000mkg5k4pf87vaf', 'ACTIVE', 549000, NULL, NULL, 4.6, 233, 2100, '[]', '["Contoured single-piece seat","Solid beech legs","Stacks 4 high","Sold individually"]', '{"Width":"50 cm","Depth":"53 cm","Height":"80 cm","Seat height":"46 cm"}', NULL, true, false, 5200, '2026-06-06T02:40:52.335Z', '2026-08-29T02:40:55.383Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx4og005gkg5kh979ba63', 'Morgen Bed Frame', 'morgen-bed-frame', 'AXIARO', 'A low platform bed with an upholstered headboard.', 'Morgen sits low and quiet, with a gently angled headboard wrapped in the same washable weave as our Aro sofa. Sprung slat base, no box spring needed. Under-bed clearance fits our storage boxes.', 'cmtdrx3bb000bkg5kyady52ns', 'ACTIVE', 2190000, 2590000, NULL, 4.7, 205, 640, '["sale","bestseller"]', '["Upholstered, removable headboard cover","Sprung beech slat base","26 cm under-bed clearance","Bolts hidden behind covers"]', '{"Fits mattress":"Queen / King","Height":"95 cm to headboard","Frame height":"28 cm","Base":"Sprung beechwood slats"}', NULL, true, true, 38000, '2026-02-11T02:40:52.335Z', '2026-08-29T12:20:42.857Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx5zb0096kg5klf7gdtcw', 'Board Dining Table', 'board-dining-table', 'AXIARO', 'A solid oak dining table for six, with breadboard ends.', 'A single thick oak top with classic breadboard ends that let the wood move with the seasons. Trestle base knocks down flat for moving. Seats six comfortably, eight at a push.', 'cmtdrx3ct000kkg5kosq55dny', 'ACTIVE', 2490000, 2990000, NULL, 4.9, 176, 420, '["sale","bestseller"]', '["30 mm solid oak top","Breadboard ends","Knock-down trestle base","Hard-wax oil finish"]', '{"Length":"180 cm","Width":"90 cm","Height":"74 cm","Seats":"6–8","Material":"Solid European oak"}', 'Blot spills promptly. Refresh with hard-wax oil once or twice a year.', true, true, 41000, '2026-07-13T02:40:52.335Z', '2026-08-29T12:20:42.875Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx6em00akkg5k84qrszx1', 'Daily Cast-Iron Pan 26 cm', 'daily-cast-iron-pan', 'AXIARO', 'A pre-seasoned cast-iron pan with a long handle and a helper loop.', 'Sand-cast in a single piece, machine-polished on the cooking surface so it needs less breaking-in, and pre-seasoned with flaxseed oil. Oven and induction safe.', 'cmtdrx3de000okg5kg7ned8zk', 'ACTIVE', 289000, NULL, NULL, 4.8, 690, 3400, '["bestseller"]', '["Polished cooking surface","Pre-seasoned, ready to use","Induction to oven to grill","Helper handle for lifting"]', '{"Diameter":"26 cm","Weight":"1.9 kg","Material":"Cast iron","Oven safe":"Yes, to 260°C"}', 'Rinse hot, dry on the hob, wipe with a little oil. Never soak.', true, true, 1900, '2026-04-30T02:40:52.335Z', '2026-08-29T12:20:42.891Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx6em00akkg5k84qrszx1', 'Daily Cast-Iron Pan 26 cm', 'daily-cast-iron-pan', 'AXIARO', 'A pre-seasoned cast-iron pan with a long handle and a helper loop.', 'Sand-cast in a single piece, machine-polished on the cooking surface so it needs less breaking-in, and pre-seasoned with flaxseed oil. Oven and induction safe.', 'cmtdrx3de000okg5kg7ned8zk', 'ACTIVE', 289000, NULL, NULL, 4.8, 690, 3400, '["bestseller"]', '["Polished cooking surface","Pre-seasoned, ready to use","Induction to oven to grill","Helper handle for lifting"]', '{"Diameter":"26 cm","Weight":"1.9 kg","Material":"Cast iron","Oven safe":"Yes, to 260°C"}', 'Rinse hot, dry on the hob, wipe with a little oil. Never soak.', true, true, 1900, '2026-04-30T02:40:52.335Z', '2026-08-30T06:44:07.280Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx6gq00avkg5kc151c7ds', 'Clay Stoneware Dinner Set (12-piece)', 'clay-dinnerware-set', 'AXIARO', 'Four each of dinner plates, side plates and bowls in reactive-glaze stoneware.', 'Thrown-look stoneware with a speckled reactive glaze, so every piece lands slightly different. Chip-resistant rims, stackable, dishwasher and microwave safe.', 'cmtdrx3dp000qkg5k32unln6h', 'ACTIVE', 399000, 469000, NULL, 4.7, 388, 1500, '["sale"]', '["Reactive speckled glaze","Rolled, chip-resistant rims","Dishwasher & microwave safe","Replacements sold individually"]', '{"Includes":"4 × dinner, 4 × side, 4 × bowl","Material":"Stoneware","Dinner plate":"27 cm"}', NULL, true, false, 6400, '2026-03-24T02:40:52.335Z', '2026-08-29T02:40:55.802Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx6n900bikg5kv9qhguog', 'Ripple Glass Tumblers (Set of 4)', 'ripple-glass-tumblers', 'AXIARO', 'Hand-blown tumblers with an uneven ripple you can feel.', 'Each tumbler is mouth-blown, so the ripple and the weight vary a little. 350 ml — right for water, wine or an old-fashioned.', 'cmtdrx3dz000skg5kgb5henki', 'ACTIVE', 149000, NULL, NULL, 4.6, 121, 423, '[]', '["Mouth-blown glass","350 ml capacity","Stacks loosely","Hand wash recommended"]', '{"Capacity":"350 ml","Height":"9.5 cm","Includes":"4 tumblers"}', NULL, false, false, 1800, '2026-02-15T02:40:52.335Z', '2026-08-29T02:40:56.037Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Product" ("id", "name", "slug", "brand", "shortDescription", "description", "categoryId", "status", "price", "compareAtPrice", "costPrice", "ratingAvg", "ratingCount", "soldCount", "badges", "highlights", "specs", "care", "freeShipping", "featured", "weightGrams", "createdAt", "updatedAt") VALUES ('cmtdrx6t100c3kg5k6us5qtfc', 'Field Hand-Loomed Wool Rug', 'field-wool-rug', 'AXIARO', 'A flatweave wool rug with a soft colour block down the middle.', 'Hand-loomed from undyed and plant-dyed wool, reversible, and dense enough to sit flat without a pad on most floors. Every rug is one of a small batch.', 'cmtdrx3ej000vkg5kuwsdt7q9', 'ACTIVE', 1890000, 2290000, NULL, 4.8, 149, 310, '["sale"]', '["100% hand-loomed wool","Reversible flatweave","Plant-based dyes","Naturally stain-resistant"]', '{"Sizes":"160×230 / 200×300","Pile":"Flatweave, 6 mm","Material":"100% wool","Origin":"Handmade, Panipat"}', 'Vacuum without a beater bar. Professional clean only. Rotate twice a year.', true, false, 16000, '2026-01-09T02:40:52.335Z', '2026-08-29T02:40:56.245Z') ON CONFLICT DO NOTHING;
@@ -495,7 +495,6 @@ INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "sta
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx69y00a8kg5kmyi8qwcm', 'cmtdrx653009rkg5kl1qprflj', 'FOLD-DINING-CHAIR-02', 549000, NULL, 'ACTIVE', 8, 'art:chair:fold-dining-chair-clay') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6bc00aakg5kumyb464z', 'cmtdrx653009rkg5kl1qprflj', 'FOLD-DINING-CHAIR-03', 549000, NULL, 'ACTIVE', 18, 'art:chair:fold-dining-chair-slate') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6ce00ackg5kabf7g58i', 'cmtdrx653009rkg5kl1qprflj', 'FOLD-DINING-CHAIR-04', 549000, NULL, 'ACTIVE', 6, 'art:chair:fold-dining-chair-olive') ON CONFLICT DO NOTHING;
-INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6fu00apkg5k54jy9g0v', 'cmtdrx6em00akkg5k84qrszx1', 'DAILY-CAST-IRON-PA-01', 289000, NULL, 'ACTIVE', 50, 'art:kitchen:daily-cast-iron-pan-0') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6j300b8kg5ksypskdp4', 'cmtdrx6gq00avkg5kc151c7ds', 'CLAY-DINNERWARE-SE-01', 399000, 469000, 'ACTIVE', 11, 'art:tableware:clay-dinnerware-set-oatmeal') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6kb00bakg5k9vleytg4', 'cmtdrx6gq00avkg5kc151c7ds', 'CLAY-DINNERWARE-SE-02', 399000, 469000, 'ACTIVE', 21, 'art:tableware:clay-dinnerware-set-ash-grey') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6ld00bckg5klt5u6zlc', 'cmtdrx6gq00avkg5kc151c7ds', 'CLAY-DINNERWARE-SE-03', 399000, 469000, 'ACTIVE', 9, 'art:tableware:clay-dinnerware-set-deep-green') ON CONFLICT DO NOTHING;
@@ -503,6 +502,7 @@ INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "sta
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6qr00bxkg5ku116u1w6', 'cmtdrx6n900bikg5kv9qhguog', 'RIPPLE-GLASS-TUMBL-02', 149000, NULL, 'ACTIVE', 12, 'art:tableware:ripple-glass-tumblers-smoke') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6rr00bzkg5k5nuqm6m9', 'cmtdrx6n900bikg5kv9qhguog', 'RIPPLE-GLASS-TUMBL-03', 149000, NULL, 'ACTIVE', 7, 'art:tableware:ripple-glass-tumblers-amber') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6wz00cmkg5kk4pgrb0t', 'cmtdrx6t100c3kg5k6us5qtfc', 'FIELD-WOOL-RUG-01', 1890000, 2290000, 'ACTIVE', 8, 'art:rug:field-wool-rug-oat-clay') ON CONFLICT DO NOTHING;
+INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6fu00apkg5k54jy9g0v', 'cmtdrx6em00akkg5k84qrszx1', 'DAILY-CAST-IRON-PA-01', 289000, NULL, 'ACTIVE', 50, 'art:kitchen:daily-cast-iron-pan-0') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6y800cokg5krl7fxjsl', 'cmtdrx6t100c3kg5k6us5qtfc', 'FIELD-WOOL-RUG-02', 1890000, 2290000, 'ACTIVE', 18, 'art:rug:field-wool-rug-oat-clay') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx6zg00cqkg5kp0lc5ipl', 'cmtdrx6t100c3kg5k6us5qtfc', 'FIELD-WOOL-RUG-03', 1890000, 2290000, 'ACTIVE', 6, 'art:rug:field-wool-rug-fog-ink') ON CONFLICT DO NOTHING;
 INSERT INTO "Variant" ("id", "productId", "sku", "price", "compareAtPrice", "status", "stock", "imageUrl") VALUES ('cmtdrx70q00cskg5kygxi8y1p', 'cmtdrx6t100c3kg5k6us5qtfc', 'FIELD-WOOL-RUG-04', 1890000, 2290000, 'ACTIVE', 23, 'art:rug:field-wool-rug-fog-ink') ON CONFLICT DO NOTHING;
@@ -1410,7 +1410,6 @@ INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reor
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqupa002fkgbodeq1kwrg', 'cmtdrx69y00a8kg5kmyi8qwcm', 'FOLD-DINING-CHAIR-02', 8, 0, 3, NULL, '2026-08-29T03:31:59.855Z', '2026-08-29T03:31:59.855Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqupk002hkgbofpkzxd9t', 'cmtdrx6bc00aakg5kumyb464z', 'FOLD-DINING-CHAIR-03', 18, 0, 3, NULL, '2026-08-29T03:31:59.864Z', '2026-08-29T03:31:59.864Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqupt002jkgbo99k6071y', 'cmtdrx6ce00ackg5kabf7g58i', 'FOLD-DINING-CHAIR-04', 6, 0, 3, NULL, '2026-08-29T03:31:59.874Z', '2026-08-29T03:31:59.874Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquq3002lkgbodwbws0k6', 'cmtdrx6fu00apkg5k54jy9g0v', 'DAILY-CAST-IRON-PA-01', 50, 0, 3, NULL, '2026-08-29T03:31:59.883Z', '2026-08-29T03:31:59.883Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquqd002nkgbouo4d0owm', 'cmtdrx6j300b8kg5ksypskdp4', 'CLAY-DINNERWARE-SE-01', 11, 0, 3, NULL, '2026-08-29T03:31:59.893Z', '2026-08-29T03:31:59.893Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquqm002pkgboktj6p78a', 'cmtdrx6kb00bakg5k9vleytg4', 'CLAY-DINNERWARE-SE-02', 21, 0, 3, NULL, '2026-08-29T03:31:59.902Z', '2026-08-29T03:31:59.902Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquqv002rkgbo7je4r33q', 'cmtdrx6ld00bckg5klt5u6zlc', 'CLAY-DINNERWARE-SE-03', 9, 0, 3, NULL, '2026-08-29T03:31:59.911Z', '2026-08-29T03:31:59.911Z') ON CONFLICT DO NOTHING;
@@ -1423,6 +1422,7 @@ INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reor
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqusy0035kgbok08vbf3y', 'cmtdrx70q00cskg5kygxi8y1p', 'FIELD-WOOL-RUG-04', 23, 0, 3, NULL, '2026-08-29T03:31:59.986Z', '2026-08-29T03:31:59.986Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqut80037kgbon4sf7ib1', 'cmtdrx71r00cukg5kb1ywght2', 'FIELD-WOOL-RUG-05', 11, 0, 3, NULL, '2026-08-29T03:31:59.997Z', '2026-08-29T03:31:59.997Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqudj0003kgbocl0ivh3o', 'cmtdrx3xt002wkg5kc56wxqet', 'ARO-3-SEAT-SOFA-02', 17, 0, 3, NULL, '2026-08-29T03:31:59.431Z', '2026-08-29T19:46:35.290Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquq3002lkgbodwbws0k6', 'cmtdrx6fu00apkg5k54jy9g0v', 'DAILY-CAST-IRON-PA-01', 50, 0, 3, NULL, '2026-08-29T03:31:59.883Z', '2026-08-30T06:45:02.218Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtqutm0039kgbo70r8f4ef', 'cmtdrx72r00cwkg5k6592w6pp', 'FIELD-WOOL-RUG-06', 21, 0, 3, NULL, '2026-08-29T03:32:00.010Z', '2026-08-29T03:32:00.010Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquty003bkgbozveker8c', 'cmtdrx77h00dlkg5knjk7omur', 'WEIGHT-LINEN-CUSHI-01', 3, 0, 3, NULL, '2026-08-29T03:32:00.023Z', '2026-08-29T03:32:00.023Z') ON CONFLICT DO NOTHING;
 INSERT INTO "Inventory" ("id", "variantId", "sku", "quantity", "reserved", "reorderPoint", "restockEta", "createdAt", "updatedAt") VALUES ('cmtdtquu9003dkgboltyvb80v', 'cmtdrx78l00dnkg5kqsq8kgm4', 'WEIGHT-LINEN-CUSHI-02', 20, 0, 3, NULL, '2026-08-29T03:32:00.033Z', '2026-08-29T03:32:00.033Z') ON CONFLICT DO NOTHING;
@@ -1710,22 +1710,27 @@ INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('payment.methods', '[{"id":"COD","label":"Cash on delivery","detail":"Pay the courier when your order arrives"},{"id":"CARD","label":"Credit / debit card","detail":"Visa, Mastercard, JCB"},{"id":"GCASH","label":"GCash","detail":"Pay via your GCash wallet"}]', 'json', 'Payment methods', 'checkout', '2026-08-29T03:32:03.550Z', '2026-08-29T03:32:03.550Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('returns.windowDays', '30', 'number', 'Return window (days)', 'policy', '2026-08-29T03:32:03.565Z', '2026-08-29T03:32:03.565Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('guarantee.furnitureYears', '10', 'number', 'Furniture frame guarantee (years)', 'policy', '2026-08-29T03:32:03.574Z', '2026-08-29T03:32:03.574Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.email', '', 'email', 'Support email', 'settings:contact', '2026-08-30T05:20:12.059Z', '2026-08-29T10:06:17.736Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.phone', '', 'string', 'Phone', 'settings:contact', '2026-08-30T05:44:42.463Z', '2026-08-29T10:06:17.764Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.addressLine1', '', 'string', 'Address line 1', 'settings:contact', '2026-08-30T05:44:42.463Z', '2026-08-29T10:06:17.783Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.addressLine2', '', 'string', 'Address line 2', 'settings:contact', '2026-08-30T05:44:42.463Z', '2026-08-29T10:06:17.808Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.city', '', 'string', 'City', 'settings:contact', '2026-08-30T05:44:42.463Z', '2026-08-29T10:06:17.830Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.country', 'Philippines', 'string', 'Country', 'settings:contact', '2026-08-30T05:44:42.463Z', '2026-08-29T10:06:17.866Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('social.facebook', '', 'url', 'Facebook', 'settings:social', '2026-08-30T05:24:00.126Z', '2026-08-29T10:06:18.163Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('social.instagram', '', 'url', 'Instagram', 'settings:social', '2026-08-30T05:24:00.126Z', '2026-08-29T10:06:18.203Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('social.x', '', 'url', 'X / Twitter', 'settings:social', '2026-08-30T05:24:00.126Z', '2026-08-30T05:20:12.359Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.phone', '', 'string', 'Phone', 'settings:contact', '2026-08-30T05:20:12.079Z', '2026-08-29T10:06:17.764Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.addressLine1', '', 'string', 'Address line 1', 'settings:contact', '2026-08-30T05:20:12.098Z', '2026-08-29T10:06:17.783Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.addressLine2', '', 'string', 'Address line 2', 'settings:contact', '2026-08-30T05:20:12.116Z', '2026-08-29T10:06:17.808Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.city', '', 'string', 'City', 'settings:contact', '2026-08-30T05:20:12.138Z', '2026-08-29T10:06:17.830Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.country', 'Philippines', 'string', 'Country', 'settings:contact', '2026-08-30T05:20:12.156Z', '2026-08-29T10:06:17.866Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.hours', '', 'text', 'Operating hours', 'settings:contact', '2026-08-30T05:20:12.175Z', '2026-08-30T05:20:12.175Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.faviconMediaId', '', 'media', 'Favicon', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.713Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.name', 'AXIARO', 'string', 'Store name', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.456Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.brand', 'Axiaro', 'string', 'Display name', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.530Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('business.legalName', '', 'string', 'Legal name', 'settings:business', '2026-08-30T05:20:12.206Z', '2026-08-29T10:06:17.898Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('business.registrationNo', '', 'string', 'Registration no.', 'settings:business', '2026-08-30T05:20:12.225Z', '2026-08-29T10:06:17.938Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('business.taxId', '', 'string', 'Tax ID', 'settings:business', '2026-08-30T05:20:12.244Z', '2026-08-29T10:06:17.971Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('regional.currency', 'PHP', 'string', 'Currency', 'settings:regional', '2026-08-30T05:20:12.264Z', '2026-08-29T10:06:18.006Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('regional.timezone', 'Asia/Manila', 'string', 'Time zone', 'settings:regional', '2026-08-30T05:20:12.283Z', '2026-08-29T10:06:18.055Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('regional.locale', 'en-PH', 'string', 'Locale', 'settings:regional', '2026-08-30T05:20:12.301Z', '2026-08-29T10:06:18.110Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.tagline', 'Considered things for everyday living', 'string', 'Tagline', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.565Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.description', 'AXIARO is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.', 'text', 'Description', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.605Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.status', 'open', 'string', 'Store status', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.656Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.logoMediaId', '', 'media', 'Logo', 'settings:identity', '2026-08-30T05:49:03.319Z', '2026-08-29T10:06:17.684Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('seo.titleTemplate', '%s · Axiaro', 'string', 'Title template', 'settings:seo', '2026-08-30T05:20:12.417Z', '2026-08-29T10:06:18.320Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('seo.defaultTitle', 'Axiaro — Considered things for everyday living', 'string', 'Default title', 'settings:seo', '2026-08-30T05:20:12.436Z', '2026-08-29T10:06:18.374Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('seo.defaultDescription', 'AXIARO is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.', 'text', 'Default meta description', 'settings:seo', '2026-08-30T05:20:12.454Z', '2026-08-29T10:06:18.430Z') ON CONFLICT DO NOTHING;
@@ -1741,13 +1746,8 @@ INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('email.provider', '', 'string', 'Provider', 'settings:email', '2026-08-30T05:20:12.653Z', '2026-08-29T10:06:18.877Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('social.tiktok', '', 'url', 'TikTok', 'settings:social', '2026-08-30T05:24:00.126Z', '2026-08-29T10:06:18.234Z') ON CONFLICT DO NOTHING;
 INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('social.youtube', '', 'url', 'YouTube', 'settings:social', '2026-08-30T05:24:00.126Z', '2026-08-29T10:06:18.269Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.name', 'AXIARO', 'string', 'Store name', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.456Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.brand', 'Axiaro', 'string', 'Display name', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.530Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.tagline', 'Considered things for everyday living', 'string', 'Tagline', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.565Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.description', 'AXIARO is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.', 'text', 'Description', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.605Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.status', 'open', 'string', 'Store status', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.656Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.logoMediaId', '', 'media', 'Logo', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.684Z') ON CONFLICT DO NOTHING;
-INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('store.faviconMediaId', '', 'media', 'Favicon', 'settings:identity', '2026-08-30T05:23:41.310Z', '2026-08-29T10:06:17.713Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.email', 'support@axiaro.example', 'email', 'Support email', 'settings:contact', '2026-08-30T08:32:54.591Z', '2026-08-29T10:06:17.736Z') ON CONFLICT DO NOTHING;
+INSERT INTO "StoreSetting" ("key", "value", "type", "label", "group", "updatedAt", "createdAt") VALUES ('contact.hours', 'Monday to Friday, 9:00am–6:00pm (Philippine time)', 'text', 'Operating hours', 'settings:contact', '2026-08-30T08:32:54.625Z', '2026-08-30T05:20:12.175Z') ON CONFLICT DO NOTHING;
 
 -- ShippingMethod (3)
 INSERT INTO "ShippingMethod" ("id", "code", "name", "description", "rate", "currency", "active", "sortOrder", "createdAt", "updatedAt") VALUES ('cmtezcsll0000kguko6lq0r1w', 'STANDARD', 'Standard Delivery', '3–7 business days', 15000, 'PHP', true, 1, '2026-08-29T22:56:47.817Z', '2026-08-29T23:26:15.452Z') ON CONFLICT DO NOTHING;
@@ -1755,73 +1755,6 @@ INSERT INTO "ShippingMethod" ("id", "code", "name", "description", "rate", "curr
 INSERT INTO "ShippingMethod" ("id", "code", "name", "description", "rate", "currency", "active", "sortOrder", "createdAt", "updatedAt") VALUES ('cmtezcsow0001kgukhvnqwwlc', 'EXPRESS', 'Express Delivery', '1–3 business days', 30000, 'PHP', true, 2, '2026-08-29T22:56:47.936Z', '2026-08-29T23:40:17.954Z') ON CONFLICT DO NOTHING;
 
 -- ContentPage (10)
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w7m0007kgyccqwyfitu', 'about', 'About AXIARO', 'PUBLISHED', 'Why we make what we make, and how.', '## Our approach
-
-AXIARO designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The result is furniture and everyday pieces that are meant to last.
-
-## What we care about
-
-- **Materials you can trace** — solid wood, natural fibres, honest hardware.
-- **Repairable design** — covers that unzip, parts you can replace.
-- **Fair pricing** — no inflated "RRP" to discount from.
-
-_This is demo content for the AXIARO showcase store._', NULL, 'Why we make what we make, and how.', '2026-08-30T05:20:13.903Z', '2026-08-30T05:20:13.906Z', '2026-08-30T05:20:13.906Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8f0008kgycgny1r66r', 'contact', 'Contact us', 'PUBLISHED', 'We usually reply within one business day.', '## Get in touch
-
-For order questions, use **[Track your order](/track)** first — it has the latest status.
-
-Still need a hand? Email us and include your order number if you have one.
-
-- **Email:** set this in Settings → Contact
-- **Hours:** set this in Settings → Contact
-
-_This is demo content for the AXIARO showcase store._', NULL, 'We usually reply within one business day.', '2026-08-30T05:20:13.933Z', '2026-08-30T05:20:13.935Z', '2026-08-30T05:20:13.935Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8y0009kgycyi29h0na', 'faq', 'Frequently asked questions', 'PUBLISHED', 'Shipping, returns, assembly and care.', '## Orders & shipping
-
-**When will my order arrive?**
-Standard delivery is 3–7 business days; express is 1–3. You''ll get tracking once it ships.
-
-**Do you ship outside the Philippines?**
-Not yet — delivery is Philippines-only for now.
-
-## Returns
-
-**What''s your return window?**
-30 days from delivery for unused items in original packaging.
-
-## Assembly & care
-
-**Do items come assembled?**
-Larger furniture ships flat-packed with clear instructions. Care guidance is on each product page.
-
-_This is demo content for the AXIARO showcase store._', NULL, 'Shipping, returns, assembly and care.', '2026-08-30T05:20:13.953Z', '2026-08-30T05:20:13.955Z', '2026-08-30T05:20:13.955Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w9i000akgyc3gx7e9fu', 'shipping', 'Shipping & delivery', 'PUBLISHED', 'Rates, timings and what to expect.', '## Rates
-
-- **Standard delivery:** ₱129, 3–7 business days
-- **Express delivery:** ₱249, 1–3 business days
-- **Free standard shipping** on orders over ₱2,500
-- **Store pickup:** free, ready in 1–2 business days
-
-## Tracking
-
-Every order gets a tracking link by email once it ships. You can also check status any time on the **[Track your order](/track)** page.
-
-_This is demo content for the AXIARO showcase store._', NULL, 'Rates, timings and what to expect.', '2026-08-30T05:20:13.972Z', '2026-08-30T05:20:13.975Z', '2026-08-30T05:20:13.975Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wa3000bkgycbrcb01dd', 'returns', 'Returns & refunds', 'PUBLISHED', 'How to return an item and when you''ll be refunded.', '> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.
-
-## Return window
-
-You can return most items within **30 days of delivery**, unused and in their original packaging.
-
-## How to return
-
-1. Contact us with your order number.
-2. We''ll arrange collection for large items, or send a return label for small ones.
-3. Once the item is inspected, your refund is issued to the original payment method within 5–10 business days.
-
-## Non-returnable items
-
-Made-to-order and clearance items are final sale unless faulty.', NULL, 'How to return an item and when you''ll be refunded.', '2026-08-30T05:20:13.993Z', '2026-08-30T05:20:13.996Z', '2026-08-30T05:20:13.996Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wap000ckgycss0yrz6h', 'care', 'Assembly & care', 'PUBLISHED', 'Keep your pieces looking their best.', '## Assembly
 
 Flat-packed furniture includes step-by-step instructions and all the hardware you need. If you''d rather not, assembly help is available at checkout in supported areas.
@@ -1833,34 +1766,6 @@ Flat-packed furniture includes step-by-step instructions and all the hardware yo
 - **Metal & stone:** wipe with a damp cloth, dry immediately.
 
 _This is demo content for the AXIARO showcase store._', NULL, 'Keep your pieces looking their best.', '2026-08-30T05:20:14.015Z', '2026-08-30T05:20:14.017Z', '2026-08-30T05:20:14.017Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbb000dkgyc7c2wlhny', 'privacy', 'Privacy policy', 'PUBLISHED', 'What we collect and how we use it.', '> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.
-
-## Information we collect
-
-We collect the information you give us at checkout and when you create an account — your name, contact details, delivery address and order history.
-
-## How we use it
-
-- To process and deliver your orders.
-- To provide customer support.
-- To send order updates.
-
-## Your choices
-
-You can access or delete your account data by contacting us. We do not sell personal information.', NULL, 'What we collect and how we use it.', '2026-08-30T05:20:14.037Z', '2026-08-30T05:20:14.039Z', '2026-08-30T05:20:14.039Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbw000ekgycoc2bg766', 'terms', 'Terms & conditions', 'PUBLISHED', 'The rules for using this store.', '> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.
-
-## Using this store
-
-By placing an order you confirm the information you provide is accurate and that you''re authorised to use the payment method.
-
-## Pricing & availability
-
-Prices are shown in Philippine peso and include applicable taxes. We may correct pricing errors and cancel affected orders with a full refund.
-
-## Orders
-
-An order is a request to buy; our acceptance happens when we confirm dispatch.', NULL, 'The rules for using this store.', '2026-08-30T05:20:14.058Z', '2026-08-30T05:20:14.061Z', '2026-08-30T05:20:14.061Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wch000fkgycv4l9520e', 'cookies', 'Cookie policy', 'PUBLISHED', 'How this site uses cookies.', '> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.
 
 ## What cookies we use
@@ -1869,15 +1774,326 @@ INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "
 - **Preferences:** remembering small choices like a filter or a tab.
 
 This demo store does not use advertising or cross-site tracking cookies.', NULL, 'How this site uses cookies.', '2026-08-30T05:20:14.079Z', '2026-08-30T05:20:14.082Z', '2026-08-30T05:20:14.082Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wd4000gkgycahu1ersb', 'cancellation', 'Cancellation policy', 'PUBLISHED', 'Cancelling an order before it ships.', '> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8f0008kgycgny1r66r', 'contact', 'Contact us', 'PUBLISHED', 'How to reach the AXIARO team about an order or a question.', '## Get in touch
 
-## Before dispatch
+For anything about an existing order, check **[Track your order](/track)** first — it always has the latest status. If you were signed in when you ordered, your full history is in **[your account](/account/orders)**.
 
-You can cancel an order for a full refund any time before it is marked as shipped — contact us with your order number.
+For everything else — a question before you buy, a return, a cancellation, or a problem with a delivery — use the contact details below. If you have an order number, please include it so we can help faster.
 
-## After dispatch
+We aim to reply within one business day.
 
-Once an order has shipped it follows the **Returns & refunds** process instead.', NULL, 'Cancelling an order before it ships.', '2026-08-30T05:20:14.102Z', '2026-08-30T05:20:14.105Z', '2026-08-30T05:20:14.105Z') ON CONFLICT DO NOTHING;
+# What we can help with
+
+- Questions about a product before you order
+- Arranging payment for an order that is awaiting payment
+- Delivery questions and delayed parcels
+- Returns, refunds and cancellations
+- Account and sign-in help
+
+_AXIARO is a demonstration store. The contact details shown here come from the store''s settings and can be updated by an administrator._', 'Contact us', 'Contact AXIARO about an order, a return, a cancellation or a question. We aim to reply within one business day.', '2026-08-30T05:20:13.933Z', '2026-08-30T05:20:13.935Z', '2026-08-30T08:37:53.776Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbb000dkgyc7c2wlhny', 'privacy', 'Privacy policy', 'PUBLISHED', 'What personal information AXIARO collects, how it is used, and the choices you have.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
+
+AXIARO ("we", "us", "the store") operates this online store. This policy explains what personal information we collect, why we collect it, how we use and protect it, and the choices you have. It applies to this website and the orders placed through it.
+
+# Information we collect
+
+## Account information
+When you create an account we store your name, email address and a secure reference to your sign-in identity. Passwords are handled by our authentication provider and are never stored by the store itself.
+
+## Contact information
+The email address, and where you provide it the phone number, that you give us so we can send order updates and respond to support requests.
+
+## Order information
+The products you order, quantities, prices at the time of purchase, any discount code applied, your chosen delivery method, and the order''s status history. Each order keeps its own immutable snapshot of these details.
+
+## Address information
+The delivery address, and billing address where different, that you enter at checkout or save to your account. Saved addresses stay in your account until you delete them.
+
+## Authentication and session technology
+We use cookies that are strictly necessary to keep you signed in and to keep your shopping cart and checkout working. These cannot be switched off without breaking core functionality.
+
+## Website usage information
+Basic technical information that your browser sends with every request — such as your device type and pages viewed — may be processed by our hosting provider to run the site securely and to diagnose faults. This demo store does not run advertising or cross-site tracking.
+
+# How we use your information
+
+- To process, fulfil and deliver your orders.
+- To contact you about an order, including to arrange payment and delivery.
+- To provide customer support and handle returns, refunds and cancellations.
+- To maintain your account and order history.
+- To keep the store secure, prevent fraud and abuse, and meet our record-keeping obligations.
+
+We do not sell your personal information, and we do not use it for automated decision-making that produces legal effects.
+
+# Service providers
+
+We rely on a small number of providers to run the store: a cloud hosting and database provider, an authentication provider, and — once configured — an email delivery provider and a payment provider. These providers process data only on our instructions and only as needed to provide their service. Transactional email is currently in a record-only mode and no marketing email is sent.
+
+# Data retention
+
+We keep order and transaction records for as long as needed to fulfil the order and to meet tax and accounting requirements. Account information is kept until you ask us to delete your account. Support messages are kept only as long as needed to resolve your query.
+
+# Security
+
+Access to store data is restricted to authorised staff through role-based permissions. Connections to the site are encrypted in transit. Payment credentials are not collected or held by the store. No online service can be guaranteed perfectly secure, but we take reasonable technical and organisational measures to protect your information.
+
+# Your rights
+
+Depending on where you live, you may have the right to access the personal information we hold about you, to ask us to correct or delete it, to object to or restrict certain processing, and to receive a copy in a portable format. You can exercise these rights, or ask a question about this policy, using the contact details on our **[Contact us](/pages/contact)** page. We may need to verify your identity before acting on a request.
+
+# Children
+
+This store is intended for adults. We do not knowingly collect information from children.
+
+# Changes to this policy
+
+We may update this policy from time to time. The "Last updated" date at the top of the page shows when it last changed. Significant changes will be highlighted on this page.
+
+# Contact
+
+Questions about privacy or your data can be sent through our **[Contact us](/pages/contact)** page.', 'Privacy policy', 'How AXIARO collects, uses, retains and protects your personal information, and how to exercise your rights.', '2026-08-30T05:20:14.037Z', '2026-08-30T05:20:14.039Z', '2026-08-30T08:37:53.612Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbw000ekgycoc2bg766', 'terms', 'Terms & conditions', 'PUBLISHED', 'The terms that apply to using the AXIARO store and placing an order.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
+
+These Terms & Conditions govern your use of the AXIARO store and any order you place. By using the site or placing an order you agree to them. Please read them together with our **[Privacy policy](/pages/privacy)**, **[Shipping & delivery](/pages/shipping)**, **[Returns & refunds](/pages/returns)** and **[Cancellation policy](/pages/cancellation)**.
+
+# Using this website
+
+You may browse and shop for your own personal, non-commercial use. You agree not to misuse the site — for example by attempting to interfere with its security, scrape it at scale, or use it to break the law. We may suspend access if we reasonably believe the site is being misused.
+
+# Your account
+
+You are responsible for the accuracy of the information on your account and for keeping your sign-in credentials confidential. Tell us promptly if you think your account has been used without your permission. You must be able to form a legally binding contract to place an order.
+
+# Product information
+
+We describe our products as accurately as we can. Product illustrations on this demo store are an in-house graphic system rather than photographs, and colours can vary between screens. Minor variation in natural materials is normal and is not a fault.
+
+# Pricing
+
+Prices are shown in Philippine peso (₱) and, where applicable, include tax. The price you pay is the price shown at the time your order is placed. If we discover a genuine pricing error before we accept your order, we will contact you to confirm the correct price or cancel the order without charge.
+
+# Product availability
+
+All products are subject to availability. Stock shown on the site is indicative and can change while you are shopping. If an item becomes unavailable after you order, we will let you know and arrange a substitute where possible or cancel that item without charge.
+
+# Orders and order acceptance
+
+Submitting an order is an offer to buy. A confirmation screen or message acknowledges that we have received your order — it is not acceptance. We accept your order when we begin preparing it for dispatch (or, for store pickup, when we confirm it is ready). We may decline an order, for example where stock is unavailable, where we could not arrange payment, or where we suspect fraud.
+
+# Payments
+
+Online card, GCash and Maya payments are **not active on this store yet**. When you place an order it is recorded as *awaiting payment* and our team contacts you to arrange payment separately. No card or wallet details are collected or stored by the store. Because payment is arranged after the order is placed, your order will show as *awaiting payment* until our team has confirmed it with you.
+
+# Shipping and delivery
+
+Delivery is within the Philippines only. Available methods, fees and estimated timeframes are set out on the **[Shipping & delivery](/pages/shipping)** page and shown again at checkout. Delivery estimates are not guarantees.
+
+# Returns, refunds and cancellations
+
+Your options for returning an item or cancelling an order are set out on the **[Returns & refunds](/pages/returns)** and **[Cancellation policy](/pages/cancellation)** pages. Refunds are processed manually by our team; automated online refunds are not available on this store.
+
+# Promotions and discount codes
+
+Discount codes are applied at checkout, cannot be exchanged for cash, and may be limited by time, by order value, by number of uses, or to one use per customer. We may withdraw a code or correct an error in how it was applied.
+
+# Intellectual property
+
+The AXIARO name, store design, text and graphics are owned by us or our licensors and may not be copied or reused without permission, except that you may keep a copy of your own order records.
+
+# Limitation of liability
+
+The store is provided on an "as is" basis. To the extent the law allows, we are not liable for indirect or consequential loss, or for loss caused by events outside our reasonable control. Nothing in these terms limits any liability that cannot be limited by law, including for death or personal injury caused by negligence, or for fraud. Your statutory consumer rights are not affected.
+
+# Changes to these terms
+
+We may update these terms. The version that applies to your order is the one published when you place it. The "Last updated" date shows when this page last changed.
+
+# Contact
+
+Questions about these terms can be sent through our **[Contact us](/pages/contact)** page.', 'Terms & conditions', 'The terms governing use of the AXIARO store, orders, pricing, payment, delivery, returns and liability.', '2026-08-30T05:20:14.058Z', '2026-08-30T05:20:14.061Z', '2026-08-30T08:37:53.647Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w9i000akgyc3gx7e9fu', 'shipping', 'Shipping & delivery', 'PUBLISHED', 'Delivery options, fees, timeframes and tracking for AXIARO orders.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
+
+This page explains how delivery works for AXIARO orders. The options and fees shown at checkout are always the current ones — if anything below differs from checkout, checkout is correct.
+
+# Where we deliver
+
+We deliver within the Philippines only. We are not able to ship internationally at this time.
+
+# Delivery options
+
+## Standard delivery
+Estimated 3–7 business days after your order is prepared for dispatch. Fee: ₱150.
+
+## Express delivery
+Estimated 1–3 business days after your order is prepared for dispatch. Fee: ₱300.
+
+## Store pickup
+Free. Collect from our Batangas City location, usually ready in 1–2 business days. We will let you know when your order is ready to collect.
+
+# Shipping fees
+
+The exact fee for your order and address is calculated and shown at checkout before you confirm. **Standard delivery is free on orders of ₱2,500 or more** (before delivery fees). Store pickup is always free.
+
+# Processing time
+
+Orders are prepared for dispatch on business days. The delivery estimates above start once your order has been prepared, not from the moment you place it. Because payment is arranged after you order, preparation begins after payment has been confirmed with you.
+
+# Delivery estimates
+
+Timeframes are estimates, not guarantees. Weather, peak periods, courier delays and remote delivery areas can add time. If your order is significantly delayed, contact us and we will chase it up.
+
+# Tracking
+
+Once your order is handed to the courier, its status moves to *shipped* and — where the courier provides one — a tracking number and link are added to the order. You can check the current status any time on the **[Track your order](/track)** page using your order number and email, or from **[your account](/account/orders)** if you were signed in when you ordered.
+
+# Incorrect or incomplete addresses
+
+Please check your delivery address carefully. If a parcel is returned to us because the address was wrong or incomplete, or because no one was available to receive it after reasonable attempts, we will contact you to arrange redelivery. A further delivery fee may apply.
+
+# Problems with a delivery
+
+If your order arrives damaged, incomplete or incorrect, keep the packaging and contact us within a reasonable time — see the **[Returns & refunds](/pages/returns)** page.
+
+# Contact
+
+Delivery questions can be sent through our **[Contact us](/pages/contact)** page. Please include your order number.', 'Shipping & delivery', 'AXIARO delivery options and fees: standard and express delivery within the Philippines, free store pickup, and order tracking.', '2026-08-30T05:20:13.972Z', '2026-08-30T05:20:13.975Z', '2026-08-30T08:37:53.673Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wa3000bkgycbrcb01dd', 'returns', 'Returns & refunds', 'PUBLISHED', 'When you can return an item, how to do it, and how refunds are handled.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
+
+We want you to be happy with your order. This page explains when and how you can return an item and how refunds are handled on this store.
+
+# Refunds on this store
+
+Refunds are **processed manually by our team**. Automated or instant online refunds are not available, because online payment is not yet active on this store. Once a refund is agreed we arrange it with you directly and confirm when it has been sent.
+
+# Return window
+
+You can request a return within **30 days of delivery** (or of collection, for store pickup orders). Items must be unused, in a resaleable condition, and in their original packaging with any tags attached.
+
+# Items that cannot be returned
+
+- Made-to-order or personalised items.
+- Clearance or final-sale items, unless they are faulty.
+- Items that have been used, assembled beyond what is needed to inspect them, or damaged after delivery.
+
+This does not affect your rights if an item is faulty or not as described.
+
+# Damaged, faulty or incorrect items
+
+If an item arrives damaged or faulty, or you received the wrong item, contact us within a reasonable time of delivery and include your order number and a photo where possible. We will arrange a repair, replacement or refund at no cost to you, including any return shipping.
+
+# How to return an item
+
+1. Contact us through the **[Contact us](/pages/contact)** page with your order number and which item(s) you want to return and why.
+2. We will confirm whether the item is eligible and send you return instructions. For larger furniture we arrange collection; for smaller items we provide a return address.
+3. Pack the item securely in its original packaging.
+4. Hand it to the courier we arrange, or send it to the address we give you.
+
+# Refund process and timing
+
+Once we receive the returned item we inspect it, usually within 3–5 business days. If the return is approved we process the refund for the price of the item. Return shipping costs are refunded only where the item was faulty, damaged or incorrect. Because refunds are arranged manually, the time to reach you depends on the payment method used — we will keep you updated and confirm when it has been sent.
+
+# Exchanges
+
+We do not run automated exchanges. If you want a different size, colour or item, return the original for a refund and place a new order.
+
+# Contact
+
+Start a return, or ask a question, through the **[Contact us](/pages/contact)** page.', 'Returns & refunds', 'AXIARO returns policy: 30-day return window, how to return an item, faulty items, and how manual refunds are processed.', '2026-08-30T05:20:13.993Z', '2026-08-30T05:20:13.996Z', '2026-08-30T08:37:53.698Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wd4000gkgycahu1ersb', 'cancellation', 'Cancellation policy', 'PUBLISHED', 'When an order can be cancelled and what happens to any payment.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
+
+This page explains when you can cancel an AXIARO order and what happens to any payment.
+
+# Before your order is prepared for dispatch
+
+You can cancel an order at no cost any time before it has been marked as *shipped* (or, for store pickup, before it is marked ready). Contact us through the **[Contact us](/pages/contact)** page with your order number and ask to cancel.
+
+Because payment on this store is arranged after you order, in most cases nothing will have been paid yet and there is simply nothing to refund. If you had already arranged payment, we will arrange the refund with you — see below.
+
+# After your order has shipped
+
+Once an order has been handed to the courier it can no longer be cancelled. When it arrives you can use the **[Returns & refunds](/pages/returns)** process instead.
+
+# Orders already delivered or collected
+
+Delivered and collected orders are handled under the **[Returns & refunds](/pages/returns)** policy, not this one.
+
+# Part-cancellations
+
+If you want to remove only some items from an order that has not yet shipped, contact us — we can usually adjust the order and update what is owed.
+
+# Payment and refund implications
+
+- If no payment had been arranged: the order is simply cancelled, with nothing to refund.
+- If payment had been arranged: we process the refund manually and confirm with you when it has been sent. Automated online refunds are not available on this store.
+- Any discount code used on a cancelled order becomes available to use again, subject to its own conditions.
+
+# If we cancel an order
+
+We may cancel an order — for example where an item is out of stock, where a pricing error is found, or where payment could not be arranged. If this happens we will tell you and arrange a full refund of anything paid.
+
+# Contact
+
+To cancel an order, use the **[Contact us](/pages/contact)** page and include your order number.', 'Cancellation policy', 'How to cancel an AXIARO order before it ships, what happens after dispatch, and the payment and refund implications.', '2026-08-30T05:20:14.102Z', '2026-08-30T05:20:14.105Z', '2026-08-30T08:37:53.722Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w7m0007kgyccqwyfitu', 'about', 'About AXIARO', 'PUBLISHED', 'Why we make what we make, and how the store works.', '## Our approach
+
+AXIARO designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
+
+# What we care about
+
+- **Materials you can trace** — solid wood, natural fibres and honest hardware.
+- **Repairable design** — covers that unzip, parts that can be replaced.
+- **Fair pricing** — a real price, not an inflated "RRP" to discount from.
+
+# How the store works
+
+Browse the catalogue, add pieces to your bag, and check out with delivery or free store pickup. You can shop as a guest or create an account to save addresses, track orders and keep a wishlist. After you place an order our team contacts you to arrange payment, then prepares it for dispatch.
+
+# About this store
+
+AXIARO is a demonstration store built to showcase a complete e-commerce platform. Product imagery is an in-house illustration system rather than photography, and some details — such as company registration and a published payment method — are intentionally left for a real operator to configure. Store and contact details shown across the site are drawn from the store''s own settings.
+
+# Get in touch
+
+Questions are welcome through our **[Contact us](/pages/contact)** page, and order updates are always on **[Track your order](/track)**.', 'About AXIARO', 'AXIARO designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.', '2026-08-30T05:20:13.903Z', '2026-08-30T05:20:13.906Z', '2026-08-30T08:37:53.750Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8y0009kgycyi29h0na', 'faq', 'Frequently asked questions', 'PUBLISHED', 'Ordering, payment, shipping, returns and support — answered.', '## Ordering
+
+## How do I place an order?
+Add the items you want to your bag, open the bag and choose **Checkout**. Pick a delivery method (or free store pickup), confirm your address, review the order and place it. You will see a confirmation with your order number.
+
+## Do I need an account?
+No — you can check out as a guest. Creating an account lets you save addresses, track orders from **[your account](/account/orders)**, keep a wishlist, and leave reviews on items you have received.
+
+## Can I change or cancel my order?
+You can cancel at no cost any time before the order is marked as shipped — see the **[Cancellation policy](/pages/cancellation)**. To change items on an order that has not shipped, contact us and we will adjust it where we can.
+
+# Payment
+
+## What payment methods are available?
+Online card, GCash and Maya payments are **not active on this store yet**. When you place an order it is recorded as *awaiting payment*, and our team contacts you to arrange payment. No card or wallet details are collected by the store.
+
+## When am I charged?
+Nothing is charged automatically. Payment is arranged with you after the order is placed and before it is prepared for dispatch.
+
+# Shipping
+
+## How does shipping work?
+We deliver within the Philippines only. You can choose Standard delivery (₱150, about 3–7 business days), Express delivery (₱300, about 1–3 business days), or free store pickup in Batangas City. Standard delivery is free on orders of ₱2,500 or more. The exact fee is shown at checkout. Full details are on the **[Shipping & delivery](/pages/shipping)** page.
+
+## How do I track my order?
+Use the **[Track your order](/track)** page with your order number and email, or open **[your account](/account/orders)** if you were signed in. Once the courier has your parcel, a tracking link is added where available.
+
+# Returns
+
+## How do returns work?
+You can request a return within 30 days of delivery for unused items in their original packaging. Contact us to start a return and we will send instructions. Refunds are processed manually by our team. Full details are on the **[Returns & refunds](/pages/returns)** page.
+
+## What if my item arrives damaged?
+Keep the packaging and contact us as soon as you can with your order number and a photo. We will arrange a repair, replacement or refund at no cost to you.
+
+# Support
+
+## How do I contact support?
+Use the **[Contact us](/pages/contact)** page. Include your order number if your question is about an order. We aim to reply within one business day.', 'Frequently asked questions', 'Answers to common questions about ordering from AXIARO: accounts, payment, delivery, tracking, returns and support.', '2026-08-30T05:20:13.953Z', '2026-08-30T05:20:13.955Z', '2026-08-30T08:37:53.793Z') ON CONFLICT DO NOTHING;
 
 -- ContentBlock (7)
 INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w3z0001kgyc61794j8l', 'homepage.categories.default', 'homepage', 'category_tiles', 'Category tiles', '{"heading":""}', 1, 'PUBLISHED', '2026-08-30T05:20:13.776Z', '2026-08-30T05:20:13.776Z') ON CONFLICT DO NOTHING;
@@ -1886,55 +2102,56 @@ INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "posit
 INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w5n0004kgycdyjgx0yt', 'homepage.rail.bestsellers', 'homepage', 'product_rail', 'Bestsellers', '{"eyebrow":"Most loved","title":"Bestsellers","source":"bestsellers","categorySlug":"","productIds":[],"actionLabel":"Shop bestsellers","actionHref":"/c/all?sort=bestselling","limit":10}', 4, 'PUBLISHED', '2026-08-30T05:20:13.836Z', '2026-08-30T05:20:13.836Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w680005kgycfocpgd0g', 'homepage.valueprops.default', 'homepage', 'value_props', 'Value props', '{"items":[{"icon":"truck","title":"Free shipping over ₱2,500","body":"Flat ₱129 below that. Express available."},{"icon":"returns","title":"30-day returns","body":"Changed your mind? Send it back, no fuss."},{"icon":"shield","title":"10-year guarantee","body":"On the frame of every piece of furniture."},{"icon":"wrench","title":"Assembly help","body":"Clear instructions, and a hand if you want one."}]}', 5, 'PUBLISHED', '2026-08-30T05:20:13.856Z', '2026-08-30T05:20:13.856Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w6r0006kgyc2aodxyza', 'homepage.rail.sale', 'homepage', 'product_rail', 'On sale now', '{"eyebrow":"Reduced","title":"On sale now","source":"on_sale","categorySlug":"","productIds":[],"actionLabel":"All sale items","actionHref":"/c/sale","limit":10}', 6, 'PUBLISHED', '2026-08-30T05:20:13.876Z', '2026-08-30T05:20:13.876Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w2m0000kgyczer8mwwq', 'homepage.hero.default', 'homepage', 'hero', 'Hero', '{"eyebrow":"Autumn / Winter — new in","heading":"Considered things for everyday living","body":"Furniture, lighting, textiles and a small wardrobe — designed in-house, made to last, and priced without the markup. Free shipping over ₱2,500.","ctaLabel":"Shop everything","ctaHref":"/c/all","secondaryCtaLabel":"See what''s new","secondaryCtaHref":"/c/new","imageMediaId":"","notes":["10-year furniture guarantee","30-day returns","Assembly help included"]}', 0, 'PUBLISHED', '2026-08-30T05:20:13.726Z', '2026-08-30T05:24:37.142Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w2m0000kgyczer8mwwq', 'homepage.hero.default', 'homepage', 'hero', 'Hero', '{"eyebrow":"Autumn / Winter — new in","heading":"Considered things for everyday living","body":"Furniture, lighting, textiles and a small wardrobe — designed in-house, made to last, and priced without the markup. Free shipping over ₱2,500.","ctaLabel":"Shop everything","ctaHref":"/c/all","secondaryCtaLabel":"See what''s new","secondaryCtaHref":"/c/new","imageMediaId":"","notes":["10-year furniture guarantee","30-day returns","Assembly help included"]}', 0, 'PUBLISHED', '2026-08-30T05:20:13.726Z', '2026-08-30T05:45:17.488Z') ON CONFLICT DO NOTHING;
 
--- Permission (36)
+-- Permission (37)
 INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsps0000kgcs51auh90f', 'view_dashboard', 'Open the admin dashboard', 'Dashboard', 0, '2026-08-29T08:34:26.465Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqe0001kgcsnue9g7os', 'view_products', 'View products', 'Products', 1, '2026-08-29T08:34:26.486Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqo0002kgcsl0l9qbw4', 'create_products', 'Create products', 'Products', 2, '2026-08-29T08:34:26.497Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqy0003kgcse5apvmr0', 'edit_products', 'Edit products', 'Products', 3, '2026-08-29T08:34:26.507Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsr90004kgcsl2qfnr7j', 'delete_products', 'Delete products', 'Products', 4, '2026-08-29T08:34:26.517Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsrk0005kgcstw1nvtam', 'manage_product_images', 'Manage product images', 'Products', 5, '2026-08-29T08:34:26.528Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsrt0006kgcs5amtd6j5', 'view_categories', 'View categories', 'Categories', 6, '2026-08-29T08:34:26.538Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jss30007kgcswj6lh85k', 'create_categories', 'Create categories', 'Categories', 7, '2026-08-29T08:34:26.548Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jssd0008kgcs3a3it7o5', 'edit_categories', 'Edit categories', 'Categories', 8, '2026-08-29T08:34:26.558Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsso0009kgcsk50wz7zr', 'delete_categories', 'Delete categories', 'Categories', 9, '2026-08-29T08:34:26.568Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jssy000akgcsvs4cvfgg', 'view_inventory', 'View inventory', 'Inventory', 10, '2026-08-29T08:34:26.579Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jst9000bkgcsj77ysaqu', 'manage_inventory', 'Adjust stock and inventory settings', 'Inventory', 11, '2026-08-29T08:34:26.589Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jstj000ckgcsequ2s89b', 'view_orders', 'View orders', 'Orders', 12, '2026-08-29T08:34:26.599Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jstt000dkgcs0iycat5z', 'manage_orders', 'Update order status and fulfilment', 'Orders', 13, '2026-08-29T08:34:26.609Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsu3000ekgcsrotpkwi4', 'cancel_orders', 'Cancel orders', 'Orders', 14, '2026-08-29T08:34:26.620Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsud000fkgcse19trsr2', 'view_customers', 'View customer accounts', 'Customers', 15, '2026-08-29T08:34:26.630Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsuo000gkgcsbe09f5ui', 'manage_customers', 'Edit customer accounts', 'Customers', 16, '2026-08-29T08:34:26.640Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsuz000hkgcs00lcuosx', 'view_payments', 'View payments', 'Payments', 17, '2026-08-29T08:34:26.651Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsva000ikgcs5mo1loh1', 'manage_payments', 'Reconcile and update payments', 'Payments', 18, '2026-08-29T08:34:26.662Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsvm000jkgcsbwl5idg9', 'issue_refunds', 'Issue refunds', 'Payments', 19, '2026-08-29T08:34:26.674Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsvx000kkgcsjssoz0jg', 'view_shipping', 'View shipping', 'Shipping', 20, '2026-08-29T08:34:26.685Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsw8000lkgcsqxkbxlg2', 'manage_shipping', 'Manage shipping methods and rates', 'Shipping', 21, '2026-08-29T08:34:26.696Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jswj000mkgcssbr97kux', 'view_coupons', 'View coupons', 'Marketing', 22, '2026-08-29T08:34:26.707Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jswv000nkgcsg4cwxwcp', 'manage_coupons', 'Create and edit coupons', 'Marketing', 23, '2026-08-29T08:34:26.719Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsx6000okgcsawb0ci57', 'view_promotions', 'View promotions', 'Marketing', 24, '2026-08-29T08:34:26.730Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsxg000pkgcsbl3pqqbv', 'manage_promotions', 'Manage promotions', 'Marketing', 25, '2026-08-29T08:34:26.740Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsxr000qkgcsnmgatnki', 'view_reviews', 'View product reviews', 'Reviews', 26, '2026-08-29T08:34:26.751Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsy1000rkgcs6wczdbm6', 'manage_reviews', 'Moderate product reviews', 'Reviews', 27, '2026-08-29T08:34:26.762Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyd000skgcs1co6585q', 'view_content', 'View site content', 'Content', 28, '2026-08-29T08:34:26.773Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyn000tkgcsjjq8lrcm', 'manage_content', 'Edit site content', 'Content', 29, '2026-08-29T08:34:26.783Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyx000ukgcsmu4ty4cz', 'view_settings', 'View store settings', 'Settings', 30, '2026-08-29T08:34:26.793Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsz8000vkgcscgx88ocy', 'manage_settings', 'Change store settings', 'Settings', 31, '2026-08-29T08:34:26.804Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jszi000wkgcsuntyehlg', 'view_admin_users', 'View administrators', 'Admin Users', 32, '2026-08-29T08:34:26.815Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jszt000xkgcsmy5jxhph', 'invite_admin_users', 'Invite administrators', 'Admin Users', 33, '2026-08-29T08:34:26.826Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jt05000ykgcsph7p327g', 'manage_admin_roles', 'Assign and remove admin roles', 'Admin Users', 34, '2026-08-29T08:34:26.838Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jt0k000zkgcswgogfrcf', 'view_audit_logs', 'View the admin audit log', 'System', 35, '2026-08-29T08:34:26.852Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmtfh6wgh0001kgqkq9yq100v', 'view_analytics', 'View store analytics and reports', 'Analytics', 1, '2026-08-30T07:16:05.970Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqe0001kgcsnue9g7os', 'view_products', 'View products', 'Products', 2, '2026-08-29T08:34:26.486Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqo0002kgcsl0l9qbw4', 'create_products', 'Create products', 'Products', 3, '2026-08-29T08:34:26.497Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsqy0003kgcse5apvmr0', 'edit_products', 'Edit products', 'Products', 4, '2026-08-29T08:34:26.507Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsr90004kgcsl2qfnr7j', 'delete_products', 'Delete products', 'Products', 5, '2026-08-29T08:34:26.517Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsrk0005kgcstw1nvtam', 'manage_product_images', 'Manage product images', 'Products', 6, '2026-08-29T08:34:26.528Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsrt0006kgcs5amtd6j5', 'view_categories', 'View categories', 'Categories', 7, '2026-08-29T08:34:26.538Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jss30007kgcswj6lh85k', 'create_categories', 'Create categories', 'Categories', 8, '2026-08-29T08:34:26.548Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jssd0008kgcs3a3it7o5', 'edit_categories', 'Edit categories', 'Categories', 9, '2026-08-29T08:34:26.558Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsso0009kgcsk50wz7zr', 'delete_categories', 'Delete categories', 'Categories', 10, '2026-08-29T08:34:26.568Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jssy000akgcsvs4cvfgg', 'view_inventory', 'View inventory', 'Inventory', 11, '2026-08-29T08:34:26.579Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jst9000bkgcsj77ysaqu', 'manage_inventory', 'Adjust stock and inventory settings', 'Inventory', 12, '2026-08-29T08:34:26.589Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jstj000ckgcsequ2s89b', 'view_orders', 'View orders', 'Orders', 13, '2026-08-29T08:34:26.599Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jstt000dkgcs0iycat5z', 'manage_orders', 'Update order status and fulfilment', 'Orders', 14, '2026-08-29T08:34:26.609Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsu3000ekgcsrotpkwi4', 'cancel_orders', 'Cancel orders', 'Orders', 15, '2026-08-29T08:34:26.620Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsud000fkgcse19trsr2', 'view_customers', 'View customer accounts', 'Customers', 16, '2026-08-29T08:34:26.630Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsuo000gkgcsbe09f5ui', 'manage_customers', 'Edit customer accounts', 'Customers', 17, '2026-08-29T08:34:26.640Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsuz000hkgcs00lcuosx', 'view_payments', 'View payments', 'Payments', 18, '2026-08-29T08:34:26.651Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsva000ikgcs5mo1loh1', 'manage_payments', 'Reconcile and update payments', 'Payments', 19, '2026-08-29T08:34:26.662Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsvm000jkgcsbwl5idg9', 'issue_refunds', 'Issue refunds', 'Payments', 20, '2026-08-29T08:34:26.674Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsvx000kkgcsjssoz0jg', 'view_shipping', 'View shipping', 'Shipping', 21, '2026-08-29T08:34:26.685Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsw8000lkgcsqxkbxlg2', 'manage_shipping', 'Manage shipping methods and rates', 'Shipping', 22, '2026-08-29T08:34:26.696Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jswj000mkgcssbr97kux', 'view_coupons', 'View coupons', 'Marketing', 23, '2026-08-29T08:34:26.707Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jswv000nkgcsg4cwxwcp', 'manage_coupons', 'Create and edit coupons', 'Marketing', 24, '2026-08-29T08:34:26.719Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsx6000okgcsawb0ci57', 'view_promotions', 'View promotions', 'Marketing', 25, '2026-08-29T08:34:26.730Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsxg000pkgcsbl3pqqbv', 'manage_promotions', 'Manage promotions', 'Marketing', 26, '2026-08-29T08:34:26.740Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsxr000qkgcsnmgatnki', 'view_reviews', 'View product reviews', 'Reviews', 27, '2026-08-29T08:34:26.751Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsy1000rkgcs6wczdbm6', 'manage_reviews', 'Moderate product reviews', 'Reviews', 28, '2026-08-29T08:34:26.762Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyd000skgcs1co6585q', 'view_content', 'View site content', 'Content', 29, '2026-08-29T08:34:26.773Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyn000tkgcsjjq8lrcm', 'manage_content', 'Edit site content', 'Content', 30, '2026-08-29T08:34:26.783Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsyx000ukgcsmu4ty4cz', 'view_settings', 'View store settings', 'Settings', 31, '2026-08-29T08:34:26.793Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jsz8000vkgcscgx88ocy', 'manage_settings', 'Change store settings', 'Settings', 32, '2026-08-29T08:34:26.804Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jszi000wkgcsuntyehlg', 'view_admin_users', 'View administrators', 'Admin Users', 33, '2026-08-29T08:34:26.815Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jszt000xkgcsmy5jxhph', 'invite_admin_users', 'Invite administrators', 'Admin Users', 34, '2026-08-29T08:34:26.826Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jt05000ykgcsph7p327g', 'manage_admin_roles', 'Assign and remove admin roles', 'Admin Users', 35, '2026-08-29T08:34:26.838Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Permission" ("id", "key", "description", "group", "sortOrder", "createdAt") VALUES ('cmte4jt0k000zkgcswgogfrcf', 'view_audit_logs', 'View the admin audit log', 'System', 36, '2026-08-29T08:34:26.852Z') ON CONFLICT DO NOTHING;
 
 -- Role (6)
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt0y0010kgcsjhv77rbr', 'SUPER_ADMIN', 'Super Admin', 'Unrestricted access, including admin user and role management.', true, 0, '2026-08-29T08:34:26.866Z', '2026-08-29T08:34:26.866Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt1h0011kgcs62tcer8s', 'ADMIN', 'Admin', 'General store management. No admin-user, refund, settings-write or audit access.', true, 1, '2026-08-29T08:34:26.886Z', '2026-08-29T08:34:26.886Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt1s0012kgcsnew90kwh', 'STAFF', 'Staff', 'Day-to-day operations across catalogue, inventory, orders and reviews.', true, 2, '2026-08-29T08:34:26.897Z', '2026-08-29T08:34:26.897Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt250013kgcsnjpgzdoe', 'SUPPORT', 'Support', 'Customer and order support.', true, 3, '2026-08-29T08:34:26.909Z', '2026-08-29T08:34:26.909Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt2g0014kgcsy1knyh1g', 'CONTENT_MANAGER', 'Content Manager', 'Site content and review moderation.', true, 4, '2026-08-29T08:34:26.920Z', '2026-08-29T08:34:26.920Z') ON CONFLICT DO NOTHING;
-INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt2q0015kgcs91iidkqa', 'FINANCE', 'Finance', 'Payments, refunds and financial visibility.', true, 5, '2026-08-29T08:34:26.930Z', '2026-08-29T08:34:26.930Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt0y0010kgcsjhv77rbr', 'SUPER_ADMIN', 'Super Admin', 'Unrestricted access, including admin user and role management.', true, 0, '2026-08-29T08:34:26.866Z', '2026-08-30T07:16:06.299Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt1h0011kgcs62tcer8s', 'ADMIN', 'Admin', 'General store management. No admin-user, refund, settings-write or audit access.', true, 1, '2026-08-29T08:34:26.886Z', '2026-08-30T07:16:06.315Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt1s0012kgcsnew90kwh', 'STAFF', 'Staff', 'Day-to-day operations across catalogue, inventory, orders and reviews.', true, 2, '2026-08-29T08:34:26.897Z', '2026-08-30T07:16:06.324Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt250013kgcsnjpgzdoe', 'SUPPORT', 'Support', 'Customer and order support.', true, 3, '2026-08-29T08:34:26.909Z', '2026-08-30T07:16:06.334Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt2g0014kgcsy1knyh1g', 'CONTENT_MANAGER', 'Content Manager', 'Site content and review moderation.', true, 4, '2026-08-29T08:34:26.920Z', '2026-08-30T07:16:06.343Z') ON CONFLICT DO NOTHING;
+INSERT INTO "Role" ("id", "key", "name", "description", "isSystem", "sortOrder", "createdAt", "updatedAt") VALUES ('cmte4jt2q0015kgcs91iidkqa', 'FINANCE', 'Finance', 'Payments, refunds and financial visibility.', true, 5, '2026-08-29T08:34:26.930Z', '2026-08-30T07:16:06.353Z') ON CONFLICT DO NOTHING;
 
--- RolePermission (101)
+-- RolePermission (104)
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4jt4q0017kgcsyyyo0hcr', 'cmte4jt0y0010kgcsjhv77rbr', 'cmte4jsps0000kgcs51auh90f', '2026-08-29T08:34:27.002Z') ON CONFLICT DO NOTHING;
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4jt5k0019kgcstjj2hgst', 'cmte4jt0y0010kgcsjhv77rbr', 'cmte4jsqe0001kgcsnue9g7os', '2026-08-29T08:34:27.032Z') ON CONFLICT DO NOTHING;
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4jt5t001bkgcsszb8liv8', 'cmte4jt0y0010kgcsjhv77rbr', 'cmte4jsqo0002kgcsl0l9qbw4', '2026-08-29T08:34:27.042Z') ON CONFLICT DO NOTHING;
@@ -2036,5 +2253,8 @@ INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUE
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4ju6g006nkgcsw2hatx3m', 'cmte4jt2q0015kgcs91iidkqa', 'cmte4jsvm000jkgcsbwl5idg9', '2026-08-29T08:34:28.360Z') ON CONFLICT DO NOTHING;
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4ju6u006pkgcsg1ew0u2e', 'cmte4jt2q0015kgcs91iidkqa', 'cmte4jsud000fkgcse19trsr2', '2026-08-29T08:34:28.374Z') ON CONFLICT DO NOTHING;
 INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmte4ju7b006rkgcs4moz3rh3', 'cmte4jt2q0015kgcs91iidkqa', 'cmte4jsyx000ukgcsmu4ty4cz', '2026-08-29T08:34:28.392Z') ON CONFLICT DO NOTHING;
+INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmtfh6wtc0018kgqkfipj36g6', 'cmte4jt0y0010kgcsjhv77rbr', 'cmtfh6wgh0001kgqkq9yq100v', '2026-08-30T07:16:06.433Z') ON CONFLICT DO NOTHING;
+INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmtfh6wvh001akgqkcxu4d6ka', 'cmte4jt1h0011kgcs62tcer8s', 'cmtfh6wgh0001kgqkq9yq100v', '2026-08-30T07:16:06.510Z') ON CONFLICT DO NOTHING;
+INSERT INTO "RolePermission" ("id", "roleId", "permissionId", "createdAt") VALUES ('cmtfh6wz5001ckgqkpl1y11p2', 'cmte4jt2q0015kgcs91iidkqa', 'cmtfh6wgh0001kgqkq9yq100v', '2026-08-30T07:16:06.641Z') ON CONFLICT DO NOTHING;
 
 SET session_replication_role = DEFAULT;

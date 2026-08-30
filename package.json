@@ -15,6 +15,7 @@
     "db:seed:rbac": "node --env-file=.env --import tsx scripts/seed-rbac.ts",
     "db:seed:settings": "node --env-file=.env --import tsx scripts/seed-admin-foundation.ts",
     "db:seed:cms": "node --env-file=.env --import tsx scripts/seed-cms.ts",
+    "db:seed:legal": "node --env-file=.env --import tsx scripts/seed-legal-content.ts",
     "storage:setup": "node --env-file=.env scripts/setup-storage.mjs",
     "db:rls": "node --env-file=.env scripts/apply-rls.mjs",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",

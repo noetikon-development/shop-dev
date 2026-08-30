@@ -1,9 +1,12 @@
+import type { Metadata } from "next";
 import { Hero } from "@/components/home/hero";
 import { CategoryTiles } from "@/components/home/category-tiles";
 import { FeatureBand } from "@/components/home/feature-band";
 import { ValueProps } from "@/components/home/value-props";
 import { ProductRail } from "@/components/product-rail";
 import { HomepageBlocks } from "@/components/home/homepage-blocks";
+
+export const metadata: Metadata = { alternates: { canonical: "/" } };
 import {
   getBestSellers,
   getCategoryTree,

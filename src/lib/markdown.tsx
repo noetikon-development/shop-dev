@@ -28,8 +28,11 @@ function renderInline(text: string, keyOf: () => string): ReactNode[] {
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) nodes.push(text.slice(last, m.index));
-    if (m[2] !== undefined) nodes.push(<strong key={keyOf()}>{m[2]}</strong>);
-    else if (m[4] !== undefined) nodes.push(<em key={keyOf()}>{m[4]}</em>);
+    // Bold / italic may themselves contain a link or code span, so recurse into
+    // their content (the captured group never includes the * delimiters, so
+    // each recursion works on a strictly shorter string).
+    if (m[2] !== undefined) nodes.push(<strong key={keyOf()}>{renderInline(m[2], keyOf)}</strong>);
+    else if (m[4] !== undefined) nodes.push(<em key={keyOf()}>{renderInline(m[4], keyOf)}</em>);
     else if (m[6] !== undefined)
       nodes.push(
         <code key={keyOf()} className="rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">

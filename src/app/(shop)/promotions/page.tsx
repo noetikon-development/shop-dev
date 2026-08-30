@@ -9,6 +9,7 @@ import { formatPrice } from "@/lib/utils";
 export const metadata: Metadata = {
   title: "Promotions",
   description: "Current AXIARO promo codes and markdowns.",
+  alternates: { canonical: "/promotions" },
 };
 
 export default async function PromotionsPage() {

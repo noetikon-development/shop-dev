@@ -674,6 +674,40 @@ this page mutates an order, product, customer, coupon or stock level.
   `view_analytics` gate, its own `403`): product sales, coupon usage, orders by
   day, customer summary (aggregated — no personal data).
 
+## Legal & storefront completion (Step 19)
+
+Finishes the customer-facing storefront. No redesign — the AXIARO header, footer
+and product pages are unchanged in appearance.
+
+- **Legal / informational pages** — Privacy, Terms, Shipping, Returns,
+  Cancellation, About, Contact and FAQ live as CMS `ContentPage` rows and are
+  editable in `/admin/content/pages` without a code change. Their canonical
+  content is `scripts/seed-legal-content.ts` (`npm run db:seed:legal`, an
+  idempotent upsert; also runs from `db:seed:cms` and `db:seed`). Copy matches
+  what the platform actually does today: online payment is not active (orders are
+  *awaiting payment*), refunds are handled manually, delivery is the Philippines
+  only, and the three configured `ShippingMethod` rows. A "Last updated" line on
+  each page reflects the row's `updatedAt` (never changes on render). Legal pages
+  carry a demo disclaimer and must be reviewed by the business before a real
+  launch.
+- **Contact page** — `/pages/contact` renders a details panel built from Store
+  Settings (`contact.email` / `contact.phone` / address / `contact.hours` /
+  social links). Nothing is hardcoded; unconfigured rows are hidden and a
+  fallback points at order tracking. Never shows an internal admin address.
+- **SEO** — every storefront route now emits `<link rel="canonical">` (home,
+  `/c/*`, `/p/*`, `/pages/*`, `/promotions`). `robots.txt` / `sitemap.xml` and
+  the per-page titles/descriptions from Steps 16/18 are unchanged.
+- **Storefront polish** — PDP image gallery thumbnails carry product-scoped
+  `aria-label`s and `aria-pressed`; the main image has an accessible name; the
+  non-functional "Size guide" button was removed; PDP shipping copy now reads the
+  `STANDARD_SHIPPING_FEE` / `FREE_SHIPPING_THRESHOLD` constants instead of a stale
+  literal; the footer "Returns" link label matches the page title; the footer
+  first-order prompt reveals the real `WELCOME10` code instead of implying an
+  email was sent; a branded `(shop)/error.tsx` boundary was added.
+- **Markdown renderer** — `src/lib/markdown.tsx` now recurses into `**bold**` /
+  `*italic*` so a link or code span inside emphasis renders (previously shown
+  raw). Still React-element output only — no HTML passthrough.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: coupons in

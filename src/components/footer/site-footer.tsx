@@ -8,7 +8,7 @@ import { NewsletterForm } from "@/components/footer/newsletter-form";
 // Content pages the footer links to when they exist and are published.
 const HELP_PAGES = [
   { slug: "shipping", label: "Shipping & delivery" },
-  { slug: "returns", label: "Returns & exchanges" },
+  { slug: "returns", label: "Returns & refunds" },
   { slug: "care", label: "Assembly & care" },
   { slug: "faq", label: "FAQ" },
   { slug: "contact", label: "Contact us" },

@@ -11,6 +11,7 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
+import { FREE_SHIPPING_THRESHOLD, STANDARD_SHIPPING_FEE } from "@/lib/constants";
 import type { ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -124,7 +125,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
       {/* Gallery */}
       <div className="lg:sticky lg:top-24 lg:self-start">
         <div className="flex gap-3">
-          <div className="hidden w-16 shrink-0 flex-col gap-2.5 sm:flex">
+          <div
+            className="hidden w-16 shrink-0 flex-col gap-2.5 sm:flex"
+            role="group"
+            aria-label={`${product.name} — image thumbnails`}
+          >
             {galleryImages.map((img, i) => (
               <button
                 key={img.url + i}
@@ -133,15 +138,20 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                   "aspect-square overflow-hidden rounded-sm border transition-colors",
                   activeImage === i ? "border-ink" : "border-line hover:border-line-strong",
                 )}
-                aria-label={`View image ${i + 1}`}
+                aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
+                aria-pressed={activeImage === i}
               >
-                <ProductImage src={img.url} alt={img.alt} seedOverride={`${product.slug}-thumb-${i}`} />
+                <ProductImage src={img.url} alt="" seedOverride={`${product.slug}-thumb-${i}`} />
               </button>
             ))}
           </div>
 
           <div className="relative flex-1 overflow-hidden rounded-lg bg-surface-sunken">
-            <div className="aspect-square">
+            <div
+              className="aspect-square"
+              role="img"
+              aria-label={galleryImages[activeImage]?.alt || product.name}
+            >
               <ProductImage
                 src={galleryImages[activeImage]?.url ?? product.image.url}
                 alt={galleryImages[activeImage]?.alt ?? product.name}
@@ -166,7 +176,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-2 sm:hidden">
+        <div
+          className="mt-3 flex gap-2 sm:hidden"
+          role="group"
+          aria-label={`${product.name} — image thumbnails`}
+        >
           {galleryImages.map((img, i) => (
             <button
               key={img.url + i}
@@ -175,7 +189,8 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                 "h-1.5 flex-1 rounded-full transition-colors",
                 activeImage === i ? "bg-ink" : "bg-line-strong",
               )}
-              aria-label={`View image ${i + 1}`}
+              aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
+              aria-pressed={activeImage === i}
             />
           ))}
         </div>
@@ -252,12 +267,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
         {/* Size */}
         {sizeOption && (
           <div className="mt-6">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium">Size</p>
-              <button className="text-xs text-ink-soft underline underline-offset-2">
-                Size guide
-              </button>
-            </div>
+            <p className="text-sm font-medium">Size</p>
             <div className="mt-2.5 flex flex-wrap gap-2">
               {sizeOption.values.map((v) => {
                 const active = selected[sizeOption.id] === v.id;
@@ -342,15 +352,15 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           <div className="flex items-start gap-3">
             <Truck size={17} className="mt-0.5 shrink-0 text-ink-soft" />
             <p className="text-ink-soft">
-              {product.freeShipping || activePrice >= 250000 ? (
+              {product.freeShipping || activePrice >= FREE_SHIPPING_THRESHOLD ? (
                 <>
                   <span className="font-medium text-ink">Free standard shipping.</span> Estimated
                   delivery {estimatedDelivery()}.
                 </>
               ) : (
                 <>
-                  Standard shipping ₱129 · Estimated delivery {estimatedDelivery()}. Free over
-                  ₱2,500.
+                  Standard shipping {formatPrice(STANDARD_SHIPPING_FEE)} · Estimated delivery{" "}
+                  {estimatedDelivery()}. Free over {formatPrice(FREE_SHIPPING_THRESHOLD)}.
                 </>
               )}
             </p>
