@@ -12,6 +12,7 @@ type Props = {
   categories: CategoryOption[];
   product: React.ComponentProps<typeof ProductForm>["product"] & { id: string };
   images: React.ComponentProps<typeof ProductImages>["images"];
+  colours: React.ComponentProps<typeof ProductImages>["colours"];
   options: React.ComponentProps<typeof ProductVariants>["options"];
   variants: React.ComponentProps<typeof ProductVariants>["variants"];
   perms: {
@@ -22,7 +23,7 @@ type Props = {
   };
 };
 
-export function ProductEditor({ categories, product, images, options, variants, perms }: Props) {
+export function ProductEditor({ categories, product, images, colours, options, variants, perms }: Props) {
   const [tab, setTab] = useState("details");
 
   return (
@@ -44,6 +45,7 @@ export function ProductEditor({ categories, product, images, options, variants, 
             <ProductImages
               productId={product.id}
               images={images}
+              colours={colours}
               canManage={perms.manageImages}
             />
           )}

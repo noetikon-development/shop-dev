@@ -3,6 +3,13 @@ import type { StockStatus } from "@/lib/inventory-status";
 
 export type ImageRef = { url: string; alt: string };
 
+/**
+ * A product-detail gallery image. `optionValueId` is the explicit link to a
+ * Colour option value (ProductOptionValue.id); null means the image applies to
+ * every colour. The PDP gallery is driven entirely by this field.
+ */
+export type GalleryImage = ImageRef & { optionValueId: string | null };
+
 export type OptionValueView = {
   id: string;
   value: string;
@@ -59,7 +66,7 @@ export type ProductDetailView = ProductCardView & {
   specs: Record<string, string>;
   care: string | null;
   weightGrams: number;
-  images: ImageRef[];
+  images: GalleryImage[];
   options: OptionView[];
   variants: VariantView[];
   totalStock: number;

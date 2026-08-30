@@ -124,7 +124,11 @@ const cartInclude = {
               name: true,
               status: true,
               freeShipping: true,
-              images: { orderBy: { sortOrder: "asc" }, take: 1, select: { url: true } },
+              images: {
+                orderBy: [{ optionValueId: { sort: "asc", nulls: "first" } }, { sortOrder: "asc" }, { id: "asc" }],
+                take: 1,
+                select: { url: true },
+              },
             },
           },
           inventory: { select: { quantity: true, reserved: true } },

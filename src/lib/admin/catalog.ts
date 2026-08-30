@@ -128,7 +128,15 @@ export async function listAdminProducts(filters: AdminProductFilters) {
         compareAtPrice: true,
         updatedAt: true,
         category: { select: { id: true, name: true } },
-        images: { orderBy: { sortOrder: "asc" }, take: 1, select: { url: true, alt: true } },
+        images: {
+          orderBy: [
+            { optionValueId: { sort: "asc", nulls: "first" } },
+            { sortOrder: "asc" },
+            { id: "asc" },
+          ],
+          take: 1,
+          select: { url: true, alt: true },
+        },
         _count: { select: { variants: true, images: true } },
       },
     }),
@@ -149,7 +157,7 @@ export async function getAdminProduct(id: string) {
     include: {
       category: { select: { id: true, name: true, slug: true } },
       images: {
-        orderBy: { sortOrder: "asc" },
+        orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
         include: { mediaAsset: { select: { id: true, sizeBytes: true, mimeType: true } } },
       },
       options: {

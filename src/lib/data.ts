@@ -1,5 +1,6 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
@@ -34,7 +35,18 @@ const cardSelect = {
   freeShipping: true,
   createdAt: true,
   category: { select: { slug: true, name: true } },
-  images: { orderBy: { sortOrder: "asc" }, take: 1, select: { url: true, alt: true } },
+  // Card thumbnail = the product's primary image: a product-level image
+  // (optionValueId null) wins over a colour-specific one; then lowest sortOrder;
+  // id breaks ties so the pick is stable.
+  images: {
+    orderBy: [
+      { optionValueId: { sort: "asc", nulls: "first" } },
+      { sortOrder: "asc" },
+      { id: "asc" },
+    ],
+    take: 1,
+    select: { url: true, alt: true },
+  },
   options: {
     where: { name: "Colour" },
     select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
@@ -43,7 +55,7 @@ const cardSelect = {
     where: { status: "ACTIVE" },
     select: { id: true, stock: true, inventory: { select: { reorderPoint: true } } },
   },
-} as const;
+} satisfies Prisma.ProductSelect;
 
 type CardRow = {
   id: string;
@@ -429,7 +441,10 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     where: { slug, status: "ACTIVE" },
     include: {
       category: { select: { slug: true, name: true } },
-      images: { orderBy: { sortOrder: "asc" } },
+      // Ordered so that, within each (colour / product-level) group, the lowest
+      // sortOrder comes first — that image is the group's primary. `id` breaks
+      // ties. The PDP groups these by `optionValueId` in the client.
+      images: { orderBy: [{ sortOrder: "asc" }, { id: "asc" }] },
       options: {
         orderBy: { sortOrder: "asc" },
         include: { values: { orderBy: { sortOrder: "asc" } } },
@@ -444,7 +459,11 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
   });
   if (!p) return null;
 
-  const firstImg = p.images[0] ?? { url: `art:accessory:${p.slug}`, alt: p.name };
+  // Card / hero primary image: a product-level image (optionValueId null) wins;
+  // otherwise the first image overall (already ordered by sortOrder, then id).
+  const primaryImg =
+    p.images.find((i) => i.optionValueId == null) ??
+    p.images[0] ?? { url: `art:accessory:${p.slug}`, alt: p.name };
   const swatches = (p.options.find((o) => o.name === "Colour")?.values ?? [])
     .map((v) => v.swatchHex)
     .filter((h): h is string => Boolean(h));
@@ -469,9 +488,13 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     care: p.care,
     weightGrams: p.weightGrams,
     freeShipping: p.freeShipping,
-    image: { url: firstImg.url, alt: firstImg.alt },
-    images: p.images.map((i) => ({ url: i.url, alt: i.alt })),
-    art: artKindFromRef(firstImg.url),
+    image: { url: primaryImg.url, alt: primaryImg.alt },
+    images: p.images.map((i) => ({
+      url: i.url,
+      alt: i.alt,
+      optionValueId: i.optionValueId ?? null,
+    })),
+    art: artKindFromRef(primaryImg.url),
     categorySlug: p.category.slug,
     categoryName: p.category.name,
     colorSwatches: swatches,
@@ -735,7 +758,21 @@ export async function searchSuggestions(q: string, take = 6) {
     },
     orderBy: { soldCount: "desc" },
     take,
-    select: { slug: true, name: true, price: true, category: { select: { name: true } }, images: { take: 1, select: { url: true } } },
+    select: {
+      slug: true,
+      name: true,
+      price: true,
+      category: { select: { name: true } },
+      images: {
+        orderBy: [
+          { optionValueId: { sort: "asc", nulls: "first" } },
+          { sortOrder: "asc" },
+          { id: "asc" },
+        ],
+        take: 1,
+        select: { url: true },
+      },
+    },
   });
   return rows.map((r) => ({
     slug: r.slug,

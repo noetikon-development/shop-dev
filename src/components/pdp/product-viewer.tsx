@@ -78,23 +78,21 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const colourValueId = colourOption ? selected[colourOption.id] : undefined;
   const colourName = colourOption?.values.find((v) => v.id === colourValueId)?.value;
 
-  // Gallery: prefer the selected colour's image first
+  // Gallery = the images EXPLICITLY assigned to the selected colour
+  // (ProductImage.optionValueId — the source of truth). If that colour has no
+  // images, fall back to the product-level images (optionValueId === null); if
+  // there are none of those either, fall back to whatever images exist (the
+  // in-house illustration). Images are never matched by filename, slug, upload
+  // order or content, and images from other colours are never shown.
   const galleryImages = useMemo(() => {
-    if (colourName) {
-      const slugColour = colourName.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      const match = product.images.find((i) => i.url.includes(slugColour));
-      if (match) {
-        return [match, ...product.images.filter((i) => i !== match)];
-      }
-      if (matchedVariant?.imageUrl) {
-        return [
-          { url: matchedVariant.imageUrl, alt: `${product.name} — ${colourName}` },
-          ...product.images,
-        ];
-      }
+    if (colourValueId) {
+      const forColour = product.images.filter((i) => i.optionValueId === colourValueId);
+      if (forColour.length > 0) return forColour;
     }
+    const productLevel = product.images.filter((i) => i.optionValueId == null);
+    if (productLevel.length > 0) return productLevel;
     return product.images;
-  }, [colourName, product.images, product.name, matchedVariant]);
+  }, [colourValueId, product.images]);
 
   async function addToBag() {
     if (needsSize) {

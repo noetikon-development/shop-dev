@@ -1,4 +1,5 @@
 import "server-only";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
@@ -48,10 +49,14 @@ const wishlistSelect = {
       freeShipping: true,
       createdAt: true,
       category: { select: { slug: true, name: true } },
-      images: { orderBy: { sortOrder: "asc" as const }, take: 1, select: { url: true, alt: true } },
+      images: {
+        orderBy: [{ optionValueId: { sort: "asc", nulls: "first" } }, { sortOrder: "asc" }, { id: "asc" }],
+        take: 1,
+        select: { url: true, alt: true },
+      },
       options: {
         where: { name: "Colour" },
-        select: { values: { orderBy: { sortOrder: "asc" as const }, select: { swatchHex: true } } },
+        select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
       },
       variants: {
         where: { status: "ACTIVE" },
@@ -59,7 +64,7 @@ const wishlistSelect = {
       },
     },
   },
-} as const;
+} satisfies Prisma.WishlistItemSelect;
 
 function safeParse<T>(value: string, fallback: T): T {
   try {

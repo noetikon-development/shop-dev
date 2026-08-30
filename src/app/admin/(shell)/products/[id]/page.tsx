@@ -70,11 +70,17 @@ export default async function EditProductPage({
           id: img.id,
           url: img.url,
           alt: img.alt,
+          optionValueId: img.optionValueId ?? null,
           isUpload: Boolean(img.mediaAssetId),
           sizeLabel: img.mediaAsset
             ? `${Math.max(1, Math.round(img.mediaAsset.sizeBytes / 1024))} KB`
             : undefined,
         }))}
+        colours={
+          product.options
+            .find((o) => o.name === "Colour")
+            ?.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })) ?? []
+        }
         options={product.options.map((o) => ({
           id: o.id,
           name: o.name,

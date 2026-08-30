@@ -287,20 +287,27 @@ model Product {
 }
 
 model ProductImage {
-  id            String  @id @default(cuid())
-  productId     String
-  url           String // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
-  alt           String  @default("")
-  sortOrder     Int     @default(0) // lowest sortOrder is the primary image
-  // optional link to a specific option value (e.g. the "Sand" colourway)
+  id        String @id @default(cuid())
+  productId String
+  url       String // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
+  alt       String @default("")
+  // `sortOrder` is scoped to the (productId, optionValueId) group: images for a
+  // given colour are ordered independently, and the lowest sortOrder in a group
+  // is that group's primary image.
+  sortOrder Int    @default(0)
+  // Explicit link to a Colour option value (ProductOptionValue). NULL = the
+  // image applies to the whole product ("all colours"). The storefront gallery
+  // is driven by THIS relation — never by the filename, slug or image content.
   optionValueId String?
   // set when the image was uploaded via the admin (Supabase Storage / MediaAsset)
-  mediaAssetId  String?
+  mediaAssetId String?
 
-  product    Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
-  mediaAsset MediaAsset? @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
+  product     Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
+  optionValue ProductOptionValue? @relation(fields: [optionValueId], references: [id], onDelete: SetNull)
+  mediaAsset  MediaAsset?         @relation(fields: [mediaAssetId], references: [id], onDelete: SetNull)
 
   @@index([productId])
+  @@index([optionValueId])
   @@index([mediaAssetId])
 }
 
@@ -325,6 +332,7 @@ model ProductOptionValue {
 
   option        ProductOption        @relation(fields: [optionId], references: [id], onDelete: Cascade)
   variantValues VariantOptionValue[]
+  images        ProductImage[]
 
   @@index([optionId])
 }

@@ -87,7 +87,7 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | --- | --- |
 | `Category` | self-referencing tree (`parentId`) |
 | `Product` | FK → `Category`; JSON-ish fields stored as text |
-| `ProductImage` | FK → `Product` (cascade) |
+| `ProductImage` | FK → `Product` (cascade). Step 20: `optionValueId` FK → `ProductOptionValue` (`SET NULL`) — the explicit Colour ↔ image link that drives the PDP gallery; `NULL` = product-level (applies to every colour). `sortOrder` is scoped to the `(productId, optionValueId)` group; the lowest in a group is that group's primary. |
 | `ProductOption` / `ProductOptionValue` | option definitions (Colour, Size…) |
 | `Variant` | FK → `Product`; `sku` unique; `status` ACTIVE/ARCHIVED; `stock` is a denormalised mirror of `Inventory` available (`quantity − reserved`), re-derived on every inventory write |
 | `VariantOptionValue` | join: variant ↔ option value |

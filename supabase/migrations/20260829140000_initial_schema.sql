@@ -24,7 +24,9 @@
 --             ProductAnswer tables for product Q&A (Step 15),
 --             EmailLog table for transactional email delivery (Step 17),
 --             analytics indexes User.createdAt / OrderItem.productId /
---             CouponRedemption.createdAt (Step 18).
+--             CouponRedemption.createdAt (Step 18),
+--             ProductImage.optionValueId FK -> ProductOptionValue for the
+--             explicit colour <-> image relation (Step 20).
 -- ============================================================================
 
 -- CreateSchema
@@ -659,6 +661,9 @@ CREATE INDEX "Product_featured_idx" ON "Product"("featured");
 CREATE INDEX "ProductImage_productId_idx" ON "ProductImage"("productId");
 
 -- CreateIndex
+CREATE INDEX "ProductImage_optionValueId_idx" ON "ProductImage"("optionValueId");
+
+-- CreateIndex
 CREATE INDEX "ProductImage_mediaAssetId_idx" ON "ProductImage"("mediaAssetId");
 
 -- CreateIndex
@@ -903,6 +908,9 @@ ALTER TABLE "Product" ADD CONSTRAINT "Product_categoryId_fkey" FOREIGN KEY ("cat
 
 -- AddForeignKey
 ALTER TABLE "ProductImage" ADD CONSTRAINT "ProductImage_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductImage" ADD CONSTRAINT "ProductImage_optionValueId_fkey" FOREIGN KEY ("optionValueId") REFERENCES "ProductOptionValue"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "ProductImage" ADD CONSTRAINT "ProductImage_mediaAssetId_fkey" FOREIGN KEY ("mediaAssetId") REFERENCES "MediaAsset"("id") ON DELETE SET NULL ON UPDATE CASCADE;

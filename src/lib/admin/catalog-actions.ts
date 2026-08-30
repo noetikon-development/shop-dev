@@ -295,6 +295,50 @@ export async function deleteProduct(
 // Product images
 // ===========================================================================
 
+/**
+ * The set of Colour option-value ids for a product. An image may be attached to
+ * one of these (colour-specific) or to nothing (product-level / all colours).
+ */
+async function colourValueIds(productId: string): Promise<Set<string>> {
+  const values = await prisma.productOptionValue.findMany({
+    where: { option: { productId, name: "Colour" } },
+    select: { id: true },
+  });
+  return new Set(values.map((v) => v.id));
+}
+
+/**
+ * Resolve a client-supplied colour choice for an image association.
+ *   ""  / "__product"  → null  (product-level, applies to all colours)
+ *   a valid Colour value id for this product → that id
+ *   anything else → undefined (invalid — the caller rejects it)
+ * The association is ALWAYS explicit; nothing is inferred from the filename,
+ * slug, image metadata or upload order.
+ */
+async function resolveImageColour(
+  productId: string,
+  raw: string,
+): Promise<string | null | undefined> {
+  const trimmed = raw.trim();
+  if (trimmed === "" || trimmed === "__product") return null;
+  const valid = await colourValueIds(productId);
+  return valid.has(trimmed) ? trimmed : undefined;
+}
+
+/** Re-number one (productId, optionValueId) group's images to 0,1,2,… */
+async function resequenceImageGroup(productId: string, optionValueId: string | null) {
+  const images = await prisma.productImage.findMany({
+    where: { productId, optionValueId },
+    orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
+    select: { id: true },
+  });
+  await prisma.$transaction(
+    images.map((img, index) =>
+      prisma.productImage.update({ where: { id: img.id }, data: { sortOrder: index } }),
+    ),
+  );
+}
+
 export async function uploadProductImage(
   _prev: CatalogState,
   formData: FormData,
@@ -307,20 +351,27 @@ export async function uploadProductImage(
 
   const product = await prisma.product.findUnique({
     where: { id: productId },
-    select: { id: true, name: true, images: { select: { sortOrder: true } } },
+    select: { id: true, name: true },
   });
   if (!product) return { error: "That product no longer exists." };
+
+  const optionValueId = await resolveImageColour(productId, String(formData.get("optionValueId") ?? ""));
+  if (optionValueId === undefined) {
+    return { error: "Choose a valid colour for this image, or “Product-level (all colours)”." };
+  }
 
   const result = await uploadMedia({ file, folder: "products" });
   if (!result.ok) return { error: result.error };
 
-  const nextOrder = product.images.reduce((m, i) => Math.max(m, i.sortOrder), -1) + 1;
+  // sortOrder is scoped to the (product, colour) group — the new image goes last.
+  const groupCount = await prisma.productImage.count({ where: { productId, optionValueId } });
   const image = await prisma.productImage.create({
     data: {
       productId,
+      optionValueId,
       url: result.asset.url,
       alt: String(formData.get("alt") ?? "").trim() || product.name,
-      sortOrder: nextOrder,
+      sortOrder: groupCount,
       mediaAssetId: result.asset.id,
     },
   });
@@ -331,7 +382,7 @@ export async function uploadProductImage(
     targetType: "product",
     targetId: productId,
     summary: `${admin.user.email} added an image to “${product.name}”`,
-    meta: { imageId: image.id, filename: result.asset.filename },
+    meta: { imageId: image.id, filename: result.asset.filename, optionValueId },
   });
   revalidateStorefront();
   return { ok: true, message: "Image uploaded." };
@@ -353,7 +404,7 @@ export async function deleteProductImage(
   if (image.mediaAssetId) {
     await deleteMedia(image.mediaAssetId).catch((e) => console.error("[deleteProductImage] media", e));
   }
-  await resequenceImages(image.productId);
+  await resequenceImageGroup(image.productId, image.optionValueId);
 
   await writeAudit({
     actorUserId: admin.user.id,
@@ -361,7 +412,47 @@ export async function deleteProductImage(
     targetType: "product",
     targetId: image.productId,
     summary: `${admin.user.email} removed an image from “${image.product.name}”`,
-    meta: { imageId },
+    meta: { imageId, optionValueId: image.optionValueId },
+  });
+  revalidateStorefront();
+  return { ok: true };
+}
+
+/** Move an existing image to a different colour group (or to product-level). */
+export async function setImageColour(
+  _prev: CatalogState,
+  formData: FormData,
+): Promise<CatalogState> {
+  const admin = await requirePermission("manage_product_images");
+  const imageId = String(formData.get("imageId") ?? "");
+  const image = await prisma.productImage.findUnique({
+    where: { id: imageId },
+    include: { product: { select: { id: true, name: true } } },
+  });
+  if (!image) return { error: "That image no longer exists." };
+
+  const next = await resolveImageColour(image.productId, String(formData.get("optionValueId") ?? ""));
+  if (next === undefined) return { error: "That colour isn’t valid for this product." };
+  if (next === image.optionValueId) return { ok: true };
+
+  const from = image.optionValueId;
+  const groupCount = await prisma.productImage.count({
+    where: { productId: image.productId, optionValueId: next },
+  });
+  await prisma.productImage.update({
+    where: { id: imageId },
+    data: { optionValueId: next, sortOrder: groupCount }, // append to the target group
+  });
+  await resequenceImageGroup(image.productId, from);
+  await resequenceImageGroup(image.productId, next);
+
+  await writeAudit({
+    actorUserId: admin.user.id,
+    action: "catalog.product.image.recoloured",
+    targetType: "product",
+    targetId: image.productId,
+    summary: `${admin.user.email} reassigned an image on “${image.product.name}”`,
+    meta: { imageId, from, to: next },
   });
   revalidateStorefront();
   return { ok: true };
@@ -373,12 +464,18 @@ export async function reorderProductImages(
 ): Promise<CatalogState> {
   const admin = await requirePermission("manage_product_images");
   const productId = String(formData.get("productId") ?? "");
+  const optionValueId = await resolveImageColour(productId, String(formData.get("optionValueId") ?? ""));
+  if (optionValueId === undefined) return { error: "Unknown colour group." };
   const order = formData.getAll("imageIds").map(String);
   if (order.length === 0) return { error: "Nothing to reorder." };
 
-  const images = await prisma.productImage.findMany({ where: { productId }, select: { id: true } });
-  const owned = new Set(images.map((i) => i.id));
-  if (!order.every((id) => owned.has(id)) || order.length !== images.length) {
+  // Only images in THIS (product, colour) group may be reordered here.
+  const group = await prisma.productImage.findMany({
+    where: { productId, optionValueId },
+    select: { id: true },
+  });
+  const owned = new Set(group.map((i) => i.id));
+  if (!order.every((id) => owned.has(id)) || order.length !== group.length) {
     return { error: "Image list is out of sync — reload and try again." };
   }
 
@@ -393,22 +490,10 @@ export async function reorderProductImages(
     targetType: "product",
     targetId: productId,
     summary: `${admin.user.email} reordered product images`,
+    meta: { optionValueId },
   });
   revalidateStorefront();
   return { ok: true };
-}
-
-async function resequenceImages(productId: string) {
-  const images = await prisma.productImage.findMany({
-    where: { productId },
-    orderBy: { sortOrder: "asc" },
-    select: { id: true },
-  });
-  await prisma.$transaction(
-    images.map((img, index) =>
-      prisma.productImage.update({ where: { id: img.id }, data: { sortOrder: index } }),
-    ),
-  );
 }
 
 // ===========================================================================
