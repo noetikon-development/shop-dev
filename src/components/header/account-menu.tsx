@@ -66,7 +66,7 @@ export function AccountMenu({
                 Orders
               </MenuLink>
               <MenuLink
-                href="/wishlist"
+                href="/account/wishlist"
                 icon={<Heart size={15} />}
                 onClick={() => setOpen(false)}
               >
@@ -118,7 +118,7 @@ export function AccountMenu({
                 Track an order
               </MenuLink>
               <MenuLink
-                href="/wishlist"
+                href="/account/wishlist"
                 icon={<Heart size={15} />}
                 onClick={() => setOpen(false)}
               >

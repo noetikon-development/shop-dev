@@ -73,13 +73,13 @@ npm run dev                  # http://localhost:3400
 | Homepage / discovery | `/` | hero, category tiles, new/bestseller/sale rails |
 | Category + PLP | `/c/[slug]` | filters (price, colour, rating, sale, stock, shipping), sort, pagination; special slugs `all` / `new` / `sale` |
 | Search | `/search?q=` | live suggestions in the header, full results page reuses PLP filters |
-| Product detail | `/p/[slug]` | gallery, variant selection (colour × size), stock-aware, reviews, related |
+| Product detail | `/p/[slug]` | gallery, variant selection (colour × size), stock-aware, moderated reviews + rating summary, product Q&A, related |
 | Cart | `/cart` + slide-over drawer | quantity, coupon, free-shipping progress |
 | Checkout | `/checkout` | guest or signed-in; contact / address / delivery / payment; server-side re-pricing in `placeOrder` |
 | Order confirmation | `/order/[orderNumber]` | |
 | Order tracking | `/track` | public, by order number + email; status timeline |
-| Accounts | `/account`, `/account/orders`, `/account/orders/[n]`, `/account/addresses` | auth-guarded |
-| Wishlist | `/wishlist` | device-local |
+| Accounts | `/account`, `/account/orders`, `/account/orders/[n]`, `/account/addresses`, `/account/wishlist` | auth-guarded |
+| Wishlist | `/account/wishlist` | server-persisted per customer (`/wishlist` redirects) |
 | Auth | `/login`, `/register` | |
 | Admin | `/admin`, `/admin/login`, `/admin/users`, `/admin/audit` | separate login; database-backed RBAC (see below) |
 
@@ -484,12 +484,61 @@ checkout.
   this step), product/category targeting, BOGO, tiered promotions, loyalty
   points.
 
+## Reviews, wishlist & Q&A (Step 15)
+
+Customer-generated content, all moderated. **The server never trusts the browser**
+for the reviewer id, the verified-purchase flag, the review status, the answer
+author, or another customer's order.
+
+- **`Review` model** (extended): `+ orderId` (the DELIVERED order that establishes
+  the verified purchase — server-set, `SET NULL` on order delete), `+ status`
+  (`PENDING` / `APPROVED` / `REJECTED` / `ARCHIVED`, default **PENDING**),
+  `+ updatedAt`, and indexes on `status` / `(productId,status)` / `userId`. One
+  review per customer per product (`@@unique([productId, userId])`, pre-existing).
+- **Verified purchase** (`src/lib/reviews.ts` → `reviewEligibility`): a customer
+  may review a product only if their account has a `DELIVERED` order containing
+  it. The query is scoped to the authenticated `userId`, so another customer's
+  order can't be used.
+- **Public reads** (`src/lib/data.ts`): `getProductReviews` and `getReviewSummary`
+  (average / count / 1–5 distribution) are computed from **APPROVED rows only** —
+  never a browser-supplied summary. `getProductReviews` shows verified purchases
+  first. The curated `Product.ratingAvg` / `ratingCount` merchandising columns
+  (used by the product-list sort/filter) are intentionally left untouched — see
+  the Step 15 report, item 19.
+- **Editing** (`src/lib/review-actions.ts`): a customer edits only their own
+  review; an edit sets it **back to PENDING** so changed text is re-moderated
+  before it is public again. A customer may delete their own review (genuine
+  removal); admin moderation uses `ARCHIVED` instead, so history stays auditable.
+- **Wishlist** — stored in **PostgreSQL** (`WishlistItem`, `@@unique([userId,
+  productId])`), never `localStorage`. `src/lib/wishlist.ts` (`loadWishlist`,
+  `toggleWishlist`) is always scoped to the authenticated user (no IDOR).
+  `src/lib/wishlist-store.ts` is a thin client mirror of the id set for instant
+  heart toggles, hydrated once per page by `<WishlistHydrator>` from the server.
+  A guest heart tap prompts sign-in. Archived / inactive products stay in the
+  wishlist but render an "unavailable" state and can't be bought. The page moved
+  to **`/account/wishlist`** (`/wishlist` redirects).
+- **Q&A** — `ProductQuestion` (customer question, moderated) + `ProductAnswer`
+  (`authorType` `STORE` → shown as **"AXIARO Team"**, or `CUSTOMER`; `authorId`
+  is the authenticated author). `src/lib/qa.ts` `getPublicQA` returns APPROVED
+  questions with their APPROVED answers only. Customers ask, edit/delete their
+  own still-PENDING questions, and see their own submissions with status.
+- **Admin** — `/admin/reviews` (list / search / filter by status·rating·verified
+  / paginate / approve·reject·archive / detail) and `/admin/reviews/questions`
+  (moderate questions, post official answers as AXIARO Team, edit/archive
+  answers). Reuses `view_reviews` / `manage_reviews` — no new permission. Every
+  mutation writes an `AdminAuditLog` entry (`review.approved` / `.rejected` /
+  `.archived`, `question.*`, `answer.created` / `.updated` / `.archived`).
+- **Not in scope**: review/question notification emails (Step 17), review photos,
+  helpful-votes, seller responses to reviews, spam scoring.
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: coupons in
 `src/lib/coupons.ts` + `src/lib/admin/coupon-actions.ts`; addresses in
 `src/lib/addresses.ts`; cart in `src/lib/cart.ts`; checkout / orders in
-`src/lib/checkout.ts`.
+`src/lib/checkout.ts`; reviews in `src/lib/review-actions.ts` +
+`src/lib/admin/review-actions.ts`; wishlist in `src/lib/wishlist-actions.ts`;
+Q&A in `src/lib/qa-actions.ts` + `src/lib/admin/question-actions.ts`.
 Prices are integer centavos throughout; `formatPrice` renders PHP.
 
 ## Deploying to Vercel (Supabase Postgres)

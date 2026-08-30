@@ -8,6 +8,7 @@ import { ProductImage } from "@/components/product-image";
 import { Stars, PriceTag, ProductBadges } from "@/components/ui/primitives";
 import { useCart } from "@/lib/cart-store";
 import { useWishlist } from "@/lib/wishlist-store";
+import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import type { ProductDetailView } from "@/lib/types";
@@ -16,8 +17,8 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const openCart = useUI((s) => s.openCart);
   const add = useCart((s) => s.add);
   const [adding, setAdding] = useState(false);
-  const wished = useWishlist((s) => s.slugs.includes(product.slug));
-  const toggleWish = useWishlist((s) => s.toggle);
+  const wished = useWishlist((s) => s.ids.includes(product.id));
+  const toggleWish = useWishlistToggle();
 
   const colourOption = product.options.find((o) => o.name === "Colour");
   const sizeOption = product.options.find((o) => o.name === "Size");
@@ -152,11 +153,9 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
               <ProductBadges badges={product.badges} />
             </div>
             <button
-              onClick={() => {
-                toggleWish(product.slug);
-                toast(wished ? "Removed from wishlist" : "Saved to wishlist");
-              }}
+              onClick={() => toggleWish(product.id)}
               aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
+              aria-pressed={wished}
               className={cn(
                 "absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors",
                 wished ? "text-clay" : "text-ink-soft hover:text-ink",
@@ -330,10 +329,8 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
         </div>
 
         <button
-          onClick={() => {
-            toggleWish(product.slug);
-            toast(wished ? "Removed from wishlist" : "Saved to wishlist");
-          }}
+          onClick={() => toggleWish(product.id)}
+          aria-pressed={wished}
           className="btn btn-outline mt-3 w-full"
         >
           <Heart size={16} fill={wished ? "currentColor" : "none"} className={wished ? "text-clay" : ""} />

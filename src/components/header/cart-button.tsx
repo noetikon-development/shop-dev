@@ -28,12 +28,12 @@ export function CartButton() {
 }
 
 export function WishlistButton() {
-  const count = useWishlist((s) => s.slugs.length);
+  const count = useWishlist((s) => s.ids.length);
   const hydrated = useWishlist((s) => s.hydrated);
 
   return (
     <Link
-      href="/wishlist"
+      href="/account/wishlist"
       className="relative hidden h-10 w-10 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink sm:grid"
       aria-label={`Wishlist${hydrated && count ? `, ${count} items` : ""}`}
     >

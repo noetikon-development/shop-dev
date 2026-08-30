@@ -43,6 +43,8 @@ model User {
   orders    Order[]
   reviews   Review[]
   wishlist  WishlistItem[]
+  questions ProductQuestion[]
+  answers   ProductAnswer[]
   carts     Cart[]
 
   couponRedemptions CouponRedemption[]
@@ -268,7 +270,8 @@ model Product {
   updatedAt DateTime @updatedAt
 
   category Category        @relation(fields: [categoryId], references: [id])
-  images   ProductImage[]
+  images    ProductImage[]
+  questions ProductQuestion[]
   options  ProductOption[]
   variants Variant[]
   reviews  Review[]
@@ -412,17 +415,64 @@ model Review {
   id        String   @id @default(cuid())
   productId String
   userId    String
-  rating    Int
+  orderId   String? // the DELIVERED order that establishes the verified purchase (server-set)
+  rating    Int // 1-5; validated server-side
   title     String?
   body      String
-  verified  Boolean  @default(false)
+  verified  Boolean  @default(false) // computed from a DELIVERED order — never client-supplied
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED | ARCHIVED
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order   Order?  @relation(fields: [orderId], references: [id], onDelete: SetNull)
 
-  @@unique([productId, userId])
+  @@unique([productId, userId]) // one review per customer per product (Step 15)
   @@index([productId])
+  @@index([status])
+  @@index([productId, status])
+  @@index([userId])
+}
+
+// ----------------------------------------------------------------------------
+// Product Q&A (Step 15). User-generated content — everything is moderated.
+// ----------------------------------------------------------------------------
+
+model ProductQuestion {
+  id        String   @id @default(cuid())
+  productId String
+  userId    String
+  body      String
+  status    String   @default("PENDING") // PENDING | APPROVED | REJECTED | ARCHIVED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  product Product         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  user    User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  answers ProductAnswer[]
+
+  @@index([productId])
+  @@index([status])
+  @@index([productId, status])
+  @@index([userId])
+}
+
+model ProductAnswer {
+  id         String   @id @default(cuid())
+  questionId String
+  authorId   String? // the User who wrote it; null if that user is later deleted
+  authorType String   @default("STORE") // STORE (official "AXIARO Team") | CUSTOMER
+  body       String
+  status     String   @default("APPROVED") // STORE answers are official; still moderatable
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  question ProductQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  author   User?           @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([questionId])
+  @@index([status])
 }
 
 model WishlistItem {
@@ -613,6 +663,7 @@ model Order {
   shipMethod       ShippingMethod?   @relation(fields: [shippingMethodId], references: [id])
   items            OrderItem[]
   events           OrderEvent[]
+  reviews          Review[]
 
   @@index([userId])
   @@index([status])

@@ -19,7 +19,9 @@
 --             Order courier/courierName/trackingNumber/trackingUrl/shippedAt/
 --             deliveredAt/fulfillmentNote + courier index (Step 13),
 --             Coupon perCustomerLimit/updatedAt/archivedAt + CouponRedemption +
---             Order discountType/discountValue + Cart.couponCode (Step 14).
+--             Order discountType/discountValue + Cart.couponCode (Step 14),
+--             Review orderId/status/updatedAt + indexes, ProductQuestion +
+--             ProductAnswer tables for product Q&A (Step 15).
 -- ============================================================================
 
 -- CreateSchema
@@ -281,13 +283,43 @@ CREATE TABLE "Review" (
     "id" TEXT NOT NULL,
     "productId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
+    "orderId" TEXT,
     "rating" INTEGER NOT NULL,
     "title" TEXT,
     "body" TEXT NOT NULL,
     "verified" BOOLEAN NOT NULL DEFAULT false,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
 
     CONSTRAINT "Review_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductQuestion" (
+    "id" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ProductQuestion_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ProductAnswer" (
+    "id" TEXT NOT NULL,
+    "questionId" TEXT NOT NULL,
+    "authorId" TEXT,
+    "authorType" TEXT NOT NULL DEFAULT 'STORE',
+    "body" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'APPROVED',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ProductAnswer_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
@@ -642,7 +674,34 @@ CREATE INDEX "VariantOptionValue_optionValueId_idx" ON "VariantOptionValue"("opt
 CREATE INDEX "Review_productId_idx" ON "Review"("productId");
 
 -- CreateIndex
+CREATE INDEX "Review_status_idx" ON "Review"("status");
+
+-- CreateIndex
+CREATE INDEX "Review_productId_status_idx" ON "Review"("productId", "status");
+
+-- CreateIndex
+CREATE INDEX "Review_userId_idx" ON "Review"("userId");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Review_productId_userId_key" ON "Review"("productId", "userId");
+
+-- CreateIndex
+CREATE INDEX "ProductQuestion_productId_idx" ON "ProductQuestion"("productId");
+
+-- CreateIndex
+CREATE INDEX "ProductQuestion_status_idx" ON "ProductQuestion"("status");
+
+-- CreateIndex
+CREATE INDEX "ProductQuestion_productId_status_idx" ON "ProductQuestion"("productId", "status");
+
+-- CreateIndex
+CREATE INDEX "ProductQuestion_userId_idx" ON "ProductQuestion"("userId");
+
+-- CreateIndex
+CREATE INDEX "ProductAnswer_questionId_idx" ON "ProductAnswer"("questionId");
+
+-- CreateIndex
+CREATE INDEX "ProductAnswer_status_idx" ON "ProductAnswer"("status");
 
 -- CreateIndex
 CREATE INDEX "WishlistItem_userId_idx" ON "WishlistItem"("userId");
@@ -826,6 +885,21 @@ ALTER TABLE "Review" ADD CONSTRAINT "Review_productId_fkey" FOREIGN KEY ("produc
 
 -- AddForeignKey
 ALTER TABLE "Review" ADD CONSTRAINT "Review_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Review" ADD CONSTRAINT "Review_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductQuestion" ADD CONSTRAINT "ProductQuestion_productId_fkey" FOREIGN KEY ("productId") REFERENCES "Product"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductQuestion" ADD CONSTRAINT "ProductQuestion_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductAnswer" ADD CONSTRAINT "ProductAnswer_questionId_fkey" FOREIGN KEY ("questionId") REFERENCES "ProductQuestion"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ProductAnswer" ADD CONSTRAINT "ProductAnswer_authorId_fkey" FOREIGN KEY ("authorId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "WishlistItem" ADD CONSTRAINT "WishlistItem_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

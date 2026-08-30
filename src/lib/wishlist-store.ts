@@ -1,36 +1,64 @@
 "use client";
 
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { toggleWishlistItem } from "@/lib/wishlist-actions";
+
+/**
+ * Client mirror of the server-persisted wishlist (Step 15).
+ *
+ * The authoritative wishlist lives in PostgreSQL. This store holds only the set
+ * of product ids so the heart controls can render instantly and toggle
+ * optimistically. It is hydrated once per page load by <WishlistProvider> and
+ * never written to localStorage.
+ */
 
 type WishlistState = {
-  slugs: string[];
+  ids: string[];
   hydrated: boolean;
-  toggle: (slug: string) => void;
-  has: (slug: string) => boolean;
-  clear: () => void;
+  /** productIds with an in-flight toggle */
+  pending: string[];
+  hydrate: (ids: string[]) => void;
+  has: (productId: string) => boolean;
+  /** Optimistic toggle. Resolves to whether the caller must prompt a sign-in. */
+  toggle: (productId: string) => Promise<{ needsAuth: boolean }>;
 };
 
-export const useWishlist = create<WishlistState>()(
-  persist(
-    (set, get) => ({
-      slugs: [],
-      hydrated: false,
-      toggle: (slug) => {
-        const slugs = get().slugs.includes(slug)
-          ? get().slugs.filter((s) => s !== slug)
-          : [slug, ...get().slugs];
-        set({ slugs });
-      },
-      has: (slug) => get().slugs.includes(slug),
-      clear: () => set({ slugs: [] }),
-    }),
-    {
-      name: "axiaro.wishlist.v1",
-      partialize: (s) => ({ slugs: s.slugs }),
-      onRehydrateStorage: () => (state) => {
-        if (state) state.hydrated = true;
-      },
-    },
-  ),
-);
+export const useWishlist = create<WishlistState>()((set, get) => ({
+  ids: [],
+  hydrated: false,
+  pending: [],
+
+  hydrate: (ids) => set({ ids, hydrated: true }),
+
+  has: (productId) => get().ids.includes(productId),
+
+  toggle: async (productId) => {
+    if (get().pending.includes(productId)) return { needsAuth: false };
+    const had = get().ids.includes(productId);
+    // optimistic
+    set((s) => ({
+      ids: had ? s.ids.filter((id) => id !== productId) : [productId, ...s.ids],
+      pending: [...s.pending, productId],
+    }));
+
+    try {
+      const res = await toggleWishlistItem({ productId });
+      if (res.ok) {
+        set((s) => ({ ids: res.ids, pending: s.pending.filter((id) => id !== productId) }));
+        return { needsAuth: false };
+      }
+      // revert
+      set((s) => ({
+        ids: had ? [productId, ...s.ids.filter((id) => id !== productId)] : s.ids.filter((id) => id !== productId),
+        pending: s.pending.filter((id) => id !== productId),
+      }));
+      return { needsAuth: Boolean(res.needsAuth) };
+    } catch {
+      set((s) => ({
+        ids: had ? [productId, ...s.ids.filter((id) => id !== productId)] : s.ids.filter((id) => id !== productId),
+        pending: s.pending.filter((id) => id !== productId),
+      }));
+      return { needsAuth: false };
+    }
+  },
+}));

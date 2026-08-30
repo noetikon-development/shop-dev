@@ -88,7 +88,7 @@ export function MobileMenu({
             {signedIn ? "My account" : "Sign in / Register"}
           </Link>
           <Link
-            href="/wishlist"
+            href="/account/wishlist"
             onClick={close}
             className="flex items-center gap-3 rounded-sm px-2 py-2.5 text-sm hover:bg-surface"
           >

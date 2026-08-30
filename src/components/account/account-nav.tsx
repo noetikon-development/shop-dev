@@ -12,7 +12,7 @@ const LINKS = [
   { href: "/account/password", label: "Password", icon: KeyRound },
   { href: "/account/orders", label: "Orders", icon: Package },
   { href: "/account/addresses", label: "Addresses", icon: MapPin },
-  { href: "/wishlist", label: "Wishlist", icon: Heart },
+  { href: "/account/wishlist", label: "Wishlist", icon: Heart },
 ];
 
 export function AccountNav() {

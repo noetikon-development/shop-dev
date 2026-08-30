@@ -56,6 +56,11 @@ ALTER TABLE "CartItem"           ENABLE ROW LEVEL SECURITY;
 -- `postgres` connection. Same posture: RLS on, no policy.
 ALTER TABLE "ShippingMethod"     ENABLE ROW LEVEL SECURITY;
 
+-- Product Q&A (Step 15, 2026-08-30). User-generated, moderated content, read
+-- only by the app's direct `postgres` connection. RLS on, no policy.
+ALTER TABLE "ProductQuestion"    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ProductAnswer"      ENABLE ROW LEVEL SECURITY;
+
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON
@@ -87,7 +92,7 @@ END $$;
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
-  "Cart", "CartItem", "ShippingMethod"
+  "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer"
 FROM anon, authenticated;
 
 -- ============================================================================

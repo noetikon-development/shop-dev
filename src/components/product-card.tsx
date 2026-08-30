@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { Stars, PriceTag, ProductBadges } from "@/components/ui/primitives";
 import { useWishlist } from "@/lib/wishlist-store";
+import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useCart } from "@/lib/cart-store";
 import { cn, compactNumber } from "@/lib/utils";
 import type { ProductCardView } from "@/lib/types";
@@ -22,8 +23,8 @@ export function ProductCard({
   className?: string;
   priority?: boolean;
 }) {
-  const wished = useWishlist((s) => s.slugs.includes(product.slug));
-  const toggleWish = useWishlist((s) => s.toggle);
+  const wished = useWishlist((s) => s.ids.includes(product.id));
+  const toggleWish = useWishlistToggle();
   const add = useCart((s) => s.add);
   const [adding, setAdding] = useState(false);
 
@@ -60,10 +61,7 @@ export function ProductCard({
           <ProductBadges badges={product.badges} />
           <button
             type="button"
-            onClick={() => {
-              toggleWish(product.slug);
-              toast(wished ? "Removed from wishlist" : "Saved to wishlist");
-            }}
+            onClick={() => toggleWish(product.id)}
             aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
             aria-pressed={wished}
             className={cn(

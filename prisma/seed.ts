@@ -989,6 +989,8 @@ async function main() {
   await prisma.orderEvent.deleteMany();
   await prisma.orderItem.deleteMany();
   await prisma.order.deleteMany();
+  await prisma.productAnswer.deleteMany();
+  await prisma.productQuestion.deleteMany();
   await prisma.review.deleteMany();
   await prisma.wishlistItem.deleteMany();
   await prisma.variantOptionValue.deleteMany();
@@ -1224,6 +1226,7 @@ async function main() {
             title: snip.title,
             body: snip.body,
             verified: true,
+            status: "APPROVED", // demo reviews are pre-moderated so the storefront has content
             createdAt: new Date(Date.now() - (r + 1) * 86400000 * 9),
           },
         })
@@ -1239,6 +1242,41 @@ async function main() {
     const id = productIdBySlug.get(slug);
     if (id) await prisma.wishlistItem.create({ data: { userId: demo.id, productId: id } });
   }
+
+  // A few demo product questions (with one official answer) so the PDP Q&A
+  // section has content. All pre-moderated to APPROVED.
+  const qaSeed: { slug: string; body: string; answer?: string }[] = [
+    {
+      slug: "aro-3-seat-sofa",
+      body: "Is the cover removable for washing?",
+      answer: "Yes — all cushion covers unzip and are dry-clean recommended. The base cover is removable too.",
+    },
+    {
+      slug: "aro-3-seat-sofa",
+      body: "Roughly how long is delivery to Metro Manila?",
+      answer: "Standard delivery to Metro Manila is 3–7 business days. You'll get tracking once it ships.",
+    },
+    { slug: "field-wool-rug", body: "Does this rug shed much in the first few weeks?" },
+  ];
+  for (const q of qaSeed) {
+    const productId = productIdBySlug.get(q.slug);
+    if (!productId) continue;
+    const question = await prisma.productQuestion.create({
+      data: { productId, userId: demo.id, body: q.body, status: "APPROVED" },
+    });
+    if (q.answer) {
+      await prisma.productAnswer.create({
+        data: {
+          questionId: question.id,
+          authorId: admin.id,
+          authorType: "STORE",
+          body: q.answer,
+          status: "APPROVED",
+        },
+      });
+    }
+  }
+  console.log(`Q&A: ${qaSeed.length} questions`);
 
   // Coupons
   for (const c of COUPONS) {

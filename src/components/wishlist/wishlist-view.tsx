@@ -1,47 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Heart } from "lucide-react";
-import { ProductCard, ProductCardSkeleton } from "@/components/product-card";
+import { Heart, X } from "lucide-react";
+import { ProductCard } from "@/components/product-card";
+import { ProductImage } from "@/components/product-image";
 import { useWishlist } from "@/lib/wishlist-store";
-import type { ProductCardView } from "@/lib/types";
+import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
+import { formatPrice } from "@/lib/utils";
+import type { WishlistCard } from "@/lib/wishlist";
 
-export function WishlistView() {
-  const slugs = useWishlist((s) => s.slugs);
+export function WishlistView({ initialItems }: { initialItems: WishlistCard[] }) {
+  const ids = useWishlist((s) => s.ids);
   const hydrated = useWishlist((s) => s.hydrated);
-  const clear = useWishlist((s) => s.clear);
-  const [products, setProducts] = useState<ProductCardView[] | null>(null);
+  const toggle = useWishlistToggle();
 
-  useEffect(() => {
-    if (!hydrated) return;
-    if (slugs.length === 0) {
-      setProducts([]);
-      return;
-    }
-    fetch(`/api/products/by-slugs?slugs=${slugs.map(encodeURIComponent).join(",")}`)
-      .then((r) => r.json())
-      .then((d) => setProducts(d.products ?? []))
-      .catch(() => setProducts([]));
-  }, [slugs, hydrated]);
+  // The server list is the source of product data; the client `ids` set is the
+  // source of truth for membership (so a heart tapped anywhere updates here).
+  const visible = initialItems.filter((it) => !hydrated || ids.includes(it.id));
 
-  if (!hydrated || products === null) {
-    return (
-      <div className="grid grid-cols-2 gap-x-4 gap-y-9 sm:grid-cols-3 lg:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <ProductCardSkeleton key={i} />
-        ))}
-      </div>
-    );
-  }
-
-  if (products.length === 0) {
+  if (visible.length === 0) {
     return (
       <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
         <div className="grid h-14 w-14 place-items-center rounded-full bg-surface-sunken">
           <Heart size={22} className="text-ink-faint" />
         </div>
-        <h2 className="mt-4 text-lg">Your wishlist is empty</h2>
+        <h3 className="mt-4 text-lg">Your wishlist is empty</h3>
         <p className="mt-1.5 max-w-sm text-sm text-ink-soft">
           Tap the heart on any product to save it here for later.
         </p>
@@ -54,21 +37,42 @@ export function WishlistView() {
 
   return (
     <div>
-      <div className="mb-6 flex items-center justify-between">
-        <p className="text-sm text-ink-soft">
-          {products.length} saved {products.length === 1 ? "item" : "items"}
-        </p>
-        <button
-          onClick={clear}
-          className="text-sm text-ink-faint underline underline-offset-4 hover:text-ink"
-        >
-          Clear all
-        </button>
-      </div>
+      <p className="mb-6 text-sm text-ink-soft">
+        {visible.length} saved {visible.length === 1 ? "item" : "items"}
+      </p>
       <div className="grid grid-cols-2 gap-x-4 gap-y-9 sm:grid-cols-3 lg:grid-cols-4">
-        {products.map((p) => (
-          <ProductCard key={p.id} product={p} showCategory />
-        ))}
+        {visible.map((p) =>
+          p.available ? (
+            <ProductCard key={p.id} product={p} showCategory />
+          ) : (
+            <div key={p.id} className="group relative flex flex-col">
+              <div className="relative overflow-hidden rounded-md bg-surface-sunken">
+                <div className="block aspect-[4/5] opacity-60 grayscale">
+                  <ProductImage src={p.image.url} alt={p.image.alt} />
+                </div>
+                <div className="absolute inset-x-3 bottom-3 rounded-sm bg-surface/95 py-2 text-center text-xs font-medium text-ink-soft">
+                  No longer available
+                </div>
+                <button
+                  type="button"
+                  onClick={() => toggle(p.id)}
+                  aria-label="Remove from wishlist"
+                  className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-surface/90 text-ink-soft backdrop-blur transition-colors hover:text-ink"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="mt-3.5 flex flex-1 flex-col">
+                <p className="eyebrow mb-1 !text-[10px]">{p.categoryName}</p>
+                <h3 className="text-[0.95rem] font-medium leading-snug text-ink-soft">{p.name}</h3>
+                <p className="mt-2 text-sm tabular-nums text-ink-faint">{formatPrice(p.price)}</p>
+                <p className="mt-1 text-xs text-ink-faint">
+                  This piece has been retired from the catalogue.
+                </p>
+              </div>
+            </div>
+          ),
+        )}
       </div>
     </div>
   );

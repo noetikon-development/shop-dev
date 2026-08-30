@@ -148,6 +148,16 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     description: "Moderate product reviews and ratings.",
     accepts: ["view_reviews"],
     emptyLabel: "No reviews to moderate yet.",
+    live: true,
+  },
+  {
+    path: "/admin/reviews/questions",
+    label: "Q&A",
+    description: "Moderate product questions and post official answers.",
+    accepts: ["view_reviews"],
+    emptyLabel: "No questions to moderate yet.",
+    live: true,
+    hideInNav: true,
   },
 
   // Content / CMS

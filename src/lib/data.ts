@@ -526,11 +526,24 @@ export const getRelatedProducts = unstable_cache(
   { revalidate: 180, tags: ["products"] },
 );
 
+/** First name only — keeps the public review identity minimal (Step 15 §32). */
+function reviewDisplayName(name: string | null): string {
+  const trimmed = (name ?? "").trim();
+  if (!trimmed) return "AXIARO customer";
+  return trimmed.split(/\s+/)[0];
+}
+
+/**
+ * Public reviews for a product — APPROVED only (Step 15 §7/§29). PENDING,
+ * REJECTED and ARCHIVED reviews are never returned here. Verified purchases are
+ * listed first, then newest.
+ */
 export const getProductReviews = unstable_cache(
   async (productId: string): Promise<ReviewView[]> => {
     const rows = await prisma.review.findMany({
-      where: { productId },
-      orderBy: { createdAt: "desc" },
+      where: { productId, status: "APPROVED" },
+      orderBy: [{ verified: "desc" }, { createdAt: "desc" }],
+      take: 50,
       include: { user: { select: { name: true } } },
     });
     return rows.map((r) => ({
@@ -538,12 +551,51 @@ export const getProductReviews = unstable_cache(
       rating: r.rating,
       title: r.title,
       body: r.body,
-      author: r.user.name ?? "AXIARO customer",
+      author: reviewDisplayName(r.user.name),
       verified: r.verified,
       createdAt: r.createdAt.toISOString(),
     }));
   },
   ["product-reviews"],
+  { revalidate: 300, tags: ["products"] },
+);
+
+export type ReviewSummary = {
+  avg: number;
+  count: number;
+  /** number of APPROVED reviews at each star level */
+  distribution: Record<1 | 2 | 3 | 4 | 5, number>;
+};
+
+/**
+ * Rating summary computed from APPROVED reviews in the database (Step 15 §29) —
+ * never trusts a browser-supplied summary. The denormalised
+ * `Product.ratingAvg` / `ratingCount` are kept in step with this by the review
+ * actions, but this recomputes the full distribution for the product page.
+ */
+export const getReviewSummary = unstable_cache(
+  async (productId: string): Promise<ReviewSummary> => {
+    const groups = await prisma.review.groupBy({
+      by: ["rating"],
+      where: { productId, status: "APPROVED" },
+      _count: { _all: true },
+    });
+    const distribution: ReviewSummary["distribution"] = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    let sum = 0;
+    let count = 0;
+    for (const g of groups) {
+      const star = Math.min(5, Math.max(1, g.rating)) as 1 | 2 | 3 | 4 | 5;
+      distribution[star] += g._count._all;
+      sum += g.rating * g._count._all;
+      count += g._count._all;
+    }
+    return {
+      avg: count > 0 ? Math.round((sum / count) * 10) / 10 : 0,
+      count,
+      distribution,
+    };
+  },
+  ["product-review-summary"],
   { revalidate: 300, tags: ["products"] },
 );
 

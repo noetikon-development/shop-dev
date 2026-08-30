@@ -5,11 +5,16 @@ import { ChevronRight } from "lucide-react";
 import {
   getProductBySlug,
   getProductReviews,
+  getReviewSummary,
   getRelatedProducts,
 } from "@/lib/data";
+import { getCurrentUser } from "@/lib/auth";
+import { reviewEligibility, getMyReview } from "@/lib/reviews";
+import { getPublicQA, getMyQuestions } from "@/lib/qa";
 import { ProductViewer } from "@/components/pdp/product-viewer";
 import { DetailsAccordion } from "@/components/pdp/details-accordion";
 import { Reviews } from "@/components/pdp/reviews";
+import { ProductQA } from "@/components/pdp/product-qa";
 import { ProductRail } from "@/components/product-rail";
 import { SITE } from "@/lib/constants";
 
@@ -34,10 +39,25 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
   const product = await getProductBySlug(slug);
   if (!product) notFound();
 
-  const [reviews, related] = await Promise.all([
+  const user = await getCurrentUser();
+
+  const [reviews, summary, related, publicQA] = await Promise.all([
     getProductReviews(product.id),
+    getReviewSummary(product.id),
     getRelatedProducts(product.categorySlug, product.slug, 8),
+    getPublicQA(product.id),
   ]);
+
+  let eligibility: Awaited<ReturnType<typeof reviewEligibility>> = { eligible: false, orderId: null };
+  let myReview: Awaited<ReturnType<typeof getMyReview>> = null;
+  let myQuestions: Awaited<ReturnType<typeof getMyQuestions>> = [];
+  if (user) {
+    [eligibility, myReview, myQuestions] = await Promise.all([
+      reviewEligibility(user.id, product.id),
+      getMyReview(user.id, product.id),
+      getMyQuestions(user.id, product.id),
+    ]);
+  }
 
   const specEntries = Object.entries(product.specs);
 
@@ -132,8 +152,20 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
       <div className="container-page mt-20">
         <Reviews
           reviews={reviews}
-          ratingAvg={product.ratingAvg}
-          ratingCount={product.ratingCount}
+          summary={summary}
+          productId={product.id}
+          canReview={eligibility.eligible}
+          myReview={myReview}
+        />
+      </div>
+
+      {/* Questions & answers */}
+      <div className="container-page mt-16">
+        <ProductQA
+          productId={product.id}
+          questions={publicQA}
+          myQuestions={myQuestions}
+          signedIn={Boolean(user)}
         />
       </div>
 

@@ -109,7 +109,10 @@ The app is unaffected: it connects as the `postgres` role, which has `BYPASSRLS`
 | `ContentBlock` | data-driven managed blocks (hero/banner/collection…); `type` + JSON `data` |
 | `MediaAsset` | metadata for files in Supabase **Storage** (bucket `media`) — no binary data |
 | `Order` | Step 9 checkout writes real orders. `cartId` (`@unique` — one order per cart, the double-submit guard), `billingAddressId` + `billingAddress` JSON snapshot, `status` value `PENDING_PAYMENT`. Order numbers from the `order_number_seq` sequence. Step 11 adds `shippingMethodId` (FK → `ShippingMethod`, `SET NULL`) + immutable `shippingMethodCode` / `shippingMethodName` snapshot alongside the existing `shippingFee`. Step 12 adds `placedAt` + `paymentStatus` indexes for the admin order list. Step 13 adds fulfilment columns `courier` / `courierName` / `trackingNumber` / `trackingUrl` / `shippedAt` / `deliveredAt` / `fulfillmentNote` + a `courier` index. Step 14 adds `discountType` / `discountValue` (coupon snapshot, alongside the existing `couponCode` / `discountTotal`). Excluded from `seed.sql` |
-| `OrderItem` / `OrderEvent`, `Review`, `WishlistItem` | present; excluded from `seed.sql` |
+| `OrderItem` / `OrderEvent` | present; excluded from `seed.sql` |
+| `Review` | Step 15 adds `orderId` (the DELIVERED order behind a verified purchase, `SET NULL`), `status` (`PENDING`/`APPROVED`/`REJECTED`/`ARCHIVED`, default `PENDING`), `updatedAt`, and indexes on `status` / `(productId,status)` / `userId`. `@@unique([productId,userId])`. Excluded from `seed.sql` |
+| `WishlistItem` | one row per saved product; `@@unique([userId,productId])`. Authoritative wishlist store (Step 15) — not `localStorage`. Excluded from `seed.sql` |
+| `ProductQuestion` / `ProductAnswer` | Step 15 product Q&A. Question: FK → `Product` + `User`, `status` moderated. Answer: FK → `ProductQuestion` (cascade), `authorId` (`SET NULL`), `authorType` `STORE`/`CUSTOMER`, `status`. Both excluded from `seed.sql` |
 | `ShippingMethod` | Step 11. Configurable delivery option shown at checkout: `code` unique, `name`, `description`, `rate` (centavos), `currency`, `active`, `sortOrder`. CHECK: `rate ≥ 0`. Included in `seed.sql` (demo methods STANDARD / EXPRESS / PICKUP) |
 
 ## Authentication

@@ -1,21 +1,35 @@
 import { Stars } from "@/components/ui/primitives";
 import { formatDate } from "@/lib/utils";
+import { ReviewComposer } from "@/components/pdp/review-composer";
 import type { ReviewView } from "@/lib/types";
+import type { ReviewSummary } from "@/lib/data";
+
+type MyReview = {
+  id: string;
+  rating: number;
+  title: string | null;
+  body: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "ARCHIVED";
+} | null;
 
 export function Reviews({
   reviews,
-  ratingAvg,
-  ratingCount,
+  summary,
+  productId,
+  canReview,
+  myReview,
 }: {
   reviews: ReviewView[];
-  ratingAvg: number;
-  ratingCount: number;
+  summary: ReviewSummary;
+  productId: string;
+  canReview: boolean;
+  myReview: MyReview;
 }) {
+  const total = summary.count || 1;
   const buckets = [5, 4, 3, 2, 1].map((star) => ({
     star,
-    count: reviews.filter((r) => Math.round(r.rating) === star).length,
+    count: summary.distribution[star as 1 | 2 | 3 | 4 | 5],
   }));
-  const shownTotal = reviews.length || 1;
 
   return (
     <section id="reviews" className="scroll-mt-28">
@@ -24,12 +38,12 @@ export function Reviews({
       <div className="mt-6 grid gap-8 sm:grid-cols-[220px_1fr] sm:gap-12">
         <div>
           <div className="flex items-end gap-2">
-            <span className="font-display text-5xl">{ratingAvg.toFixed(1)}</span>
+            <span className="font-display text-5xl">{summary.avg.toFixed(1)}</span>
             <span className="pb-1.5 text-sm text-ink-faint">/ 5</span>
           </div>
-          <Stars value={ratingAvg} showNumber={false} className="mt-2" />
+          <Stars value={summary.avg} showNumber={false} className="mt-2" />
           <p className="mt-2 text-sm text-ink-faint">
-            Based on {ratingCount.toLocaleString()} ratings
+            {summary.count.toLocaleString()} approved {summary.count === 1 ? "review" : "reviews"}
           </p>
 
           <div className="mt-5 space-y-1.5">
@@ -39,7 +53,7 @@ export function Reviews({
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-surface-sunken">
                   <div
                     className="h-full rounded-full bg-clay"
-                    style={{ width: `${(b.count / shownTotal) * 100}%` }}
+                    style={{ width: `${(b.count / total) * 100}%` }}
                   />
                 </div>
                 <span className="w-6 text-right tabular-nums">{b.count}</span>
@@ -48,7 +62,9 @@ export function Reviews({
           </div>
         </div>
 
-        <div>
+        <div className="space-y-6">
+          <ReviewComposer productId={productId} canReview={canReview} myReview={myReview} />
+
           {reviews.length === 0 ? (
             <p className="text-sm text-ink-soft">No written reviews yet.</p>
           ) : (
@@ -60,7 +76,9 @@ export function Reviews({
                     <span className="text-xs text-ink-faint">{formatDate(r.createdAt)}</span>
                   </div>
                   {r.title && <p className="mt-2 text-sm font-medium">{r.title}</p>}
-                  <p className="mt-1.5 text-sm leading-relaxed text-ink-soft">{r.body}</p>
+                  <p className="mt-1.5 whitespace-pre-line text-sm leading-relaxed text-ink-soft">
+                    {r.body}
+                  </p>
                   <p className="mt-2 text-xs text-ink-faint">
                     {r.author}
                     {r.verified && <span className="text-success"> · Verified purchase</span>}
