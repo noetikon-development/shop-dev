@@ -627,6 +627,53 @@ lives in `src/lib/email/` — never in a route or action.**
 - **Links** — built from `getSiteUrl()` (`NEXT_PUBLIC_SITE_URL` → prod domain).
   Customer order links go to `/account/orders/<n>` (authenticated) or `/track`.
 
+## Analytics & reporting (Step 18)
+
+Database-backed store analytics at **`/admin/analytics`** (permission
+`view_analytics` — granted to SUPER_ADMIN, ADMIN, FINANCE). Read-only: nothing on
+this page mutates an order, product, customer, coupon or stock level.
+
+- **Data source** — `User` / `Order` / `OrderItem` / `Product` / `Category` /
+  `Coupon` / `CouponRedemption` / `Inventory`, aggregated in the database
+  (`COUNT` / `SUM` / `GROUP BY`, `prisma.aggregate` / `groupBy` and a few
+  parameterised `$queryRaw` group-bys). No rows are pulled into memory to be
+  totalled. No analytics-only tables. Three additive indexes were added for the
+  group-bys: `User.createdAt`, `OrderItem.productId`, `CouponRedemption.createdAt`.
+- **Date range** (`src/lib/analytics/range.ts`) — Today / Yesterday / Last 7 /
+  Last 30 / This month / Last month / Custom. Boundaries are **midnight-to-midnight
+  in the store timezone** (`regional.timezone`, default `Asia/Manila`), resolved
+  server-side — the browser clock is never used. Ranges are **half-open
+  `[start, end)`**. Custom ranges are capped at 366 days; invalid input is
+  rejected (`400` on export, safe default on the dashboard).
+- **Metrics** — Orders / Order value (gross · discounts · shipping · net) /
+  Average order value / Units sold / Order status breakdown / Best-selling
+  products / Category performance / Customer metrics / Coupon usage / Inventory
+  insights + low-stock report. Every figure comes from the immutable per-order
+  snapshots (`grandTotal`, `discountTotal`, `shippingFee`, `OrderItem.lineTotal`,
+  `CouponRedemption.amount`) — never recomputed from current prices/coupons/rates.
+  Definitions are shown on the page and documented in
+  `src/lib/analytics/queries.ts`.
+- **"Included" order** — `placedAt` in range **and** `status <> CANCELLED`. This
+  is the set behind every sales metric. Cancelled orders appear only in the
+  status breakdown and a separate count.
+- **Paid revenue** — `SUM(grandTotal) WHERE paymentStatus = 'PAID'`, shown
+  **separately** from order value and **never** labelled as revenue elsewhere.
+  Payment capture (PayMongo) is still deferred, so no automated flow sets `PAID`;
+  the figure reflects only orders reconciled as paid by an admin or the seed. It
+  is never inferred from order creation.
+- **Currency** — `regional.currency` / `regional.locale` via `Intl.NumberFormat`
+  (`src/lib/analytics/format.ts`). Money is integer centavos summed in the DB and
+  divided by 100 only for display. Multi-currency is not implemented — every
+  amount is in the single store currency, so an aggregate never mixes currencies.
+- **Comparison** — optional "vs previous equivalent period". A zero previous
+  period shows **"N/A"**, never "∞%".
+- **Charts** — dependency-free SVG (`src/components/admin/analytics/`), responsive,
+  with hover/focus tooltips and a visually-hidden data table. Order-count and
+  order-value trends are labelled as such — never "Revenue".
+- **Export** — server-generated CSV (`/admin/analytics/export`, same
+  `view_analytics` gate, its own `403`): product sales, coupon usage, orders by
+  day, customer summary (aggregated — no personal data).
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: coupons in

@@ -22,7 +22,9 @@
 --             Order discountType/discountValue + Cart.couponCode (Step 14),
 --             Review orderId/status/updatedAt + indexes, ProductQuestion +
 --             ProductAnswer tables for product Q&A (Step 15),
---             EmailLog table for transactional email delivery (Step 17).
+--             EmailLog table for transactional email delivery (Step 17),
+--             analytics indexes User.createdAt / OrderItem.productId /
+--             CouponRedemption.createdAt (Step 18).
 -- ============================================================================
 
 -- CreateSchema
@@ -573,6 +575,9 @@ CREATE UNIQUE INDEX "User_supabaseUserId_key" ON "User"("supabaseUserId");
 CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
 
 -- CreateIndex
+CREATE INDEX "User_createdAt_idx" ON "User"("createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Role_key_key" ON "Role"("key");
 
 -- CreateIndex
@@ -771,6 +776,9 @@ CREATE INDEX "CouponRedemption_userId_idx" ON "CouponRedemption"("userId");
 CREATE INDEX "CouponRedemption_couponId_userId_idx" ON "CouponRedemption"("couponId", "userId");
 
 -- CreateIndex
+CREATE INDEX "CouponRedemption_createdAt_idx" ON "CouponRedemption"("createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Order_orderNumber_key" ON "Order"("orderNumber");
 
 -- CreateIndex
@@ -805,6 +813,9 @@ CREATE INDEX "ShippingMethod_active_idx" ON "ShippingMethod"("active");
 
 -- CreateIndex
 CREATE INDEX "OrderItem_orderId_idx" ON "OrderItem"("orderId");
+
+-- CreateIndex
+CREATE INDEX "OrderItem_productId_idx" ON "OrderItem"("productId");
 
 -- CreateIndex
 CREATE INDEX "OrderEvent_orderId_idx" ON "OrderEvent"("orderId");

@@ -15,6 +15,7 @@ import { PageHeader, EmptyState, Card } from "@/components/admin/ui";
 
 const RESERVED = new Set([
   "/admin",
+  "/admin/analytics",
   "/admin/users",
   "/admin/audit",
   "/admin/media",

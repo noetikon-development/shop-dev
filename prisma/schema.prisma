@@ -56,6 +56,9 @@ model User {
   invitesAccepted      AdminInvite[]         @relation("AdminInviteAcceptedBy")
   auditEvents          AdminAuditLog[]       @relation("AdminAuditActor")
   inventoryAdjustments InventoryAdjustment[] @relation("InventoryAdjustmentActor")
+
+  // Analytics (Step 18): new-customers-in-period is a createdAt range scan.
+  @@index([createdAt])
 }
 
 // ----------------------------------------------------------------------------
@@ -588,6 +591,8 @@ model CouponRedemption {
   @@index([couponId])
   @@index([userId])
   @@index([couponId, userId])
+  // Analytics (Step 18): coupon redemptions in a date range.
+  @@index([createdAt])
 }
 
 // ----------------------------------------------------------------------------
@@ -719,6 +724,9 @@ model OrderItem {
   variant Variant? @relation(fields: [variantId], references: [id])
 
   @@index([orderId])
+  // Analytics (Step 18): best-selling / product-performance aggregation groups
+  // OrderItem by productId (joined to Order for the date/status filter).
+  @@index([productId])
 }
 
 model OrderEvent {

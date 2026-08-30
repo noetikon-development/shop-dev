@@ -26,6 +26,9 @@ export const PERMISSIONS: PermissionDef[] = [
   // Dashboard
   { key: "view_dashboard", group: "Dashboard", description: "Open the admin dashboard" },
 
+  // Analytics
+  { key: "view_analytics", group: "Analytics", description: "View store analytics and reports" },
+
   // Products
   { key: "view_products", group: "Products", description: "View products" },
   { key: "create_products", group: "Products", description: "Create products" },
@@ -128,6 +131,7 @@ export const ROLE_KEYS = ROLES.map((r) => r.key);
 
 const ADMIN_PERMS: string[] = [
   "view_dashboard",
+  "view_analytics",
   "view_products",
   "create_products",
   "edit_products",
@@ -198,6 +202,7 @@ const CONTENT_MANAGER_PERMS: string[] = [
 
 const FINANCE_PERMS: string[] = [
   "view_dashboard",
+  "view_analytics",
   "view_orders",
   "view_payments",
   "manage_payments",

@@ -45,6 +45,14 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     accepts: ["view_dashboard"],
     live: true,
   },
+  {
+    path: "/admin/analytics",
+    label: "Analytics",
+    description: "Database-backed sales, product, customer, coupon and inventory reporting.",
+    accepts: ["view_analytics"],
+    emptyLabel: "No analytics to show yet.",
+    live: true,
+  },
 
   // Catalog
   {
