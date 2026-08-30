@@ -290,7 +290,7 @@ To cancel an order, use the **[Contact us](/pages/contact)** page and include yo
 
 // ---------------------------------------------------------------------------
 
-const ABOUT = `## Our approach
+const ABOUT = `# Our approach
 
 AXIARO designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
 
@@ -314,7 +314,7 @@ Questions are welcome through our **[Contact us](/pages/contact)** page, and ord
 
 // ---------------------------------------------------------------------------
 
-const CONTACT = `## Get in touch
+const CONTACT = `# Get in touch
 
 For anything about an existing order, check **[Track your order](/track)** first — it always has the latest status. If you were signed in when you ordered, your full history is in **[your account](/account/orders)**.
 
@@ -334,7 +334,7 @@ _AXIARO is a demonstration store. The contact details shown here come from the s
 
 // ---------------------------------------------------------------------------
 
-const FAQ = `## Ordering
+const FAQ = `# Ordering
 
 ## How do I place an order?
 Add the items you want to your bag, open the bag and choose **Checkout**. Pick a delivery method (or free store pickup), confirm your address, review the order and place it. You will see a confirmation with your order number.

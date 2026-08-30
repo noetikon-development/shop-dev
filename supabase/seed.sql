@@ -1774,23 +1774,6 @@ INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "
 - **Preferences:** remembering small choices like a filter or a tab.
 
 This demo store does not use advertising or cross-site tracking cookies.', NULL, 'How this site uses cookies.', '2026-08-30T05:20:14.079Z', '2026-08-30T05:20:14.082Z', '2026-08-30T05:20:14.082Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8f0008kgycgny1r66r', 'contact', 'Contact us', 'PUBLISHED', 'How to reach the AXIARO team about an order or a question.', '## Get in touch
-
-For anything about an existing order, check **[Track your order](/track)** first — it always has the latest status. If you were signed in when you ordered, your full history is in **[your account](/account/orders)**.
-
-For everything else — a question before you buy, a return, a cancellation, or a problem with a delivery — use the contact details below. If you have an order number, please include it so we can help faster.
-
-We aim to reply within one business day.
-
-# What we can help with
-
-- Questions about a product before you order
-- Arranging payment for an order that is awaiting payment
-- Delivery questions and delayed parcels
-- Returns, refunds and cancellations
-- Account and sign-in help
-
-_AXIARO is a demonstration store. The contact details shown here come from the store''s settings and can be updated by an administrator._', 'Contact us', 'Contact AXIARO about an order, a return, a cancellation or a question. We aim to reply within one business day.', '2026-08-30T05:20:13.933Z', '2026-08-30T05:20:13.935Z', '2026-08-30T08:37:53.776Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbb000dkgyc7c2wlhny', 'privacy', 'Privacy policy', 'PUBLISHED', 'What personal information AXIARO collects, how it is used, and the choices you have.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
 
 AXIARO ("we", "us", "the store") operates this online store. This policy explains what personal information we collect, why we collect it, how we use and protect it, and the choices you have. It applies to this website and the orders placed through it.
@@ -1851,7 +1834,7 @@ We may update this policy from time to time. The "Last updated" date at the top 
 
 # Contact
 
-Questions about privacy or your data can be sent through our **[Contact us](/pages/contact)** page.', 'Privacy policy', 'How AXIARO collects, uses, retains and protects your personal information, and how to exercise your rights.', '2026-08-30T05:20:14.037Z', '2026-08-30T05:20:14.039Z', '2026-08-30T08:37:53.612Z') ON CONFLICT DO NOTHING;
+Questions about privacy or your data can be sent through our **[Contact us](/pages/contact)** page.', 'Privacy policy', 'How AXIARO collects, uses, retains and protects your personal information, and how to exercise your rights.', '2026-08-30T05:20:14.037Z', '2026-08-30T05:20:14.039Z', '2026-08-30T10:07:27.032Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wbw000ekgycoc2bg766', 'terms', 'Terms & conditions', 'PUBLISHED', 'The terms that apply to using the AXIARO store and placing an order.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
 
 These Terms & Conditions govern your use of the AXIARO store and any order you place. By using the site or placing an order you agree to them. Please read them together with our **[Privacy policy](/pages/privacy)**, **[Shipping & delivery](/pages/shipping)**, **[Returns & refunds](/pages/returns)** and **[Cancellation policy](/pages/cancellation)**.
@@ -1910,7 +1893,7 @@ We may update these terms. The version that applies to your order is the one pub
 
 # Contact
 
-Questions about these terms can be sent through our **[Contact us](/pages/contact)** page.', 'Terms & conditions', 'The terms governing use of the AXIARO store, orders, pricing, payment, delivery, returns and liability.', '2026-08-30T05:20:14.058Z', '2026-08-30T05:20:14.061Z', '2026-08-30T08:37:53.647Z') ON CONFLICT DO NOTHING;
+Questions about these terms can be sent through our **[Contact us](/pages/contact)** page.', 'Terms & conditions', 'The terms governing use of the AXIARO store, orders, pricing, payment, delivery, returns and liability.', '2026-08-30T05:20:14.058Z', '2026-08-30T05:20:14.061Z', '2026-08-30T10:07:27.063Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w9i000akgyc3gx7e9fu', 'shipping', 'Shipping & delivery', 'PUBLISHED', 'Delivery options, fees, timeframes and tracking for AXIARO orders.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
 
 This page explains how delivery works for AXIARO orders. The options and fees shown at checkout are always the current ones — if anything below differs from checkout, checkout is correct.
@@ -1956,7 +1939,7 @@ If your order arrives damaged, incomplete or incorrect, keep the packaging and c
 
 # Contact
 
-Delivery questions can be sent through our **[Contact us](/pages/contact)** page. Please include your order number.', 'Shipping & delivery', 'AXIARO delivery options and fees: standard and express delivery within the Philippines, free store pickup, and order tracking.', '2026-08-30T05:20:13.972Z', '2026-08-30T05:20:13.975Z', '2026-08-30T08:37:53.673Z') ON CONFLICT DO NOTHING;
+Delivery questions can be sent through our **[Contact us](/pages/contact)** page. Please include your order number.', 'Shipping & delivery', 'AXIARO delivery options and fees: standard and express delivery within the Philippines, free store pickup, and order tracking.', '2026-08-30T05:20:13.972Z', '2026-08-30T05:20:13.975Z', '2026-08-30T10:07:27.084Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wa3000bkgycbrcb01dd', 'returns', 'Returns & refunds', 'PUBLISHED', 'When you can return an item, how to do it, and how refunds are handled.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
 
 We want you to be happy with your order. This page explains when and how you can return an item and how refunds are handled on this store.
@@ -1998,7 +1981,24 @@ We do not run automated exchanges. If you want a different size, colour or item,
 
 # Contact
 
-Start a return, or ask a question, through the **[Contact us](/pages/contact)** page.', 'Returns & refunds', 'AXIARO returns policy: 30-day return window, how to return an item, faulty items, and how manual refunds are processed.', '2026-08-30T05:20:13.993Z', '2026-08-30T05:20:13.996Z', '2026-08-30T08:37:53.698Z') ON CONFLICT DO NOTHING;
+Start a return, or ask a question, through the **[Contact us](/pages/contact)** page.', 'Returns & refunds', 'AXIARO returns policy: 30-day return window, how to return an item, faulty items, and how manual refunds are processed.', '2026-08-30T05:20:13.993Z', '2026-08-30T05:20:13.996Z', '2026-08-30T10:07:27.103Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8f0008kgycgny1r66r', 'contact', 'Contact us', 'PUBLISHED', 'How to reach the AXIARO team about an order or a question.', '# Get in touch
+
+For anything about an existing order, check **[Track your order](/track)** first — it always has the latest status. If you were signed in when you ordered, your full history is in **[your account](/account/orders)**.
+
+For everything else — a question before you buy, a return, a cancellation, or a problem with a delivery — use the contact details below. If you have an order number, please include it so we can help faster.
+
+We aim to reply within one business day.
+
+# What we can help with
+
+- Questions about a product before you order
+- Arranging payment for an order that is awaiting payment
+- Delivery questions and delayed parcels
+- Returns, refunds and cancellations
+- Account and sign-in help
+
+_AXIARO is a demonstration store. The contact details shown here come from the store''s settings and can be updated by an administrator._', 'Contact us', 'Contact AXIARO about an order, a return, a cancellation or a question. We aim to reply within one business day.', '2026-08-30T05:20:13.933Z', '2026-08-30T05:20:13.935Z', '2026-08-30T10:07:27.157Z') ON CONFLICT DO NOTHING;
 INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1wd4000gkgycahu1ersb', 'cancellation', 'Cancellation policy', 'PUBLISHED', 'When an order can be cancelled and what happens to any payment.', '> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.
 
 This page explains when you can cancel an AXIARO order and what happens to any payment.
@@ -2033,8 +2033,8 @@ We may cancel an order — for example where an item is out of stock, where a pr
 
 # Contact
 
-To cancel an order, use the **[Contact us](/pages/contact)** page and include your order number.', 'Cancellation policy', 'How to cancel an AXIARO order before it ships, what happens after dispatch, and the payment and refund implications.', '2026-08-30T05:20:14.102Z', '2026-08-30T05:20:14.105Z', '2026-08-30T08:37:53.722Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w7m0007kgyccqwyfitu', 'about', 'About AXIARO', 'PUBLISHED', 'Why we make what we make, and how the store works.', '## Our approach
+To cancel an order, use the **[Contact us](/pages/contact)** page and include your order number.', 'Cancellation policy', 'How to cancel an AXIARO order before it ships, what happens after dispatch, and the payment and refund implications.', '2026-08-30T05:20:14.102Z', '2026-08-30T05:20:14.105Z', '2026-08-30T10:07:27.122Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w7m0007kgyccqwyfitu', 'about', 'About AXIARO', 'PUBLISHED', 'Why we make what we make, and how the store works.', '# Our approach
 
 AXIARO designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
 
@@ -2054,8 +2054,8 @@ AXIARO is a demonstration store built to showcase a complete e-commerce platform
 
 # Get in touch
 
-Questions are welcome through our **[Contact us](/pages/contact)** page, and order updates are always on **[Track your order](/track)**.', 'About AXIARO', 'AXIARO designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.', '2026-08-30T05:20:13.903Z', '2026-08-30T05:20:13.906Z', '2026-08-30T08:37:53.750Z') ON CONFLICT DO NOTHING;
-INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8y0009kgycyi29h0na', 'faq', 'Frequently asked questions', 'PUBLISHED', 'Ordering, payment, shipping, returns and support — answered.', '## Ordering
+Questions are welcome through our **[Contact us](/pages/contact)** page, and order updates are always on **[Track your order](/track)**.', 'About AXIARO', 'AXIARO designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.', '2026-08-30T05:20:13.903Z', '2026-08-30T05:20:13.906Z', '2026-08-30T10:07:27.140Z') ON CONFLICT DO NOTHING;
+INSERT INTO "ContentPage" ("id", "slug", "title", "status", "excerpt", "body", "seoTitle", "seoDescription", "publishedAt", "createdAt", "updatedAt") VALUES ('cmtfd1w8y0009kgycyi29h0na', 'faq', 'Frequently asked questions', 'PUBLISHED', 'Ordering, payment, shipping, returns and support — answered.', '# Ordering
 
 ## How do I place an order?
 Add the items you want to your bag, open the bag and choose **Checkout**. Pick a delivery method (or free store pickup), confirm your address, review the order and place it. You will see a confirmation with your order number.
@@ -2093,7 +2093,7 @@ Keep the packaging and contact us as soon as you can with your order number and 
 # Support
 
 ## How do I contact support?
-Use the **[Contact us](/pages/contact)** page. Include your order number if your question is about an order. We aim to reply within one business day.', 'Frequently asked questions', 'Answers to common questions about ordering from AXIARO: accounts, payment, delivery, tracking, returns and support.', '2026-08-30T05:20:13.953Z', '2026-08-30T05:20:13.955Z', '2026-08-30T08:37:53.793Z') ON CONFLICT DO NOTHING;
+Use the **[Contact us](/pages/contact)** page. Include your order number if your question is about an order. We aim to reply within one business day.', 'Frequently asked questions', 'Answers to common questions about ordering from AXIARO: accounts, payment, delivery, tracking, returns and support.', '2026-08-30T05:20:13.953Z', '2026-08-30T05:20:13.955Z', '2026-08-30T10:07:27.174Z') ON CONFLICT DO NOTHING;
 
 -- ContentBlock (7)
 INSERT INTO "ContentBlock" ("id", "key", "area", "type", "title", "data", "position", "status", "createdAt", "updatedAt") VALUES ('cmtfd1w3z0001kgyc61794j8l', 'homepage.categories.default', 'homepage', 'category_tiles', 'Category tiles', '{"heading":""}', 1, 'PUBLISHED', '2026-08-30T05:20:13.776Z', '2026-08-30T05:20:13.776Z') ON CONFLICT DO NOTHING;

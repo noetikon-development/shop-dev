@@ -65,6 +65,12 @@ ALTER TABLE "ProductAnswer"      ENABLE ROW LEVEL SECURITY;
 -- only by the app's direct `postgres` connection. RLS on, no policy.
 ALTER TABLE "EmailLog"           ENABLE ROW LEVEL SECURITY;
 
+-- Coupon redemption ledger (Step 14; RLS added in the Step 20 hardening pass,
+-- 2026-08-30). One row per successful coupon use — reveals which customer used
+-- which code and for how much. `anon` / `authenticated` already hold no grant
+-- on it; this is the belt-and-braces layer every other table already has.
+ALTER TABLE "CouponRedemption"   ENABLE ROW LEVEL SECURITY;
+
 -- 3. Public, read-only catalogue via PostgREST -----------------------------------
 GRANT USAGE ON SCHEMA public TO anon, authenticated;
 GRANT SELECT ON
@@ -96,7 +102,8 @@ END $$;
 REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
-  "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog"
+  "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog",
+  "CouponRedemption"
 FROM anon, authenticated;
 
 -- ============================================================================
