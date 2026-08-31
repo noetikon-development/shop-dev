@@ -10,7 +10,7 @@ import {
   updateProduct,
   type CatalogState,
 } from "@/lib/admin/catalog-actions";
-import { PRODUCT_STATUSES } from "@/lib/admin/catalog-schemas";
+import { PRODUCT_STATUSES, serializeSpecs } from "@/lib/admin/catalog-schemas";
 
 type CategoryOption = { id: string; label: string };
 
@@ -251,54 +251,51 @@ export function ProductForm({
         const specs = safeJson<Record<string, string>>(product!.specs, {});
         const highlights = safeJson<string[]>(product!.highlights, []);
         const care = product!.care ?? "";
-        const specEntries = Object.entries(specs);
         return (
-          <section className="space-y-3">
-            <h2 className="text-sm font-semibold text-ink">Specifications &amp; details</h2>
-            <p className="text-xs text-ink-faint">
-              Informational content shown on the product page. These are{" "}
-              <strong className="font-medium text-ink">not purchasable options</strong> — they
-              never create variants and never affect price, SKU or stock. Managed outside this
-              screen.
-            </p>
-            {specEntries.length === 0 && highlights.length === 0 && !care ? (
-              <p className="rounded-sm border border-dashed border-line px-3 py-2 text-xs text-ink-faint">
-                No specifications set.
+          <section className="space-y-4">
+            <div>
+              <h2 className="text-sm font-semibold text-ink">Specifications &amp; details</h2>
+              <p className="text-xs text-ink-faint">
+                Informational content shown on the product page.{" "}
+                <strong className="font-medium text-ink">Not purchasable options</strong> — editing
+                these never creates variants and never changes price, SKU, stock or orders.
               </p>
-            ) : (
-              <div className="space-y-3 rounded-md border border-line bg-surface-sunken/40 p-3 text-sm">
-                {specEntries.length > 0 && (
-                  <dl className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
-                    {specEntries.map(([k, v]) => (
-                      <div key={k} className="flex justify-between gap-4 border-b border-line/60 py-1">
-                        <dt className="text-ink-faint">{k}</dt>
-                        <dd className="text-right font-medium text-ink">{v}</dd>
-                      </div>
-                    ))}
-                  </dl>
-                )}
-                {highlights.length > 0 && (
-                  <div>
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
-                      Highlights
-                    </p>
-                    <ul className="list-disc space-y-0.5 pl-4 text-ink-soft">
-                      {highlights.map((h) => (
-                        <li key={h}>{h}</li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {care && (
-                  <div>
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wide text-ink-faint">
-                      Care
-                    </p>
-                    <p className="text-ink-soft">{care}</p>
-                  </div>
-                )}
-              </div>
-            )}
+            </div>
+            <FormField
+              label="Specifications"
+              htmlFor="p-specs"
+              hint="One per line as “Label: Value”, e.g. Material: Solid oak"
+            >
+              <textarea
+                id="p-specs"
+                name="specs"
+                rows={5}
+                defaultValue={serializeSpecs(specs)}
+                disabled={disabled}
+                className="field font-mono text-xs"
+                placeholder={"Material: Solid oak\nDimensions: 200 × 90 × 75 cm"}
+              />
+            </FormField>
+            <FormField label="Highlights" htmlFor="p-highlights" hint="One selling point per line.">
+              <textarea
+                id="p-highlights"
+                name="highlights"
+                rows={4}
+                defaultValue={highlights.join("\n")}
+                disabled={disabled}
+                className="field text-sm"
+              />
+            </FormField>
+            <FormField label="Care information" htmlFor="p-care">
+              <textarea
+                id="p-care"
+                name="care"
+                rows={3}
+                defaultValue={care}
+                disabled={disabled}
+                className="field text-sm"
+              />
+            </FormField>
           </section>
         );
       })()}

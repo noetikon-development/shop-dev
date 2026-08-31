@@ -26,6 +26,18 @@ export type SiteSettings = {
   status: "open" | "maintenance" | "closed" | string;
   /** Scrolling announcement-bar messages; empty = hide the bar. Plain text. */
   announcements: string[];
+  /** Product-page copy panels (Markdown); empty string = hide that panel. */
+  pdp: { shipping: string; guarantee: string };
+  /**
+   * Marketing copy for the virtual collection pages (/c/all, /c/new, /c/sale).
+   * Empty strings mean "use the built-in default". Product membership is NOT
+   * configured here — that stays in application logic.
+   */
+  collections: {
+    all: { title: string; description: string };
+    new: { title: string; description: string };
+    sale: { title: string; description: string };
+  };
   logoUrl: string | null;
   faviconUrl: string | null;
   contact: {
@@ -82,6 +94,12 @@ function fallbackSettings(): SiteSettings {
     description: SITE.description,
     status: "open",
     announcements: [],
+    pdp: { shipping: "", guarantee: "" },
+    collections: {
+      all: { title: "", description: "" },
+      new: { title: "", description: "" },
+      sale: { title: "", description: "" },
+    },
     logoUrl: null,
     faviconUrl: null,
     contact: { email: "", phone: "", addressLine1: "", addressLine2: "", city: "", country: "", hours: "" },
@@ -147,6 +165,24 @@ const load = unstable_cache(
       .slice(0, 12);
 
     return {
+      pdp: {
+        shipping: str(val("storefront.pdpShipping")),
+        guarantee: str(val("storefront.pdpGuarantee")),
+      },
+      collections: {
+        all: {
+          title: str(val("storefront.collectionAllTitle")),
+          description: str(val("storefront.collectionAllText")),
+        },
+        new: {
+          title: str(val("storefront.collectionNewTitle")),
+          description: str(val("storefront.collectionNewText")),
+        },
+        sale: {
+          title: str(val("storefront.collectionSaleTitle")),
+          description: str(val("storefront.collectionSaleText")),
+        },
+      },
       name: str(val("store.name")) || SITE.name,
       brand,
       tagline: str(val("store.tagline")) || SITE.tagline,

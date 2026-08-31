@@ -17,12 +17,7 @@ import { Reviews } from "@/components/pdp/reviews";
 import { ProductQA } from "@/components/pdp/product-qa";
 import { ProductRail } from "@/components/product-rail";
 import { getSiteSettings } from "@/lib/site-settings";
-import {
-  FREE_SHIPPING_THRESHOLD,
-  STANDARD_SHIPPING_FEE,
-  EXPRESS_SHIPPING_FEE,
-} from "@/lib/constants";
-import { formatPrice } from "@/lib/utils";
+import { Markdown } from "@/lib/markdown";
 
 export async function generateMetadata({
   params,
@@ -51,11 +46,12 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
 
   const user = await getCurrentUser();
 
-  const [reviews, summary, related, publicQA] = await Promise.all([
+  const [reviews, summary, related, publicQA, settings] = await Promise.all([
     getProductReviews(product.id),
     getReviewSummary(product.id),
     getRelatedProducts(product.categorySlug, product.slug, 8),
     getPublicQA(product.id),
+    getSiteSettings(),
   ]);
 
   let eligibility: Awaited<ReturnType<typeof reviewEligibility>> = { eligible: false, orderId: null };
@@ -128,35 +124,24 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
             ...(product.care
               ? [{ id: "care", title: "Care", content: <p>{product.care}</p> }]
               : []),
-            {
-              id: "shipping",
-              title: "Shipping & returns",
-              content: (
-                <div className="space-y-2">
-                  <p>
-                    Standard delivery is {formatPrice(STANDARD_SHIPPING_FEE)} and takes 3–7 business
-                    days, free on orders over {formatPrice(FREE_SHIPPING_THRESHOLD)}. Express (1–3
-                    days) is {formatPrice(EXPRESS_SHIPPING_FEE)}. Free store pickup is also
-                    available. See <Link href="/pages/shipping">Shipping &amp; delivery</Link>.
-                  </p>
-                  <p>
-                    Return anything unused within 30 days for a full refund — see{" "}
-                    <Link href="/pages/returns">Returns &amp; refunds</Link>. Large furniture is
-                    collected from your door.
-                  </p>
-                </div>
-              ),
-            },
-            {
-              id: "guarantee",
-              title: "Our guarantee",
-              content: (
-                <p>
-                  Every piece of AXIARO furniture carries a 10-year guarantee against manufacturing
-                  faults in the frame. Textiles and wardrobe are covered for one year.
-                </p>
-              ),
-            },
+            ...(settings.pdp.shipping
+              ? [
+                  {
+                    id: "shipping",
+                    title: "Shipping & returns",
+                    content: <Markdown source={settings.pdp.shipping} />,
+                  },
+                ]
+              : []),
+            ...(settings.pdp.guarantee
+              ? [
+                  {
+                    id: "guarantee",
+                    title: "Our guarantee",
+                    content: <Markdown source={settings.pdp.guarantee} />,
+                  },
+                ]
+              : []),
           ]}
         />
       </div>

@@ -87,6 +87,28 @@ export const SETTINGS_REGISTRY: SettingField[] = [
     default: "",
     help: "One message per line for the scrolling bar at the top of every page. Leave blank to hide the bar. Plain text only — no HTML.",
   },
+  {
+    key: "storefront.pdpShipping",
+    label: "Product page — Shipping & returns",
+    type: "text",
+    group: "storefront",
+    default: "",
+    help: "Shown in the “Shipping & returns” panel on every product page. Markdown links allowed. This is display copy only — it does not set actual shipping rates or return rules.",
+  },
+  {
+    key: "storefront.pdpGuarantee",
+    label: "Product page — Our guarantee",
+    type: "text",
+    group: "storefront",
+    default: "",
+    help: "Shown in the “Our guarantee” panel on every product page. Leave blank to hide the panel.",
+  },
+  { key: "storefront.collectionAllTitle", label: "Collection — “All products” heading", type: "string", group: "storefront", default: "" },
+  { key: "storefront.collectionAllText", label: "Collection — “All products” description", type: "text", group: "storefront", default: "" },
+  { key: "storefront.collectionNewTitle", label: "Collection — “New In” heading", type: "string", group: "storefront", default: "" },
+  { key: "storefront.collectionNewText", label: "Collection — “New In” description", type: "text", group: "storefront", default: "" },
+  { key: "storefront.collectionSaleTitle", label: "Collection — “Sale” heading", type: "string", group: "storefront", default: "" },
+  { key: "storefront.collectionSaleText", label: "Collection — “Sale” description", type: "text", group: "storefront", default: "" },
 
   // Contact
   { key: "contact.email", label: "Support email", type: "email", group: "contact", default: "" },

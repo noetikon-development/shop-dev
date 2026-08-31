@@ -16,7 +16,11 @@ import {
   pesosToCentavos,
   formBool,
   PRODUCT_STATUSES,
+  parseSpecsText,
+  parseHighlightsText,
+  parseCareText,
 } from "@/lib/admin/catalog-schemas";
+import { cleanUserText } from "@/lib/ugc";
 import {
   generateProductSlug,
   generateCategorySlug,
@@ -66,6 +70,26 @@ function readProductForm(formData: FormData) {
     price: pesosToCentavos(formData.get("price")) ?? NaN,
     compareAtPrice: rawCompare === null || Number.isNaN(rawCompare) ? null : rawCompare,
     weightGrams: Number(formData.get("weightGrams") ?? 500) || 500,
+  };
+}
+
+/**
+ * Reads the informational marketing fields (specs / highlights / care) IF the
+ * form submitted them. Returns Prisma-ready JSON strings, or `null` when the
+ * form didn't include these fields (so a form without them never wipes stored
+ * content). These fields never affect price / SKU / inventory / variants.
+ */
+function readProductContent(
+  formData: FormData,
+): { specs: string; highlights: string; care: string | null } | null {
+  if (!formData.has("specs") && !formData.has("highlights") && !formData.has("care")) return null;
+  const specs = parseSpecsText(cleanUserText(formData.get("specs")));
+  const highlights = parseHighlightsText(cleanUserText(formData.get("highlights")));
+  const care = parseCareText(cleanUserText(formData.get("care")));
+  return {
+    specs: JSON.stringify(specs),
+    highlights: JSON.stringify(highlights),
+    care,
   };
 }
 
@@ -166,6 +190,7 @@ export async function updateProduct(
     return { error: "Please fix the highlighted fields.", fieldErrors: zodFieldErrors(parsed.error.issues) };
   }
   const data = parsed.data;
+  const content = readProductContent(formData);
 
   const category = await prisma.category.findUnique({ where: { id: data.categoryId } });
   if (!category) return { error: "That category no longer exists.", fieldErrors: { categoryId: "Choose a valid category" } };
@@ -192,6 +217,8 @@ export async function updateProduct(
         price: data.price,
         compareAtPrice: data.compareAtPrice ?? null,
         weightGrams: data.weightGrams ?? 500,
+        // Informational marketing content — never affects price/SKU/stock/variants.
+        ...(content ? { specs: content.specs, highlights: content.highlights, care: content.care } : {}),
       },
     });
 

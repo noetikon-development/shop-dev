@@ -31,6 +31,17 @@ const INITIAL: Record<string, unknown> = {
     "30-day returns, always",
     "Use WELCOME10 for 10% off your first order",
   ].join("\n"),
+  "storefront.pdpShipping":
+    "Standard delivery is ₱150 and takes 3–7 business days, free on orders over ₱2,500. Express (1–3 days) is ₱300. Free store pickup is also available. See [Shipping & delivery](/pages/shipping).\n\nReturn anything unused within 30 days for a full refund — see [Returns & refunds](/pages/returns). Large furniture is collected from your door.",
+  "storefront.pdpGuarantee":
+    "Every piece of AXIARO furniture carries a 10-year guarantee against manufacturing faults in the frame. Textiles and wardrobe are covered for one year.",
+  "storefront.collectionAllTitle": "All products",
+  "storefront.collectionAllText": "The complete AXIARO catalogue.",
+  "storefront.collectionNewTitle": "New In",
+  "storefront.collectionNewText":
+    "The latest additions across furniture, lighting, textiles and wardrobe.",
+  "storefront.collectionSaleTitle": "Sale",
+  "storefront.collectionSaleText": "Current markdowns while stock lasts.",
 };
 
 export async function seedAdminFoundation(

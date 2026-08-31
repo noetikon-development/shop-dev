@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 import { getCategoryBySlug, listProducts } from "@/lib/data";
+import { getSiteSettings } from "@/lib/site-settings";
 import { parseListingParams, buildQuery, countActiveFilters } from "@/lib/listing-params";
 import { ProductGrid, EmptyState } from "@/components/product-grid";
 import { FilterControls } from "@/components/plp/filter-controls";
@@ -12,37 +13,63 @@ import { ActiveFilters } from "@/components/plp/active-filters";
 import { Pagination } from "@/components/plp/pagination";
 import { pluralize } from "@/lib/utils";
 
-type SpecialSlug = { title: string; description: string; forceSale?: boolean; forceNew?: boolean };
+// Product SELECTION for these virtual collections is application logic
+// (`forceNew` / `forceSale`) and stays here. The customer-facing title /
+// description are CMS-editable (Store Settings → Storefront content); the
+// strings below are only the fallback when a setting is blank.
+type SpecialSlug = {
+  key: "all" | "new" | "sale";
+  title: string;
+  description: string;
+  forceSale?: boolean;
+  forceNew?: boolean;
+};
 const SPECIAL: Record<string, SpecialSlug> = {
-  all: { title: "All products", description: "The complete AXIARO catalogue." },
+  all: { key: "all", title: "All products", description: "The complete catalogue." },
   new: {
+    key: "new",
     title: "New In",
     description: "The latest additions across furniture, lighting, textiles and wardrobe.",
     forceNew: true,
   },
   sale: {
+    key: "sale",
     title: "Sale",
     description: "Current markdowns while stock lasts.",
     forceSale: true,
   },
 };
 
+/** Resolve a special collection's copy: CMS setting first, built-in fallback. */
+function specialCopy(
+  special: SpecialSlug,
+  settings: Awaited<ReturnType<typeof getSiteSettings>>,
+): { title: string; description: string } {
+  const cms = settings.collections[special.key];
+  return {
+    title: cms.title || special.title,
+    description: cms.description || special.description,
+  };
+}
+
 export async function generateMetadata({
   params,
 }: PageProps<"/c/[slug]">): Promise<Metadata> {
   const { slug } = await params;
   if (SPECIAL[slug]) {
+    const copy = specialCopy(SPECIAL[slug], await getSiteSettings());
     return {
-      title: SPECIAL[slug].title,
-      description: SPECIAL[slug].description,
+      title: copy.title,
+      description: copy.description,
       alternates: { canonical: `/c/${slug}` },
     };
   }
   const cat = await getCategoryBySlug(slug);
   if (!cat) return { title: "Not found" };
+  const settings = await getSiteSettings();
   return {
     title: cat.name,
-    description: cat.description ?? `Shop ${cat.name} at AXIARO.`,
+    description: cat.description ?? `Shop ${cat.name} at ${settings.brand}.`,
     alternates: { canonical: `/c/${slug}` },
   };
 }
@@ -61,10 +88,14 @@ export default async function CategoryPage({ params, searchParams }: PageProps<"
     forceNew: special?.forceNew,
   });
 
-  const result = await listProducts(listingParams);
+  const [result, settings] = await Promise.all([
+    listProducts(listingParams),
+    special ? getSiteSettings() : Promise.resolve(null),
+  ]);
 
-  const title = special ? special.title : cat!.name;
-  const description = special ? special.description : cat!.description;
+  const copy = special && settings ? specialCopy(special, settings) : null;
+  const title = copy ? copy.title : cat!.name;
+  const description = copy ? copy.description : cat!.description;
   const currentSp = new URLSearchParams(
     Object.entries(sp).flatMap(([k, v]) =>
       v == null ? [] : Array.isArray(v) ? v.map((x) => [k, x] as [string, string]) : [[k, v] as [string, string]],

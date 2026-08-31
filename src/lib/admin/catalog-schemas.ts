@@ -136,3 +136,53 @@ export function pesosToCentavos(raw: FormDataEntryValue | null): number | null {
 export function formBool(raw: FormDataEntryValue | null): boolean {
   return raw === "on" || raw === "true" || raw === "1";
 }
+
+// ---------------------------------------------------------------------------
+// Product marketing content (specs / highlights / care) — informational only.
+// Parsed from plain-text textareas; these NEVER touch price / SKU / inventory /
+// variants. Every value is stored JSON-encoded and rendered as escaped React
+// text on the storefront.
+// ---------------------------------------------------------------------------
+
+export const PRODUCT_CONTENT_LIMITS = {
+  specRows: 40,
+  specKey: 60,
+  specValue: 300,
+  highlights: 16,
+  highlight: 200,
+  care: 2000,
+} as const;
+
+/** "Key: Value" per line → { key: value }. Lines without a colon are ignored. */
+export function parseSpecsText(raw: FormDataEntryValue | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of String(raw ?? "").split("\n")) {
+    const i = line.indexOf(":");
+    if (i < 1) continue;
+    const key = line.slice(0, i).trim().slice(0, PRODUCT_CONTENT_LIMITS.specKey);
+    const value = line.slice(i + 1).trim().slice(0, PRODUCT_CONTENT_LIMITS.specValue);
+    if (key && value && Object.keys(out).length < PRODUCT_CONTENT_LIMITS.specRows) out[key] = value;
+  }
+  return out;
+}
+
+export function serializeSpecs(specs: Record<string, string>): string {
+  return Object.entries(specs)
+    .map(([k, v]) => `${k}: ${v}`)
+    .join("\n");
+}
+
+/** One item per line. */
+export function parseHighlightsText(raw: FormDataEntryValue | null): string[] {
+  return String(raw ?? "")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .slice(0, PRODUCT_CONTENT_LIMITS.highlights)
+    .map((s) => s.slice(0, PRODUCT_CONTENT_LIMITS.highlight));
+}
+
+export function parseCareText(raw: FormDataEntryValue | null): string | null {
+  const s = String(raw ?? "").trim().slice(0, PRODUCT_CONTENT_LIMITS.care);
+  return s || null;
+}
