@@ -24,7 +24,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
       : order.paymentStatus === "REFUNDED"
         ? "Refunded"
         : order.paymentStatus === "PENDING"
-          ? "Awaiting payment"
+          ? "Pay on delivery"
           : "Unpaid";
 
   return (

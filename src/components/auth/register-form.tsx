@@ -78,11 +78,11 @@ export function RegisterForm() {
         </button>
         <p className="text-center text-xs text-ink-faint">
           By continuing you agree to our{" "}
-          <Link href="/legal/terms" className="underline">
+          <Link href="/pages/terms" className="underline">
             Terms
           </Link>{" "}
           and{" "}
-          <Link href="/legal/privacy" className="underline">
+          <Link href="/pages/privacy" className="underline">
             Privacy Policy
           </Link>
           .

@@ -212,9 +212,8 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
 
         <Section step={4} icon={<Lock size={15} />} title="Payment">
           <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
-            Payment isn’t available yet. Your order will be placed as{" "}
-            <span className="font-medium text-ink">awaiting payment</span> — you’ll be able to pay
-            in a later step.
+            <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
+            now — our team confirms it and arranges payment before dispatch.
           </p>
           <label className="mt-4 block">
             <span className="mb-1.5 block text-sm font-medium">Order note</span>
@@ -332,7 +331,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
 
           <p className="mt-3 text-center text-xs text-ink-faint">
             By placing your order you agree to our{" "}
-            <Link href="/legal/terms" className="underline">
+            <Link href="/pages/terms" className="underline">
               Terms
             </Link>
             .

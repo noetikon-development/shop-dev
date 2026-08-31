@@ -601,7 +601,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
               {
                 status: "PENDING_PAYMENT",
                 title: "Order placed",
-                detail: "Your order is placed and is awaiting payment.",
+                detail: "We’ve received your order. Payment is arranged on delivery.",
               },
             ],
           },

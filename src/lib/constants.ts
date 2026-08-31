@@ -49,8 +49,8 @@ export const ORDER_STATUS_META: Record<
   { label: string; description: string; tone: "neutral" | "progress" | "positive" | "negative" }
 > = {
   PENDING_PAYMENT: {
-    label: "Awaiting payment",
-    description: "Your order is placed — payment is the next step",
+    label: "Order placed",
+    description: "Payment is arranged on delivery",
     tone: "neutral",
   },
   PENDING: { label: "Order placed", description: "We’ve received your order", tone: "neutral" },

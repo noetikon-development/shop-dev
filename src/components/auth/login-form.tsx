@@ -82,11 +82,6 @@ export function LoginForm() {
         </button>
       </form>
 
-      <div className="mt-5 rounded-sm border border-line bg-surface p-3 text-xs text-ink-soft">
-        <p className="font-medium text-ink">Demo account</p>
-        <p className="mt-1">demo@axiaro.test · password123</p>
-      </div>
-
       <p className="mt-6 text-center text-sm text-ink-soft">
         New to AXIARO?{" "}
         <Link

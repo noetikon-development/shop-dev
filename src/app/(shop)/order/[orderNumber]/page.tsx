@@ -23,7 +23,7 @@ export default async function OrderConfirmationPage({
     if (!user || user.id !== order.userId) notFound();
   }
 
-  const awaitingPayment =
+  const payOnDelivery =
     order.status === "PENDING_PAYMENT" || order.paymentStatus === "PENDING";
 
   return (
@@ -39,7 +39,7 @@ export default async function OrderConfirmationPage({
         </p>
         <p className="mt-1 text-sm text-ink-faint">
           Order total: {formatPrice(order.grandTotal)}
-          {awaitingPayment && " · awaiting payment"}
+          {payOnDelivery && " · pay on delivery"}
         </p>
         <div className="mt-5 flex justify-center gap-3">
           <Link href="/account/orders" className="btn btn-outline">
