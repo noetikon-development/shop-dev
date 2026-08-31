@@ -62,7 +62,7 @@ const SUPPORT_EMAIL = "support@axiaro.shop";
 export const REASONS = {
   order: "You're receiving this because you placed an order with {brand}.",
   return: "You're receiving this because you requested a return with {brand}.",
-  account: "You're receiving this because you have a {brand} account.",
+  account: "You're receiving this because you have an account with {brand}.",
   security: "You're receiving this because of security activity on your {brand} account.",
   support: "You're receiving this because you contacted {brand}.",
 } as const;
