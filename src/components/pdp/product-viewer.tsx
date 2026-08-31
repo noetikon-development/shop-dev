@@ -13,7 +13,7 @@ import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import { FREE_SHIPPING_THRESHOLD, STANDARD_SHIPPING_FEE } from "@/lib/constants";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
-import type { ProductDetailView } from "@/lib/types";
+import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
   const openCart = useUI((s) => s.openCart);
@@ -82,18 +82,24 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   // Gallery = the images EXPLICITLY assigned to the selected colour
   // (ProductImage.optionValueId — the source of truth). If that colour has no
   // images, fall back to the product-level images (optionValueId === null); if
-  // there are none of those either, fall back to whatever images exist (the
-  // in-house illustration). Images are never matched by filename, slug, upload
-  // order or content, and images from other colours are never shown.
-  const galleryImages = useMemo(() => {
+  // there are none of those either, fall back to the in-house illustration.
+  // Images are never matched by filename, slug, upload order or content, and a
+  // photo assigned to another colour is NEVER shown for the selected colour.
+  const galleryImages = useMemo<GalleryImage[]>(() => {
     if (colourValueId) {
       const forColour = product.images.filter((i) => i.optionValueId === colourValueId);
       if (forColour.length > 0) return forColour;
     }
     const productLevel = product.images.filter((i) => i.optionValueId == null);
     if (productLevel.length > 0) return productLevel;
-    return product.images;
-  }, [colourValueId, product.images]);
+    // Nothing for this colour and nothing product-level. Do not borrow another
+    // colour's photos — show the illustration instead.
+    return [{ url: `art:${product.art}:${product.slug}`, alt: product.name, optionValueId: null }];
+  }, [colourValueId, product.images, product.art, product.slug, product.name]);
+
+  // Clamp the active index to the current gallery (it is reset to 0 on a colour
+  // change, but the gallery can otherwise be shorter than a stale index).
+  const mainImage = galleryImages[activeImage] ?? galleryImages[0];
 
   async function addToBag() {
     if (missingSelection) {
@@ -153,11 +159,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             <div
               className="aspect-square"
               role="img"
-              aria-label={galleryImages[activeImage]?.alt || product.name}
+              aria-label={mainImage.alt || product.name}
             >
               <ProductImage
-                src={galleryImages[activeImage]?.url ?? product.image.url}
-                alt={galleryImages[activeImage]?.alt ?? product.name}
+                src={mainImage.url}
+                alt={mainImage.alt || product.name}
                 seedOverride={`${product.slug}-main-${activeImage}`}
                 priority
               />
