@@ -57,7 +57,10 @@ export function getEmailConfig(): EmailConfig {
     secure: port === 465,
     user,
     password,
-    from: (process.env.EMAIL_FROM ?? user ?? "").trim(),
+    // Branded envelope-from. Override per deployment with EMAIL_FROM (a verified
+    // sender at your provider); the fallback is the store's transactional
+    // address, never the raw SMTP login. No effect while email runs SKIPPED.
+    from: (process.env.EMAIL_FROM || "orders@axiaro.shop").trim(),
     fromName: (process.env.EMAIL_FROM_NAME ?? SITE.brand).trim(),
     replyTo: (process.env.EMAIL_REPLY_TO ?? "").trim() || null,
   };

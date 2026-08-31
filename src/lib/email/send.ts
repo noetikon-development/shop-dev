@@ -19,7 +19,9 @@ import { getTransport } from "@/lib/email/transport";
 
 export type EmailType =
   | "order_confirmation"
+  | "order_processing"
   | "order_shipped"
+  | "out_for_delivery"
   | "order_delivered"
   | "order_cancelled"
   | "welcome"

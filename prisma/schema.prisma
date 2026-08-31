@@ -764,7 +764,7 @@ model OrderEvent {
 
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_shipped | order_delivered | order_cancelled | welcome | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | refund_notification | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

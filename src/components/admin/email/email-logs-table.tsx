@@ -11,7 +11,9 @@ import type { EmailLogRow } from "@/lib/admin/email-logs";
 
 const TYPE_LABEL: Record<string, string> = {
   order_confirmation: "Order confirmation",
+  order_processing: "Preparing order",
   order_shipped: "Shipment",
+  out_for_delivery: "Out for delivery",
   order_delivered: "Delivery",
   order_cancelled: "Cancellation",
   welcome: "Welcome",

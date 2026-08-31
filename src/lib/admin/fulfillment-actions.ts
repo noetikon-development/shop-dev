@@ -15,7 +15,7 @@ import {
   isStorePickupCode,
 } from "@/lib/orders/couriers";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderShipped, sendOrderDelivered } from "@/lib/email/notifications";
+import { sendOrderShipped, sendOutForDelivery, sendOrderDelivered } from "@/lib/email/notifications";
 
 /**
  * Fulfilment / courier / tracking actions (Step 13).
@@ -401,6 +401,11 @@ export async function markOutForDeliveryAction(input: unknown): Promise<Fulfillm
   });
 
   revalidateOrderPaths(order.orderNumber, order.id);
+
+  // Step 21 P1 — "out for delivery" notification. After the response;
+  // ORDER_OUT_FOR_DELIVERY:<orderId> dedupes.
+  scheduleEmail(() => sendOutForDelivery(order.id));
+
   return { ok: true, message: "Order marked out for delivery." };
 }
 

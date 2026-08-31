@@ -16,7 +16,7 @@ import {
   orderStatusLabel,
 } from "@/lib/orders/status";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderCancelled } from "@/lib/email/notifications";
+import { sendOrderCancelled, sendOrderProcessing } from "@/lib/email/notifications";
 
 /**
  * Admin order mutations (Step 12; fulfilment milestones moved to
@@ -114,6 +114,15 @@ export async function updateOrderStatusAction(input: unknown): Promise<OrderActi
   });
 
   revalidateOrderPaths(order.orderNumber, orderId);
+
+  // Step 21 P1 — "preparing your order" notification. After the response;
+  // ORDER_PROCESSING:<orderId> dedupes if the transition is somehow re-run.
+  // PROCESSING is the only forward status this action performs, but the guard
+  // keeps the trigger explicit and future-proof.
+  if (to === "PROCESSING") {
+    scheduleEmail(() => sendOrderProcessing(orderId));
+  }
+
   return { ok: true, message: `Order marked ${orderStatusLabel(to)}.` };
 }
 

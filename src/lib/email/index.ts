@@ -5,7 +5,9 @@
  */
 export {
   sendOrderConfirmation,
+  sendOrderProcessing,
   sendOrderShipped,
+  sendOutForDelivery,
   sendOrderDelivered,
   sendOrderCancelled,
   sendWelcomeEmail,

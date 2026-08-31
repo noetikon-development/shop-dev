@@ -5,7 +5,9 @@ import { getStoreBrand } from "@/lib/site-settings";
 import { courierLabel, isStorePickupCode } from "@/lib/orders/couriers";
 import { dispatchEmail, type DispatchResult } from "@/lib/email/send";
 import { renderOrderConfirmation } from "@/lib/email/templates/order-confirmation";
+import { renderOrderProcessing } from "@/lib/email/templates/order-processing";
 import { renderOrderShipped } from "@/lib/email/templates/order-shipped";
+import { renderOutForDelivery } from "@/lib/email/templates/out-for-delivery";
 import { renderOrderDelivered } from "@/lib/email/templates/order-delivered";
 import { renderOrderCancelled } from "@/lib/email/templates/order-cancelled";
 import { renderWelcome } from "@/lib/email/templates/welcome";
@@ -117,6 +119,50 @@ export async function sendOrderConfirmation(
 }
 
 // ---------------------------------------------------------------------------
+// Processing — ORDER_PROCESSING:<orderId>  (Step 21 P1)
+// ---------------------------------------------------------------------------
+
+export async function sendOrderProcessing(
+  orderId: string,
+  opts: { retry?: boolean } = {},
+): Promise<DispatchResult> {
+  try {
+    const order = await prisma.order.findUnique({ where: { id: orderId }, include: ORDER_INCLUDE });
+    if (!order || !order.email) return { ok: false, status: "FAILED", error: "order_not_found" };
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+
+    const { subject, html, text } = renderOrderProcessing({
+      brand,
+      siteUrl,
+      orderUrl: orderLink(siteUrl, order),
+      orderNumber: order.orderNumber,
+      customerName: firstNameOf(order.user?.name) ?? "there",
+      items: order.items.map((i) => ({
+        name: i.name,
+        variantLabel: i.variantLabel,
+        quantity: i.quantity,
+      })),
+    });
+
+    return dispatchEmail({
+      type: "order_processing",
+      to: order.email,
+      subject,
+      html,
+      text,
+      idempotencyKey: `ORDER_PROCESSING:${order.id}`,
+      userId: order.userId,
+      orderId: order.id,
+      retry: opts.retry,
+    });
+  } catch (err) {
+    console.error("[email] sendOrderProcessing", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Shipment — ORDER_SHIPPED:<orderId>
 // ---------------------------------------------------------------------------
 
@@ -158,6 +204,51 @@ export async function sendOrderShipped(
     });
   } catch (err) {
     console.error("[email] sendOrderShipped", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Out for delivery — ORDER_OUT_FOR_DELIVERY:<orderId>  (Step 21 P1)
+// ---------------------------------------------------------------------------
+
+export async function sendOutForDelivery(
+  orderId: string,
+  opts: { retry?: boolean } = {},
+): Promise<DispatchResult> {
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: { user: { select: { name: true } } },
+    });
+    if (!order || !order.email) return { ok: false, status: "FAILED", error: "order_not_found" };
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+
+    const { subject, html, text } = renderOutForDelivery({
+      brand,
+      siteUrl,
+      orderUrl: orderLink(siteUrl, order),
+      orderNumber: order.orderNumber,
+      customerName: firstNameOf(order.user?.name) ?? "there",
+      courierLabel: courierLabel(order.courier, order.courierName) || "Courier",
+      trackingNumber: order.trackingNumber,
+      trackingUrl: order.trackingUrl,
+    });
+
+    return dispatchEmail({
+      type: "out_for_delivery",
+      to: order.email,
+      subject,
+      html,
+      text,
+      idempotencyKey: `ORDER_OUT_FOR_DELIVERY:${order.id}`,
+      userId: order.userId,
+      orderId: order.id,
+      retry: opts.retry,
+    });
+  } catch (err) {
+    console.error("[email] sendOutForDelivery", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -315,8 +406,12 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
   switch (log.type) {
     case "order_confirmation":
       return log.orderId ? sendOrderConfirmation(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
+    case "order_processing":
+      return log.orderId ? sendOrderProcessing(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
     case "order_shipped":
       return log.orderId ? sendOrderShipped(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
+    case "out_for_delivery":
+      return log.orderId ? sendOutForDelivery(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
     case "order_delivered":
       return log.orderId ? sendOrderDelivered(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
     case "order_cancelled":
