@@ -17,6 +17,7 @@ import {
   sendReturnRefundCompleted,
   sendReturnRequested,
   sendReturnInbound,
+  sendRefundIssued,
 } from "@/lib/email/notifications";
 import {
   canTransitionReturn,
@@ -27,6 +28,8 @@ import {
   RETURN_LIMITS,
 } from "@/lib/returns/status";
 import { nextReturnNumber, remainingReturnableByOrderItem, getReturnsConfig } from "@/lib/returns";
+import { refundRouteForOrder, initiateProviderRefund } from "@/lib/payments/refund";
+import { hasPermission } from "@/lib/admin/rbac";
 
 /**
  * Admin returns / RMA actions (Step 21 P3).
@@ -371,6 +374,65 @@ export async function initiateRefundAction(input: unknown): Promise<ReturnAdminS
     clean(parsed.data.staffNote, RETURN_LIMITS.staffNoteMax),
   );
 
+  // Routing (Step 21 P4). DORMANT in Phase 4-A: `refundRouteForOrder` always
+  // returns "bookkeeping" while online payment is disabled, so the block below
+  // runs and the existing P3 behaviour is byte-identical.
+  const routing = await refundRouteForOrder(ret.order.id);
+
+  if (routing.route === "provider") {
+    if (!(admin.isSuperAdmin || hasPermission(admin, "issue_refunds"))) {
+      return { ok: false, error: "Issuing a refund to the customer’s payment method needs the ‘issue refunds’ permission." };
+    }
+    if (parsed.data.refundAmount > routing.payment.amount - routing.alreadyRefunded) {
+      return {
+        ok: false,
+        fieldErrors: { refundAmount: "That’s more than the remaining refundable amount on this payment." },
+      };
+    }
+    const claimed = await prisma.returnRequest.updateMany({
+      where: { id: ret.id, status: "RECEIVED" },
+      data: { status: "REFUND_INITIATED", refundInitiatedAt: new Date(), staffNote },
+    });
+    if (claimed.count === 0) return { ok: false, error: "The return was updated elsewhere — refresh and try again." };
+
+    const provider = await initiateProviderRefund({
+      returnRequestId: ret.id,
+      paymentId: routing.payment.id,
+      providerPaymentId: routing.payment.providerId,
+      amount: parsed.data.refundAmount,
+      reason: "requested_by_customer",
+    });
+    if (!provider.ok) {
+      // Roll the return back so an admin can retry or fall back to bookkeeping.
+      await prisma.returnRequest.updateMany({
+        where: { id: ret.id, status: "REFUND_INITIATED" },
+        data: { status: "RECEIVED", refundInitiatedAt: null },
+      });
+      return { ok: false, error: `Refund could not be issued: ${provider.error}` };
+    }
+
+    await prisma.returnRequest.update({
+      where: { id: ret.id },
+      data: {
+        refundAmount: parsed.data.refundAmount,
+        refundMethod: `Original ${routing.payment.method ?? "payment method"} via PayMongo`,
+        refundReference: provider.paymentRefundId,
+      },
+    });
+    await writeAudit({
+      actorUserId: admin.user.id,
+      action: "return.refund_issued",
+      targetType: "return",
+      targetId: ret.id,
+      summary: `${admin.user.email} issued a PayMongo refund of ${parsed.data.refundAmount} centavos for return ${ret.returnNumber}`,
+      meta: { returnNumber: ret.returnNumber, orderNumber: ret.order.orderNumber, paymentRefundId: provider.paymentRefundId, bookkeepingOnly: false },
+    });
+    revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
+    scheduleEmail(() => sendRefundIssued(provider.paymentRefundId));
+    return { ok: true, message: "Refund issued to the customer’s payment method. It will complete automatically.", returnId: ret.id };
+  }
+
+  // --- bookkeeping path (unchanged from P3) ---------------------------------
   const res = await prisma.returnRequest.updateMany({
     where: { id: ret.id, status: "RECEIVED" },
     data: {
@@ -426,6 +488,19 @@ export async function completeRefundAction(input: unknown): Promise<ReturnAdminS
   if (!ret) return { ok: false, error: "Return not found." };
   if (!canTransitionReturn(ret.status, "REFUND_COMPLETED")) {
     return { ok: false, error: `A return that is ${returnStatusLabel(ret.status)} can’t be marked refunded.` };
+  }
+
+  // A provider (PayMongo) refund completes itself via the webhook — the manual
+  // step is only for bookkeeping refunds. DORMANT in Phase 4-A.
+  const providerRefund = await prisma.paymentRefund.findFirst({
+    where: { returnRequestId: ret.id },
+    select: { status: true },
+  });
+  if (providerRefund && providerRefund.status !== "FAILED") {
+    return {
+      ok: false,
+      error: "This refund is being processed by PayMongo and will be marked complete automatically.",
+    };
   }
 
   const staffNote = appendStaffNote(

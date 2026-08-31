@@ -118,9 +118,10 @@ export const ADMIN_ROUTES: AdminRoute[] = [
   {
     path: "/admin/payments",
     label: "Payments",
-    description: "Reconcile payments and (with permission) issue refunds.",
+    description: "Provider payment records, refund status and reconciliation.",
     accepts: ["view_payments"],
-    emptyLabel: "No payments to reconcile yet.",
+    emptyLabel: "No payment records yet.",
+    live: true,
   },
   {
     path: "/admin/shipping",

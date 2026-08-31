@@ -682,6 +682,7 @@ model Order {
   reviews          Review[]
   emailLogs        EmailLog[]
   returnRequests   ReturnRequest[]
+  payments         Payment[]
 
   @@index([userId])
   @@index([status])
@@ -804,9 +805,10 @@ model ReturnRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
-  items ReturnItem[]
+  order         Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items         ReturnItem[]
+  paymentRefund PaymentRefund?
 
   @@index([orderId])
   @@index([userId])
@@ -844,6 +846,107 @@ model ReturnItem {
   @@unique([returnRequestId, orderItemId])
   @@index([returnRequestId])
   @@index([orderItemId])
+}
+
+// ----------------------------------------------------------------------------
+// Payments / PayMongo (Step 21 P4, Phase 4-A — DORMANT)
+//
+// Additive only. Order / OrderItem are never mutated by these tables — Order is
+// the immutable commercial snapshot, Payment is the mutable money ledger beside
+// it. In Phase 4-A there is NO way to create a Payment row: online payment is
+// gated off (`payments.onlinePaymentEnabled = false`), no PayMongo API is ever
+// called, and Order.paymentStatus is not written by any P4 code path.
+//
+// Payment state machine (src/lib/payments/status.ts):
+//   PENDING -> AWAITING_PAYMENT -> PAID
+//   AWAITING_PAYMENT -> FAILED | EXPIRED | CANCELLED   (terminal-ish; a retry is a new row)
+//   PAID -> PARTIALLY_REFUNDED -> REFUNDED
+// Every state change is a verified-webhook event, applied inside one atomic,
+// status-guarded transaction. Never inferred from browser state, client fetch,
+// success_url, EmailLog or admin UI.
+//
+// NEVER stored here: card numbers, CVV, expiry, provider auth tokens, raw
+// provider payloads. Only a provider object id + amount snapshot + method label.
+// ----------------------------------------------------------------------------
+
+model Payment {
+  id             String @id @default(cuid())
+  orderId        String
+  provider       String @default("paymongo")
+  providerObject String // "checkout_session" | "payment_intent" | "payment"
+  providerId     String @unique // ps_xxx / pi_xxx / pay_xxx
+
+  status String @default("PENDING")
+  // PENDING | AWAITING_PAYMENT | PAID | FAILED | EXPIRED | CANCELLED
+  //   | REFUND_PENDING | PARTIALLY_REFUNDED | REFUNDED
+
+  amount   Int // centavos — snapshot of order.grandTotal at session creation
+  currency String @default("PHP")
+
+  method        String? // "card" | "gcash" | "paymaya" | "grab_pay" — from the paid event
+  paidAt        DateTime?
+  failureReason String? // provider decline reason text — non-sensitive
+  checkoutUrl   String? // the hosted PayMongo page (short-lived; "resume payment" link)
+  lastEventId   String? // provider evt_xxx of the last webhook that mutated this row
+  metadata      String  @default("{}") // JSON — reference_number, line summary. NEVER a secret.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  refunds PaymentRefund[]
+
+  @@index([orderId])
+  @@index([status])
+  // At most one "active" payment per order is enforced by a partial unique index
+  // in supabase/migrations/20260829140100_rls_and_grants.sql:
+  //   CREATE UNIQUE INDEX "payment_one_active_per_order" ON "Payment"("orderId")
+  //     WHERE "status" IN ('PENDING','AWAITING_PAYMENT','PAID','PARTIALLY_REFUNDED');
+}
+
+model PaymentRefund {
+  id              String  @id @default(cuid())
+  paymentId       String
+  returnRequestId String? @unique // the P3 return this settles, if any
+  provider        String  @default("paymongo")
+  providerId      String? @unique // re_xxx — null until the provider accepts the request
+
+  status String @default("PENDING") // PENDING | PROCESSING | SUCCEEDED | FAILED
+
+  amount        Int
+  currency      String  @default("PHP")
+  reason        String? // "requested_by_customer" | "duplicate" | "others"
+  failureReason String?
+  metadata      String  @default("{}")
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  succeededAt DateTime?
+
+  payment       Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  returnRequest ReturnRequest? @relation(fields: [returnRequestId], references: [id], onDelete: SetNull)
+
+  @@index([paymentId])
+  @@index([status])
+}
+
+// Every inbound provider webhook, for replay protection + idempotent processing.
+// `providerId` (evt_xxx) is the dedup key; `payloadHash` catches a tampered
+// re-send of a known event id. No secrets, no raw body stored.
+model WebhookEvent {
+  id          String   @id @default(cuid())
+  provider    String   @default("paymongo")
+  providerId  String   @unique // evt_xxx
+  type        String // "checkout_session.payment.paid" | ...
+  status      String   @default("RECEIVED") // RECEIVED | PROCESSED | IGNORED | FAILED
+  payloadHash String // sha256(raw body)
+  error       String?
+  receivedAt  DateTime @default(now())
+  processedAt DateTime?
+
+  @@index([type])
+  @@index([status])
+  @@index([receivedAt])
 }
 
 // ----------------------------------------------------------------------------
@@ -892,7 +995,7 @@ model SignInDevice {
 
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | return_requested | return_inbound | return_approved | return_rejected | return_received | return_refund_initiated | return_refund_completed | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | return_requested | return_inbound | return_approved | return_rejected | return_received | return_refund_initiated | return_refund_completed | payment_confirmation | refund_issued | refund_completed | refund_notification | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

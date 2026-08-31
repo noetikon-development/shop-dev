@@ -37,6 +37,9 @@ export type EmailType =
   | "return_received"
   | "return_refund_initiated"
   | "return_refund_completed"
+  | "payment_confirmation"
+  | "refund_issued"
+  | "refund_completed"
   | "refund_notification"
   | "email_verification"
   | "password_reset";

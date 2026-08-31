@@ -79,6 +79,15 @@ ALTER TABLE "RateHit"            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ReturnRequest"      ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "ReturnItem"         ENABLE ROW LEVEL SECURITY;
 
+-- Payments / PayMongo (Step 21 P4 Phase 4-A, 2026-09-01). Financial ledger:
+-- provider reference + amount + method + timestamps. NO card data, NO tokens,
+-- NO raw payloads. Written only by the signature-verified webhook handler and
+-- server-side admin actions via the direct `postgres` connection. RLS on, no
+-- policy — the auto-generated PostgREST API can neither read nor write these.
+ALTER TABLE "Payment"            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "PaymentRefund"      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "WebhookEvent"       ENABLE ROW LEVEL SECURITY;
+
 -- Coupon redemption ledger (Step 14; RLS added in the Step 20 hardening pass,
 -- 2026-08-30). One row per successful coupon use — reveals which customer used
 -- which code and for how much. `anon` / `authenticated` already hold no grant
@@ -117,7 +126,8 @@ REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
   "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog",
-  "CouponRedemption", "SignInDevice", "RateHit", "ReturnRequest", "ReturnItem"
+  "CouponRedemption", "SignInDevice", "RateHit", "ReturnRequest", "ReturnItem",
+  "Payment", "PaymentRefund", "WebhookEvent"
 FROM anon, authenticated;
 
 -- ============================================================================
@@ -226,3 +236,24 @@ ALTER TABLE "ReturnRequest" ADD  CONSTRAINT returnrequest_refund_nonneg
   CHECK ("refundAmount" IS NULL OR "refundAmount" >= 0);
 
 REVOKE ALL ON "ReturnRequest", "ReturnItem" FROM anon, authenticated;
+
+-- ============================================================================
+-- 12. Payments / PayMongo invariants (Step 21 P4 Phase 4-A). src/lib/payments/*
+--     also guard these; the DB is the final authority under concurrent webhook
+--     delivery.
+-- ============================================================================
+-- At most one "active" payment per order (a customer who abandons and retries
+-- gets a fresh row; only one is ever PAID). FAILED / EXPIRED / CANCELLED /
+-- REFUNDED payments free the slot.
+DROP INDEX IF EXISTS "payment_one_active_per_order";
+CREATE UNIQUE INDEX "payment_one_active_per_order"
+  ON "Payment" ("orderId")
+  WHERE "status" IN ('PENDING', 'AWAITING_PAYMENT', 'PAID', 'PARTIALLY_REFUNDED');
+
+-- Amounts are never negative; a refund is always at least 1 centavo.
+ALTER TABLE "Payment" DROP CONSTRAINT IF EXISTS payment_amount_nonneg;
+ALTER TABLE "Payment" ADD  CONSTRAINT payment_amount_nonneg CHECK ("amount" >= 0);
+ALTER TABLE "PaymentRefund" DROP CONSTRAINT IF EXISTS paymentrefund_amount_positive;
+ALTER TABLE "PaymentRefund" ADD  CONSTRAINT paymentrefund_amount_positive CHECK ("amount" >= 1);
+
+REVOKE ALL ON "Payment", "PaymentRefund", "WebhookEvent" FROM anon, authenticated;

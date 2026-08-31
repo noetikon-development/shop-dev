@@ -6,9 +6,11 @@ import { getCurrentAdmin, requirePermission } from "@/lib/admin/rbac";
 import { getAdminOrder } from "@/lib/admin/orders";
 import { orderReturnableLines } from "@/lib/admin/returns";
 import { orderHasOpenReturn } from "@/lib/returns";
+import { getOrderPayments, getPaymentsAdminConfig } from "@/lib/admin/payments";
 import { PageHeader } from "@/components/admin/ui";
 import { OrderDetailView } from "@/components/admin/orders/order-detail-view";
 import { AdminStartReturn } from "@/components/admin/returns/admin-start-return";
+import { PaymentPanel } from "@/components/admin/payments/payment-panel";
 import {
   ORDER_STATUS_TRANSITIONS,
   isCancellable,
@@ -51,6 +53,12 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
     ? await Promise.all([orderReturnableLines(order.id), orderHasOpenReturn(order.id)])
     : [null, null];
 
+  const canViewPayments = admin.isSuperAdmin || admin.permissions.has("view_payments");
+  const canManagePayments = admin.isSuperAdmin || admin.permissions.has("manage_payments");
+  const [orderPayments, paymentsConfig] = canViewPayments
+    ? await Promise.all([getOrderPayments(order.id), getPaymentsAdminConfig()])
+    : [null, null];
+
   return (
     <div>
       <Link
@@ -72,6 +80,16 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
         canManage={canManage}
         storePickup={storePickup}
       />
+
+      {canViewPayments && orderPayments && (
+        <div className="mt-6">
+          <PaymentPanel
+            payments={orderPayments}
+            canManage={canManagePayments}
+            onlinePaymentEnabled={paymentsConfig?.onlinePaymentEnabled ?? false}
+          />
+        </div>
+      )}
 
       {canManageReturns && returnable && (
         <div className="mt-6">

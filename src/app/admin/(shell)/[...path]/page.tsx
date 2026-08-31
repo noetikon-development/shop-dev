@@ -27,6 +27,7 @@ const RESERVED = new Set([
   "/admin/shipping",
   "/admin/orders",
   "/admin/returns",
+  "/admin/payments",
   "/admin/marketing/coupons",
   "/admin/reviews",
   "/admin/reviews/questions",

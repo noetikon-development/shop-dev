@@ -152,7 +152,23 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   // Payments (non-sensitive)
   { key: "payments.enabledMethods", label: "Enabled methods", type: "json", group: "payments", default: ["COD", "CARD", "GCASH"] },
   { key: "payments.provider", label: "Card provider", type: "string", group: "payments", default: "", help: "Provider name only. API keys stay in the server environment." },
-  { key: "payments.mode", label: "Mode", type: "string", group: "payments", default: "test", help: "test | live" },
+  { key: "payments.mode", label: "Mode", type: "string", group: "payments", default: "test", help: "test | live — which PayMongo keys / webhook signature to use." },
+  {
+    key: "payments.onlinePaymentEnabled",
+    label: "Online payment enabled",
+    type: "boolean",
+    group: "payments",
+    default: false,
+    help: "Master switch for PayMongo checkout. Off = checkout behaves as today (orders placed as ‘awaiting payment’, no payment step). Also requires PAYMONGO_SECRET_KEY + PAYMONGO_WEBHOOK_SECRET in the server environment.",
+  },
+  {
+    key: "payments.holdForReview",
+    label: "Hold paid orders for review",
+    type: "boolean",
+    group: "payments",
+    default: false,
+    help: "When on, a verified payment moves the order to ‘Paid’ but NOT automatically to ‘Preparing’ — an admin advances it. Off = paid orders start being prepared immediately.",
+  },
 
   // Shipping. Per-method rates live in the ShippingMethod table (Step 11,
   // managed in /admin/shipping); these keys are store-wide policy.

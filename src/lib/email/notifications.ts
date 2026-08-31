@@ -23,6 +23,9 @@ import { renderReturnRejected } from "@/lib/email/templates/return-rejected";
 import { renderReturnReceived } from "@/lib/email/templates/return-received";
 import { renderReturnRefundInitiated } from "@/lib/email/templates/return-refund-initiated";
 import { renderReturnRefundCompleted } from "@/lib/email/templates/return-refund-completed";
+import { renderPaymentConfirmation } from "@/lib/email/templates/payment-confirmation";
+import { renderRefundIssued } from "@/lib/email/templates/refund-issued";
+import { renderRefundCompleted } from "@/lib/email/templates/refund-completed";
 import { renderRefundNotification } from "@/lib/email/templates/refund-notification";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
 import { returnReasonLabel } from "@/lib/returns/status";
@@ -989,6 +992,208 @@ export async function sendReturnRefundCompleted(returnId: string): Promise<Dispa
 }
 
 // ---------------------------------------------------------------------------
+// Payments / PayMongo (Step 21 P4). DORMANT in Phase 4-A — no Payment /
+// PaymentRefund row can exist, so these are never called. Each loads the
+// authoritative record and dispatches from orders@axiaro.shop. No card data,
+// no token, no provider secret ever reaches an email. Keys:
+//   PAYMENT_CONFIRMATION:<orderId>
+//   REFUND_ISSUED:<paymentRefundId>
+//   REFUND_COMPLETED:<paymentRefundId>
+// ---------------------------------------------------------------------------
+
+function paidMethodLabel(method: string | null | undefined): string {
+  switch ((method ?? "").toLowerCase()) {
+    case "card":
+      return "your card";
+    case "gcash":
+      return "your GCash account";
+    case "paymaya":
+      return "your Maya account";
+    case "grab_pay":
+      return "your GrabPay account";
+    default:
+      return "your payment method";
+  }
+}
+
+/** Verified payment captured. Key: PAYMENT_CONFIRMATION:<orderId>. */
+export async function sendPaymentConfirmation(orderId: string): Promise<DispatchResult> {
+  try {
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        email: true,
+        userId: true,
+        grandTotal: true,
+        shippingAddress: true,
+        user: { select: { name: true } },
+        payments: {
+          where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
+          orderBy: { paidAt: "desc" },
+          take: 1,
+          select: { amount: true, method: true, paidAt: true },
+        },
+      },
+    });
+    if (!order?.email) return { ok: false, status: "FAILED", error: "order_not_found" };
+    const payment = order.payments[0];
+    if (!payment) return { ok: false, status: "FAILED", error: "no_paid_payment" };
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const shipping = safeParse<Record<string, unknown>>(order.shippingAddress, {});
+    const customerName =
+      firstNameOf(order.user?.name) ??
+      (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
+      "there";
+
+    const { subject, html, text } = renderPaymentConfirmation({
+      brand,
+      siteUrl,
+      orderUrl: orderLink(siteUrl, order),
+      orderNumber: order.orderNumber,
+      customerName,
+      amount: payment.amount,
+      methodLabel: paidMethodLabel(payment.method),
+      paidAt: payment.paidAt ?? new Date(),
+    });
+
+    return dispatchEmail({
+      type: "payment_confirmation",
+      to: order.email,
+      subject,
+      html,
+      text,
+      from: ORDERS_FROM,
+      idempotencyKey: `PAYMENT_CONFIRMATION:${order.id}`,
+      userId: order.userId,
+      orderId: order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendPaymentConfirmation", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+const REFUND_EMAIL_SELECT = {
+  id: true,
+  amount: true,
+  payment: {
+    select: {
+      amount: true,
+      method: true,
+      order: {
+        select: {
+          id: true,
+          orderNumber: true,
+          email: true,
+          userId: true,
+          shippingAddress: true,
+          user: { select: { name: true } },
+        },
+      },
+    },
+  },
+  returnRequest: { select: { returnNumber: true } },
+} as const;
+
+async function loadRefundEmailContext(paymentRefundId: string) {
+  const r = await prisma.paymentRefund.findUnique({
+    where: { id: paymentRefundId },
+    select: REFUND_EMAIL_SELECT,
+  });
+  if (!r?.payment.order.email) return null;
+  const order = r.payment.order;
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  const shipping = safeParse<Record<string, unknown>>(order.shippingAddress, {});
+  const customerName =
+    firstNameOf(order.user?.name) ??
+    (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
+    "there";
+  return {
+    r,
+    order,
+    brand,
+    siteUrl,
+    customerName,
+    returnNumber: r.returnRequest?.returnNumber ?? "—",
+    returnUrl: order.userId
+      ? `${siteUrl}/account/returns/${encodeURIComponent(r.returnRequest?.returnNumber ?? "")}`
+      : `${siteUrl}/track`,
+  };
+}
+
+/** Provider refund requested. Key: REFUND_ISSUED:<paymentRefundId>. */
+export async function sendRefundIssued(paymentRefundId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadRefundEmailContext(paymentRefundId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "refund_not_found" };
+
+    const { subject, html, text } = renderRefundIssued({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      orderNumber: ctx.order.orderNumber,
+      returnNumber: ctx.returnNumber,
+      customerName: ctx.customerName,
+      amount: ctx.r.amount,
+      methodLabel: paidMethodLabel(ctx.r.payment.method),
+    });
+
+    return dispatchEmail({
+      type: "refund_issued",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: ORDERS_FROM,
+      idempotencyKey: `REFUND_ISSUED:${ctx.r.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendRefundIssued", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Provider refund settled. Key: REFUND_COMPLETED:<paymentRefundId>. */
+export async function sendRefundCompleted(paymentRefundId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadRefundEmailContext(paymentRefundId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "refund_not_found" };
+
+    const { subject, html, text } = renderRefundCompleted({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      orderNumber: ctx.order.orderNumber,
+      returnNumber: ctx.returnNumber,
+      customerName: ctx.customerName,
+      amount: ctx.r.amount,
+      methodLabel: paidMethodLabel(ctx.r.payment.method),
+      partial: ctx.r.amount < ctx.r.payment.amount,
+    });
+
+    return dispatchEmail({
+      type: "refund_completed",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: ORDERS_FROM,
+      idempotencyKey: `REFUND_COMPLETED:${ctx.r.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendRefundCompleted", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Admin retry — re-run the matching notification for a FAILED / SKIPPED log,
 // reusing its idempotency key (so it never becomes a second row / second send).
 // ---------------------------------------------------------------------------
@@ -1016,11 +1221,15 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
       return log.orderId ? sendOrderCancelled(log.orderId, null, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
     case "welcome":
       return log.userId ? sendWelcomeEmail(log.userId, { retry: true }) : { ok: false, status: "FAILED", error: "no_user" };
+    case "payment_confirmation":
+      // Order-scoped, deterministic (re-reads the PAID Payment) — safe to re-send.
+      return log.orderId ? sendPaymentConfirmation(log.orderId) : { ok: false, status: "FAILED", error: "no_order" };
     default:
       // refund_notification / auth emails / P2 security notices / support
-      // (contact-form) emails / return (P3) emails are not retryable here: they
-      // carry time-of-event content (or a single-use provider token) that must
-      // not be regenerated and re-sent later.
+      // (contact-form) emails / return (P3) emails / refund_issued /
+      // refund_completed are not retryable here: they carry time-of-event
+      // content (or a single-use provider reference) that must not be
+      // regenerated and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
   }
 }

@@ -32,6 +32,10 @@
 -- 2026-09-01: + ReturnRequest / ReturnItem tables for Returns / RMA (Step 21 P3).
 --             Partial unique index return_one_open_per_order + return_number_seq
 --             + ReturnItem CHECK constraints live in 20260829140100_rls_and_grants.sql.
+-- 2026-09-01: + Payment / PaymentRefund / WebhookEvent tables for PayMongo
+--             (Step 21 P4, Phase 4-A — dormant). Partial unique index
+--             payment_one_active_per_order + CHECK constraints live in
+--             20260829140100_rls_and_grants.sql.
 -- ============================================================================
 
 -- CreateSchema
@@ -535,6 +539,63 @@ CREATE TABLE "ReturnItem" (
 );
 
 -- CreateTable
+CREATE TABLE "Payment" (
+    "id" TEXT NOT NULL,
+    "orderId" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'paymongo',
+    "providerObject" TEXT NOT NULL,
+    "providerId" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "amount" INTEGER NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'PHP',
+    "method" TEXT,
+    "paidAt" TIMESTAMP(3),
+    "failureReason" TEXT,
+    "checkoutUrl" TEXT,
+    "lastEventId" TEXT,
+    "metadata" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "PaymentRefund" (
+    "id" TEXT NOT NULL,
+    "paymentId" TEXT NOT NULL,
+    "returnRequestId" TEXT,
+    "provider" TEXT NOT NULL DEFAULT 'paymongo',
+    "providerId" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'PENDING',
+    "amount" INTEGER NOT NULL,
+    "currency" TEXT NOT NULL DEFAULT 'PHP',
+    "reason" TEXT,
+    "failureReason" TEXT,
+    "metadata" TEXT NOT NULL DEFAULT '{}',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "succeededAt" TIMESTAMP(3),
+
+    CONSTRAINT "PaymentRefund_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "WebhookEvent" (
+    "id" TEXT NOT NULL,
+    "provider" TEXT NOT NULL DEFAULT 'paymongo',
+    "providerId" TEXT NOT NULL,
+    "type" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'RECEIVED',
+    "payloadHash" TEXT NOT NULL,
+    "error" TEXT,
+    "receivedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "processedAt" TIMESTAMP(3),
+
+    CONSTRAINT "WebhookEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "EmailLog" (
     "id" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -948,6 +1009,39 @@ CREATE INDEX "ReturnItem_orderItemId_idx" ON "ReturnItem"("orderItemId");
 CREATE UNIQUE INDEX "ReturnItem_returnRequestId_orderItemId_key" ON "ReturnItem"("returnRequestId", "orderItemId");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Payment_providerId_key" ON "Payment"("providerId");
+
+-- CreateIndex
+CREATE INDEX "Payment_orderId_idx" ON "Payment"("orderId");
+
+-- CreateIndex
+CREATE INDEX "Payment_status_idx" ON "Payment"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentRefund_returnRequestId_key" ON "PaymentRefund"("returnRequestId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "PaymentRefund_providerId_key" ON "PaymentRefund"("providerId");
+
+-- CreateIndex
+CREATE INDEX "PaymentRefund_paymentId_idx" ON "PaymentRefund"("paymentId");
+
+-- CreateIndex
+CREATE INDEX "PaymentRefund_status_idx" ON "PaymentRefund"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "WebhookEvent_providerId_key" ON "WebhookEvent"("providerId");
+
+-- CreateIndex
+CREATE INDEX "WebhookEvent_type_idx" ON "WebhookEvent"("type");
+
+-- CreateIndex
+CREATE INDEX "WebhookEvent_status_idx" ON "WebhookEvent"("status");
+
+-- CreateIndex
+CREATE INDEX "WebhookEvent_receivedAt_idx" ON "WebhookEvent"("receivedAt");
+
+-- CreateIndex
 CREATE INDEX "StoreSetting_group_idx" ON "StoreSetting"("group");
 
 -- CreateIndex
@@ -1136,3 +1230,12 @@ ALTER TABLE "ReturnItem" ADD CONSTRAINT "ReturnItem_returnRequestId_fkey" FOREIG
 
 -- AddForeignKey
 ALTER TABLE "ReturnItem" ADD CONSTRAINT "ReturnItem_orderItemId_fkey" FOREIGN KEY ("orderItemId") REFERENCES "OrderItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Payment" ADD CONSTRAINT "Payment_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentRefund" ADD CONSTRAINT "PaymentRefund_paymentId_fkey" FOREIGN KEY ("paymentId") REFERENCES "Payment"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "PaymentRefund" ADD CONSTRAINT "PaymentRefund_returnRequestId_fkey" FOREIGN KEY ("returnRequestId") REFERENCES "ReturnRequest"("id") ON DELETE SET NULL ON UPDATE CASCADE;
