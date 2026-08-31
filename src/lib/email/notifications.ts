@@ -14,6 +14,8 @@ import { renderWelcome } from "@/lib/email/templates/welcome";
 import { renderPasswordChanged } from "@/lib/email/templates/password-changed";
 import { renderEmailChanged } from "@/lib/email/templates/email-changed";
 import { renderSignInAlert } from "@/lib/email/templates/sign-in-alert";
+import { renderSupportInbound } from "@/lib/email/templates/support-inbound";
+import { renderSupportAck } from "@/lib/email/templates/support-ack";
 import { renderRefundNotification } from "@/lib/email/templates/refund-notification";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
 import { createHash } from "node:crypto";
@@ -21,6 +23,44 @@ import { maskEmail } from "@/lib/email/html";
 
 /** Account-security notices go from a no-reply address, not the orders inbox. */
 const SECURITY_FROM = "no-reply@axiaro.shop";
+/** Support-team notifications come from the support inbox address. */
+const SUPPORT_FROM = "support@axiaro.shop";
+/** Fallback support inbox when `support.inboxEmail` is unset or invalid. */
+const SUPPORT_INBOX_FALLBACK = "support@axiaro.shop";
+/** How long we tell customers a support reply takes. */
+const SUPPORT_RESPONSE_WINDOW = "1–2 business days";
+const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+
+/**
+ * The address contact-form messages are delivered to. Configured in
+ * Settings → Contact (`support.inboxEmail`); read uncached here because this
+ * runs from `after()`, outside a Next request scope.
+ */
+async function getSupportInboxEmail(): Promise<string> {
+  try {
+    const row = await prisma.storeSetting.findUnique({
+      where: { key: "support.inboxEmail" },
+      select: { value: true },
+    });
+    const v = (row?.value ?? "").trim();
+    return EMAIL_RE.test(v) ? v : SUPPORT_INBOX_FALLBACK;
+  } catch {
+    return SUPPORT_INBOX_FALLBACK;
+  }
+}
+
+/** Stable digest of a contact-form submission, shared by both support emails. */
+function supportDigest(email: string, subject: string, message: string): string {
+  return shortHash(`${email.trim().toLowerCase()}|${subject}|${message}`);
+}
+
+export type SupportMessageInput = {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+  at?: Date;
+};
 
 /** UTC hour bucket, e.g. "2026-08-31T14" — deterministic idempotency window. */
 function hourBucket(at: Date = new Date()): string {
@@ -541,6 +581,77 @@ export async function sendSignInAlert(
 }
 
 // ---------------------------------------------------------------------------
+// Customer support / contact form (Step 21 P5). Two emails per submission:
+//   support_inbound — to the support inbox, from support@, Reply-To = customer.
+//   support_ack     — to the customer, from no-reply@.
+// Both carry ONLY the customer's own name / email / subject / message. No
+// account data, order data, password, token or secret. Idempotency keys share a
+// digest of (email, subject, message) + the UTC day, so an accidental double
+// submit on the same day never produces a second email.
+// ---------------------------------------------------------------------------
+
+/** Notify the support team of a new contact-form message. */
+export async function sendSupportInbound(input: SupportMessageInput): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const at = input.at ?? new Date();
+
+    const { subject, html, text } = renderSupportInbound({
+      brand,
+      siteUrl,
+      name: input.name,
+      email: input.email,
+      subject: input.subject,
+      message: input.message,
+      submittedAt: at,
+    });
+
+    return dispatchEmail({
+      type: "support_inbound",
+      to,
+      subject,
+      html,
+      text,
+      from: SUPPORT_FROM,
+      replyTo: input.email,
+      idempotencyKey: `SUPPORT_INBOUND:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
+    });
+  } catch (err) {
+    console.error("[email] sendSupportInbound", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Acknowledge the customer's contact-form message. */
+export async function sendSupportAck(input: SupportMessageInput): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const at = input.at ?? new Date();
+
+    const { subject, html, text } = renderSupportAck({
+      brand,
+      siteUrl,
+      customerName: firstNameOf(input.name) ?? "there",
+      subject: input.subject,
+      responseWindow: SUPPORT_RESPONSE_WINDOW,
+    });
+
+    return dispatchEmail({
+      type: "support_ack",
+      to: input.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `SUPPORT_ACK:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
+    });
+  } catch (err) {
+    console.error("[email] sendSupportAck", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Admin retry — re-run the matching notification for a FAILED / SKIPPED log,
 // reusing its idempotency key (so it never becomes a second row / second send).
 // ---------------------------------------------------------------------------
@@ -569,9 +680,10 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
     case "welcome":
       return log.userId ? sendWelcomeEmail(log.userId, { retry: true }) : { ok: false, status: "FAILED", error: "no_user" };
     default:
-      // refund_notification / auth emails / P2 security notices are not
-      // retryable here: they carry time-of-event content (or a single-use
-      // provider token) that must not be regenerated and re-sent later.
+      // refund_notification / auth emails / P2 security notices / support
+      // (contact-form) emails are not retryable here: they carry time-of-event
+      // content (or a single-use provider token) that must not be regenerated
+      // and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
   }
 }

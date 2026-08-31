@@ -111,7 +111,8 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "storefront.collectionSaleText", label: "Collection — “Sale” description", type: "text", group: "storefront", default: "" },
 
   // Contact
-  { key: "contact.email", label: "Support email", type: "email", group: "contact", default: "" },
+  { key: "contact.email", label: "Support email", type: "email", group: "contact", default: "", help: "Public support address shown on the contact page." },
+  { key: "support.inboxEmail", label: "Contact-form inbox", type: "email", group: "contact", default: "support@axiaro.shop", help: "Internal address that contact-form submissions are delivered to. Not shown publicly." },
   { key: "contact.phone", label: "Phone", type: "string", group: "contact", default: "" },
   { key: "contact.addressLine1", label: "Address line 1", type: "string", group: "contact", default: "" },
   { key: "contact.addressLine2", label: "Address line 2", type: "string", group: "contact", default: "" },

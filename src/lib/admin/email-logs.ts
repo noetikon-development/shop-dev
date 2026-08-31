@@ -20,6 +20,8 @@ export const EMAIL_TYPES = [
   "password_changed",
   "email_changed",
   "sign_in_alert",
+  "support_inbound",
+  "support_ack",
   "refund_notification",
   "email_verification",
   "password_reset",

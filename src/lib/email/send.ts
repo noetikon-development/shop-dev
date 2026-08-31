@@ -28,6 +28,8 @@ export type EmailType =
   | "password_changed"
   | "email_changed"
   | "sign_in_alert"
+  | "support_inbound"
+  | "support_ack"
   | "refund_notification"
   | "email_verification"
   | "password_reset";
@@ -47,6 +49,12 @@ export type DispatchInput = {
    * deployment — the provider's verified sender always wins there.
    */
   from?: string;
+  /**
+   * Preferred Reply-To for this message (e.g. the customer's address on a
+   * support notification so the team can reply straight back). Falls back to
+   * the global EMAIL_REPLY_TO.
+   */
+  replyTo?: string;
   /** Admin-initiated re-send: reuse an existing FAILED / SKIPPED log row. */
   retry?: boolean;
 };
@@ -135,6 +143,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
   // unless the deployment pinned EMAIL_FROM, in which case that verified sender
   // always wins.
   const fromAddr = cfg.fromPinned ? cfg.from : (input.from || cfg.from);
+  const replyToAddr = input.replyTo || cfg.replyTo;
 
   try {
     const info = await transport.sendMail({
@@ -143,7 +152,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
       subject: input.subject,
       text: input.text,
       html: input.html,
-      ...(cfg.replyTo ? { replyTo: cfg.replyTo } : {}),
+      ...(replyToAddr ? { replyTo: replyToAddr } : {}),
     });
     await prisma.emailLog
       .update({

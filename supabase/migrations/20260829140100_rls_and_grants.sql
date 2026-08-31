@@ -69,6 +69,10 @@ ALTER TABLE "EmailLog"           ENABLE ROW LEVEL SECURITY;
 -- (UA hash + short summary, no raw UA / IP / token). RLS on, no policy.
 ALTER TABLE "SignInDevice"       ENABLE ROW LEVEL SECURITY;
 
+-- Fixed-window rate limiter (Step 21 P5, 2026-08-31). Hashed keys + counters
+-- only, no PII. RLS on, no policy.
+ALTER TABLE "RateHit"            ENABLE ROW LEVEL SECURITY;
+
 -- Coupon redemption ledger (Step 14; RLS added in the Step 20 hardening pass,
 -- 2026-08-30). One row per successful coupon use — reveals which customer used
 -- which code and for how much. `anon` / `authenticated` already hold no grant
@@ -107,7 +111,7 @@ REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
   "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog",
-  "CouponRedemption", "SignInDevice"
+  "CouponRedemption", "SignInDevice", "RateHit"
 FROM anon, authenticated;
 
 -- ============================================================================

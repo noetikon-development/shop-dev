@@ -763,6 +763,20 @@ model OrderEvent {
 // triggered it. No credentials or message bodies are stored here.
 // ----------------------------------------------------------------------------
 
+// Generic fixed-window rate limiter (Step 21 P5). One row per limit key
+// (e.g. "contact:email:<hash>"). `count` is the number of hits since
+// `windowStart`; a hit after the window has elapsed resets the row. Used by
+// the contact form and reusable for other unauthenticated endpoints. Stores
+// only a hashed key + counters — no PII. RLS on, no policy.
+model RateHit {
+  key         String   @id
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([windowStart])
+}
+
 // Known sign-in devices (Step 21 P2). One row per (user, user-agent hash) — a
 // coarse "have we seen this browser for this account before?" signal used to
 // drive the security "new sign-in" alert. Stores NO raw user-agent, NO IP, NO
@@ -784,7 +798,7 @@ model SignInDevice {
 
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | refund_notification | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

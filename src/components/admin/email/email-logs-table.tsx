@@ -20,6 +20,8 @@ const TYPE_LABEL: Record<string, string> = {
   password_changed: "Password changed",
   email_changed: "Email change",
   sign_in_alert: "Sign-in alert",
+  support_inbound: "Contact form",
+  support_ack: "Contact reply",
   refund_notification: "Refund",
   email_verification: "Email verification",
   password_reset: "Password reset",

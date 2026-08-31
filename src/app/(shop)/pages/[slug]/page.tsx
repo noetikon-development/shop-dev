@@ -4,6 +4,7 @@ import { getPublishedPage } from "@/lib/content";
 import { getSiteSettings } from "@/lib/site-settings";
 import { Markdown } from "@/lib/markdown";
 import { ContactPanel } from "@/components/content/contact-panel";
+import { ContactForm } from "@/components/content/contact-form";
 import { formatDate } from "@/lib/utils";
 
 export async function generateMetadata({ params }: PageProps<"/pages/[slug]">): Promise<Metadata> {
@@ -60,7 +61,12 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
             professional for your business before relying on it commercially.
           </p>
         )}
-        {settings && <ContactPanel settings={settings} />}
+        {settings && (
+          <>
+            <ContactForm />
+            <ContactPanel settings={settings} />
+          </>
+        )}
       </div>
     </article>
   );

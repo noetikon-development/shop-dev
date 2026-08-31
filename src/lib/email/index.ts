@@ -14,6 +14,8 @@ export {
   sendPasswordChanged,
   sendEmailChanged,
   sendSignInAlert,
+  sendSupportInbound,
+  sendSupportAck,
   sendRefundNotification,
   sendEmailVerification,
   sendPasswordReset,

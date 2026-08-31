@@ -28,6 +28,7 @@
 --             ProductImage.optionValueId FK -> ProductOptionValue for the
 --             explicit colour <-> image relation (Step 20).
 -- 2026-08-31: + SignInDevice table for the new-device sign-in alert (Step 21 P2).
+-- 2026-08-31: + RateHit table (fixed-window rate limiter) for the contact form (Step 21 P5).
 -- ============================================================================
 
 -- CreateSchema
@@ -520,6 +521,16 @@ CREATE TABLE "SignInDevice" (
 );
 
 -- CreateTable
+CREATE TABLE "RateHit" (
+    "key" TEXT NOT NULL,
+    "count" INTEGER NOT NULL DEFAULT 0,
+    "windowStart" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "RateHit_pkey" PRIMARY KEY ("key")
+);
+
+-- CreateTable
 CREATE TABLE "StoreSetting" (
     "key" TEXT NOT NULL,
     "value" TEXT NOT NULL,
@@ -861,6 +872,9 @@ CREATE INDEX "SignInDevice_userId_idx" ON "SignInDevice"("userId");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "SignInDevice_userId_uaHash_key" ON "SignInDevice"("userId", "uaHash");
+
+-- CreateIndex
+CREATE INDEX "RateHit_windowStart_idx" ON "RateHit"("windowStart");
 
 -- CreateIndex
 CREATE INDEX "StoreSetting_group_idx" ON "StoreSetting"("group");
