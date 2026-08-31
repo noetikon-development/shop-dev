@@ -31,6 +31,7 @@ export type SettingGroupKey =
   | "seo"
   | "payments"
   | "shipping"
+  | "returns"
   | "email";
 
 export type SettingField = {
@@ -62,6 +63,10 @@ export const SETTING_GROUPS: Record<
     description: "Non-sensitive payment configuration. Secrets stay in the server environment.",
   },
   shipping: { label: "Shipping", description: "Default rates and thresholds." },
+  returns: {
+    label: "Returns",
+    description: "Return window and the instructions sent when a return is approved.",
+  },
   email: {
     label: "Email",
     description: "Sender identity. Provider credentials stay in the server environment.",
@@ -153,6 +158,11 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   // managed in /admin/shipping); these keys are store-wide policy.
   { key: "shipping.freeThreshold", label: "Free-shipping threshold (centavos)", type: "number", group: "shipping", default: 250000, help: "Order subtotal at or above which shipping is free. 0 disables free shipping." },
   { key: "shipping.countries", label: "Supported delivery countries", type: "json", group: "shipping", default: ["PH"], help: "ISO 3166-1 alpha-2 codes the store delivers to." },
+
+  // Returns
+  { key: "returns.windowDays", label: "Return window (days)", type: "number", group: "returns", default: 30, help: "How many days after delivery a customer can open a return. An admin can still assist outside this window." },
+  { key: "returns.instructions", label: "Return instructions", type: "text", group: "returns", default: "", help: "Shown to the customer in the “return approved” email — e.g. the return address and how to pack the parcel. Plain text." },
+  { key: "returns.policyUrl", label: "Returns policy link", type: "url", group: "returns", default: "", help: "Optional link to the full returns policy page, shown in return emails." },
 
   // Email (non-sensitive)
   { key: "email.fromName", label: "From name", type: "string", group: "email", default: "" },

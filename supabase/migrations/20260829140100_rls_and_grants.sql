@@ -73,6 +73,12 @@ ALTER TABLE "SignInDevice"       ENABLE ROW LEVEL SECURITY;
 -- only, no PII. RLS on, no policy.
 ALTER TABLE "RateHit"            ENABLE ROW LEVEL SECURITY;
 
+-- Returns / RMA (Step 21 P3, 2026-09-01). Return requests + immutable line
+-- snapshots. Read / written only by the app's direct `postgres` connection with
+-- server-side ownership / manage_returns checks. RLS on, no policy.
+ALTER TABLE "ReturnRequest"      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "ReturnItem"         ENABLE ROW LEVEL SECURITY;
+
 -- Coupon redemption ledger (Step 14; RLS added in the Step 20 hardening pass,
 -- 2026-08-30). One row per successful coupon use — reveals which customer used
 -- which code and for how much. `anon` / `authenticated` already hold no grant
@@ -111,7 +117,7 @@ REVOKE ALL ON
   "Role", "Permission", "UserRole", "RolePermission", "AdminInvite", "AdminAuditLog",
   "ContentPage", "ContentBlock", "MediaAsset", "InventoryAdjustment",
   "Cart", "CartItem", "ShippingMethod", "ProductQuestion", "ProductAnswer", "EmailLog",
-  "CouponRedemption", "SignInDevice", "RateHit"
+  "CouponRedemption", "SignInDevice", "RateHit", "ReturnRequest", "ReturnItem"
 FROM anon, authenticated;
 
 -- ============================================================================
@@ -187,3 +193,36 @@ CREATE SEQUENCE IF NOT EXISTS "order_number_seq" AS bigint INCREMENT BY 1 MINVAL
 -- ============================================================================
 ALTER TABLE "ShippingMethod" DROP CONSTRAINT IF EXISTS shippingmethod_rate_nonneg;
 ALTER TABLE "ShippingMethod" ADD  CONSTRAINT shippingmethod_rate_nonneg CHECK ("rate" >= 0);
+
+-- ============================================================================
+-- 11. Returns / RMA invariants (Step 21 P3). src/lib/returns-actions.ts +
+--     src/lib/admin/returns-actions.ts also guard these; the DB is the final
+--     authority under concurrent writes.
+-- ============================================================================
+-- Return numbers are RET-<YYMMDD>-<nextval, zero-padded to 5>. Independent of
+-- the order-number sequence.
+CREATE SEQUENCE IF NOT EXISTS "return_number_seq" AS bigint INCREMENT BY 1 MINVALUE 100001 START WITH 100001;
+
+-- At most one OPEN (non-terminal) return per order. A rejected / cancelled /
+-- fully-refunded return frees the slot so the customer can raise a new one.
+DROP INDEX IF EXISTS "return_one_open_per_order";
+CREATE UNIQUE INDEX "return_one_open_per_order"
+  ON "ReturnRequest" ("orderId")
+  WHERE "status" NOT IN ('REJECTED', 'CANCELLED', 'REFUND_COMPLETED');
+
+-- Line quantities and refund amounts are never negative; returned quantity is
+-- always at least 1; restock quantity never exceeds the returned quantity.
+ALTER TABLE "ReturnItem" DROP CONSTRAINT IF EXISTS returnitem_quantity_positive;
+ALTER TABLE "ReturnItem" ADD  CONSTRAINT returnitem_quantity_positive
+  CHECK ("quantity" >= 1);
+ALTER TABLE "ReturnItem" DROP CONSTRAINT IF EXISTS returnitem_restock_bounds;
+ALTER TABLE "ReturnItem" ADD  CONSTRAINT returnitem_restock_bounds
+  CHECK ("restockQuantity" >= 0 AND "restockQuantity" <= "quantity");
+ALTER TABLE "ReturnItem" DROP CONSTRAINT IF EXISTS returnitem_refund_nonneg;
+ALTER TABLE "ReturnItem" ADD  CONSTRAINT returnitem_refund_nonneg
+  CHECK ("refundAmount" >= 0);
+ALTER TABLE "ReturnRequest" DROP CONSTRAINT IF EXISTS returnrequest_refund_nonneg;
+ALTER TABLE "ReturnRequest" ADD  CONSTRAINT returnrequest_refund_nonneg
+  CHECK ("refundAmount" IS NULL OR "refundAmount" >= 0);
+
+REVOKE ALL ON "ReturnRequest", "ReturnItem" FROM anon, authenticated;

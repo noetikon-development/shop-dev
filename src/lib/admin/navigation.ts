@@ -101,6 +101,14 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     live: true,
   },
   {
+    path: "/admin/returns",
+    label: "Returns",
+    description: "Review return requests, receive items and record refunds.",
+    accepts: ["manage_returns"],
+    emptyLabel: "No return requests yet.",
+    live: true,
+  },
+  {
     path: "/admin/customers",
     label: "Customers",
     description: "Look up customer accounts, addresses and order history.",

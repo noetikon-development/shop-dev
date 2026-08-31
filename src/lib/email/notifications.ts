@@ -16,13 +16,24 @@ import { renderEmailChanged } from "@/lib/email/templates/email-changed";
 import { renderSignInAlert } from "@/lib/email/templates/sign-in-alert";
 import { renderSupportInbound } from "@/lib/email/templates/support-inbound";
 import { renderSupportAck } from "@/lib/email/templates/support-ack";
+import { renderReturnRequested } from "@/lib/email/templates/return-requested";
+import { renderReturnInbound } from "@/lib/email/templates/return-inbound";
+import { renderReturnApproved } from "@/lib/email/templates/return-approved";
+import { renderReturnRejected } from "@/lib/email/templates/return-rejected";
+import { renderReturnReceived } from "@/lib/email/templates/return-received";
+import { renderReturnRefundInitiated } from "@/lib/email/templates/return-refund-initiated";
+import { renderReturnRefundCompleted } from "@/lib/email/templates/return-refund-completed";
 import { renderRefundNotification } from "@/lib/email/templates/refund-notification";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
+import { returnReasonLabel } from "@/lib/returns/status";
+import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
 import { maskEmail } from "@/lib/email/html";
 
 /** Account-security notices go from a no-reply address, not the orders inbox. */
 const SECURITY_FROM = "no-reply@axiaro.shop";
+/** Operational order/return notifications to the store team. */
+const ORDERS_FROM = "orders@axiaro.shop";
 /** Support-team notifications come from the support inbox address. */
 const SUPPORT_FROM = "support@axiaro.shop";
 /** Fallback support inbox when `support.inboxEmail` is unset or invalid. */
@@ -652,6 +663,332 @@ export async function sendSupportAck(input: SupportMessageInput): Promise<Dispat
 }
 
 // ---------------------------------------------------------------------------
+// Returns / RMA (Step 21 P3). One email per (event, return). All customer
+// notices go from no-reply@; the single internal notice (return_inbound) goes
+// from orders@ to the support inbox with Reply-To = the customer. NONE carry a
+// staff note, token or secret. Every dynamic value is escaped by the template.
+// Keys: RETURN_<EVENT>:<returnId>.
+// ---------------------------------------------------------------------------
+
+type ReturnEmailContext = {
+  brand: string;
+  siteUrl: string;
+  ret: {
+    id: string;
+    returnNumber: string;
+    reason: string;
+    customerNote: string | null;
+    resolutionNote: string | null;
+    adminAssisted: boolean;
+    refundAmount: number | null;
+    refundMethod: string | null;
+    refundReference: string | null;
+  };
+  order: { id: string; orderNumber: string; email: string; userId: string | null };
+  customerName: string;
+  items: { name: string; variantLabel: string | null; quantity: number }[];
+  returnUrl: string;
+  adminUrl: string;
+  supportUrl: string;
+};
+
+async function loadReturnContext(returnId: string): Promise<ReturnEmailContext | null> {
+  const ret = await prisma.returnRequest.findUnique({
+    where: { id: returnId },
+    select: {
+      id: true,
+      returnNumber: true,
+      reason: true,
+      customerNote: true,
+      resolutionNote: true,
+      adminAssisted: true,
+      refundAmount: true,
+      refundMethod: true,
+      refundReference: true,
+      user: { select: { name: true } },
+      order: {
+        select: { id: true, orderNumber: true, email: true, userId: true, shippingAddress: true },
+      },
+      items: { orderBy: { id: "asc" }, select: { name: true, variantLabel: true, quantity: true } },
+    },
+  });
+  if (!ret || !ret.order?.email) return null;
+
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  const shipping = safeParse<Record<string, unknown>>(ret.order.shippingAddress, {});
+  const customerName =
+    firstNameOf(ret.user?.name) ??
+    (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
+    "there";
+  const returnUrl = ret.order.userId
+    ? `${siteUrl}/account/returns/${encodeURIComponent(ret.returnNumber)}`
+    : `${siteUrl}/track`;
+
+  return {
+    brand,
+    siteUrl,
+    ret,
+    order: ret.order,
+    customerName,
+    items: ret.items,
+    returnUrl,
+    adminUrl: `${siteUrl}/admin/returns/${ret.id}`,
+    supportUrl: `${siteUrl}/pages/contact`,
+  };
+}
+
+/** Customer — a return request has been opened. Key: RETURN_REQUESTED:<id>. */
+export async function sendReturnRequested(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+
+    const { subject, html, text } = renderReturnRequested({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      reasonLabel: returnReasonLabel(ctx.ret.reason),
+      items: ctx.items,
+    });
+
+    return dispatchEmail({
+      type: "return_requested",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_REQUESTED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnRequested", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Internal — a return needs triage. Key: RETURN_INBOUND:<id>. */
+export async function sendReturnInbound(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+    const to = await getSupportInboxEmail();
+
+    const { subject, html, text } = renderReturnInbound({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      adminUrl: ctx.adminUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      customerEmail: ctx.order.email,
+      reasonLabel: returnReasonLabel(ctx.ret.reason),
+      customerNote: ctx.ret.customerNote,
+      adminAssisted: ctx.ret.adminAssisted,
+      items: ctx.items,
+    });
+
+    return dispatchEmail({
+      type: "return_inbound",
+      to,
+      subject,
+      html,
+      text,
+      from: ORDERS_FROM,
+      replyTo: ctx.order.email,
+      idempotencyKey: `RETURN_INBOUND:${ctx.ret.id}`,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnInbound", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Customer — return approved. Key: RETURN_APPROVED:<id>. */
+export async function sendReturnApproved(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+    const cfg = await getReturnsConfig();
+
+    const { subject, html, text } = renderReturnApproved({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      items: ctx.items,
+      instructions: cfg.instructions || null,
+      policyUrl: cfg.policyUrl || null,
+      resolutionNote: ctx.ret.resolutionNote,
+    });
+
+    return dispatchEmail({
+      type: "return_approved",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_APPROVED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnApproved", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Customer — return rejected. Key: RETURN_REJECTED:<id>. */
+export async function sendReturnRejected(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+
+    const { subject, html, text } = renderReturnRejected({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      supportUrl: ctx.supportUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      resolutionNote: ctx.ret.resolutionNote,
+    });
+
+    return dispatchEmail({
+      type: "return_rejected",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_REJECTED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnRejected", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Customer — returned items received. Key: RETURN_RECEIVED:<id>. */
+export async function sendReturnReceived(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+
+    const { subject, html, text } = renderReturnReceived({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      items: ctx.items,
+    });
+
+    return dispatchEmail({
+      type: "return_received",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_RECEIVED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnReceived", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Customer — refund recorded / being processed. Key: RETURN_REFUND_INITIATED:<id>. */
+export async function sendReturnRefundInitiated(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (ctx.ret.refundAmount == null) {
+      return { ok: false, status: "FAILED", error: "no_refund_amount" };
+    }
+
+    const { subject, html, text } = renderReturnRefundInitiated({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      refundAmount: ctx.ret.refundAmount,
+      refundMethod: ctx.ret.refundMethod || "your original payment method",
+    });
+
+    return dispatchEmail({
+      type: "return_refund_initiated",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_REFUND_INITIATED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnRefundInitiated", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Customer — refund marked complete. Key: RETURN_REFUND_COMPLETED:<id>. */
+export async function sendReturnRefundCompleted(returnId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadReturnContext(returnId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (ctx.ret.refundAmount == null) {
+      return { ok: false, status: "FAILED", error: "no_refund_amount" };
+    }
+
+    const { subject, html, text } = renderReturnRefundCompleted({
+      brand: ctx.brand,
+      siteUrl: ctx.siteUrl,
+      returnUrl: ctx.returnUrl,
+      returnNumber: ctx.ret.returnNumber,
+      orderNumber: ctx.order.orderNumber,
+      customerName: ctx.customerName,
+      refundAmount: ctx.ret.refundAmount,
+      refundMethod: ctx.ret.refundMethod || "your original payment method",
+      refundReference: ctx.ret.refundReference,
+    });
+
+    return dispatchEmail({
+      type: "return_refund_completed",
+      to: ctx.order.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `RETURN_REFUND_COMPLETED:${ctx.ret.id}`,
+      userId: ctx.order.userId,
+      orderId: ctx.order.id,
+    });
+  } catch (err) {
+    console.error("[email] sendReturnRefundCompleted", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Admin retry — re-run the matching notification for a FAILED / SKIPPED log,
 // reusing its idempotency key (so it never becomes a second row / second send).
 // ---------------------------------------------------------------------------
@@ -681,9 +1018,9 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
       return log.userId ? sendWelcomeEmail(log.userId, { retry: true }) : { ok: false, status: "FAILED", error: "no_user" };
     default:
       // refund_notification / auth emails / P2 security notices / support
-      // (contact-form) emails are not retryable here: they carry time-of-event
-      // content (or a single-use provider token) that must not be regenerated
-      // and re-sent later.
+      // (contact-form) emails / return (P3) emails are not retryable here: they
+      // carry time-of-event content (or a single-use provider token) that must
+      // not be regenerated and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
   }
 }

@@ -51,6 +51,9 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: "manage_orders", group: "Orders", description: "Update order status and fulfilment" },
   { key: "cancel_orders", group: "Orders", description: "Cancel orders" },
 
+  // Returns
+  { key: "manage_returns", group: "Returns", description: "Review, approve and process customer returns and refund bookkeeping" },
+
   // Customers
   { key: "view_customers", group: "Customers", description: "View customer accounts" },
   { key: "manage_customers", group: "Customers", description: "Edit customer accounts" },
@@ -146,6 +149,7 @@ const ADMIN_PERMS: string[] = [
   "view_orders",
   "manage_orders",
   "cancel_orders",
+  "manage_returns",
   "view_customers",
   "manage_customers",
   "view_payments",
@@ -172,6 +176,7 @@ const STAFF_PERMS: string[] = [
   "manage_inventory",
   "view_orders",
   "manage_orders",
+  "manage_returns",
   "view_customers",
   "view_shipping",
   "manage_shipping",
@@ -183,6 +188,7 @@ const SUPPORT_PERMS: string[] = [
   "view_dashboard",
   "view_orders",
   "manage_orders",
+  "manage_returns",
   "view_customers",
   "manage_customers",
   "view_shipping",
@@ -204,6 +210,7 @@ const FINANCE_PERMS: string[] = [
   "view_dashboard",
   "view_analytics",
   "view_orders",
+  "manage_returns",
   "view_payments",
   "manage_payments",
   "issue_refunds",

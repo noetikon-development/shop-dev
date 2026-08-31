@@ -30,6 +30,13 @@ export type EmailType =
   | "sign_in_alert"
   | "support_inbound"
   | "support_ack"
+  | "return_requested"
+  | "return_inbound"
+  | "return_approved"
+  | "return_rejected"
+  | "return_received"
+  | "return_refund_initiated"
+  | "return_refund_completed"
   | "refund_notification"
   | "email_verification"
   | "password_reset";

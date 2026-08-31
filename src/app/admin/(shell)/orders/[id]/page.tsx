@@ -4,8 +4,11 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { getCurrentAdmin, requirePermission } from "@/lib/admin/rbac";
 import { getAdminOrder } from "@/lib/admin/orders";
+import { orderReturnableLines } from "@/lib/admin/returns";
+import { orderHasOpenReturn } from "@/lib/returns";
 import { PageHeader } from "@/components/admin/ui";
 import { OrderDetailView } from "@/components/admin/orders/order-detail-view";
+import { AdminStartReturn } from "@/components/admin/returns/admin-start-return";
 import {
   ORDER_STATUS_TRANSITIONS,
   isCancellable,
@@ -43,6 +46,11 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
   const cancellable = isCancellable(order.status);
   const storePickup = isStorePickupCode(order.shippingMethodCode);
 
+  const canManageReturns = admin.isSuperAdmin || admin.permissions.has("manage_returns");
+  const [returnable, openReturn] = canManageReturns
+    ? await Promise.all([orderReturnableLines(order.id), orderHasOpenReturn(order.id)])
+    : [null, null];
+
   return (
     <div>
       <Link
@@ -64,6 +72,25 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
         canManage={canManage}
         storePickup={storePickup}
       />
+
+      {canManageReturns && returnable && (
+        <div className="mt-6">
+          <AdminStartReturn
+            orderId={order.id}
+            orderNumber={order.orderNumber}
+            orderStatus={order.status}
+            openReturnNumber={openReturn?.open ? (openReturn.returnNumber ?? null) : null}
+            lines={returnable.lines
+              .filter((l) => l.remaining > 0)
+              .map((l) => ({
+                orderItemId: l.orderItemId,
+                name: l.name,
+                variantLabel: l.variantLabel,
+                remaining: l.remaining,
+              }))}
+          />
+        </div>
+      )}
     </div>
   );
 }

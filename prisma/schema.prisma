@@ -41,6 +41,7 @@ model User {
 
   addresses Address[]
   orders    Order[]
+  returnRequests ReturnRequest[]
   reviews   Review[]
   wishlist  WishlistItem[]
   questions ProductQuestion[]
@@ -680,6 +681,7 @@ model Order {
   events           OrderEvent[]
   reviews          Review[]
   emailLogs        EmailLog[]
+  returnRequests   ReturnRequest[]
 
   @@index([userId])
   @@index([status])
@@ -729,8 +731,9 @@ model OrderItem {
   quantity     Int
   lineTotal    Int
 
-  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  variant Variant? @relation(fields: [variantId], references: [id])
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant     Variant?     @relation(fields: [variantId], references: [id])
+  returnItems ReturnItem[]
 
   @@index([orderId])
   // Analytics (Step 18): best-selling / product-performance aggregation groups
@@ -750,6 +753,97 @@ model OrderEvent {
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([orderId])
+}
+
+// ----------------------------------------------------------------------------
+// Returns / RMA (Step 21 P3)
+//
+// A customer-initiated (or admin-assisted) request to return one or more lines
+// of a DELIVERED order. Additive only — Order / OrderItem / Variant / Inventory
+// are never mutated by this feature. The refund fields are BOOKKEEPING ONLY:
+// PayMongo is deferred, no money moves, Order.paymentStatus is not touched.
+//
+// State machine (src/lib/returns/status.ts):
+//   REQUESTED -> APPROVED -> RECEIVED -> REFUND_INITIATED -> REFUND_COMPLETED
+//   REQUESTED -> REJECTED                                    (terminal)
+//   REQUESTED|APPROVED|RECEIVED|REFUND_INITIATED -> CANCELLED (terminal)
+// No backward transitions, no skipped states. Restock happens once, on
+// APPROVED -> RECEIVED, through the existing row-locked adjustStock() primitive
+// with reason "RETURN".
+// ----------------------------------------------------------------------------
+
+model ReturnRequest {
+  id           String @id @default(cuid())
+  returnNumber String @unique // RET-<YYMMDD>-<nextval("return_number_seq")>
+
+  orderId String
+  userId  String? // order owner at request time; null for guest / admin-assisted
+
+  status String @default("REQUESTED")
+  // REQUESTED | APPROVED | REJECTED | RECEIVED | REFUND_INITIATED | REFUND_COMPLETED | CANCELLED
+
+  reason       String // DAMAGED | WRONG_ITEM | NOT_AS_DESCRIBED | NO_LONGER_NEEDED | OTHER
+  customerNote String? // free text from the customer (sanitised, capped) — shown to admin, escaped in email
+  staffNote    String? // internal only — NEVER emailed or shown to the customer
+  resolutionNote String? // customer-facing note attached on approve / reject
+
+  // Whether this return was raised by an admin on the customer's behalf, and any
+  // eligibility rules that were overridden (audited).
+  adminAssisted    Boolean @default(false)
+  overriddenRules  String? // JSON array snapshot, e.g. ["window","status"]
+
+  // Refund — BOOKKEEPING ONLY. No gateway, no Payment row, no money movement.
+  refundAmount      Int? // centavos
+  refundMethod      String? // free-text snapshot: "Original payment method", "Store credit", ...
+  refundReference   String? // admin-entered manual reference (bank ref, etc.) — not a gateway id
+  refundInitiatedAt DateTime?
+  refundCompletedAt DateTime?
+
+  restockedAt DateTime? // set once, on -> RECEIVED (second idempotency guard for the restock)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user  User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  items ReturnItem[]
+
+  @@index([orderId])
+  @@index([userId])
+  @@index([status])
+  @@index([createdAt])
+  // At most one non-terminal return per order is enforced by a partial unique
+  // index added in supabase/migrations/20260829140100_rls_and_grants.sql:
+  //   CREATE UNIQUE INDEX "return_one_open_per_order" ON "ReturnRequest"("orderId")
+  //     WHERE "status" NOT IN ('REJECTED','CANCELLED','REFUND_COMPLETED');
+}
+
+model ReturnItem {
+  id              String @id @default(cuid())
+  returnRequestId String
+  orderItemId     String // the exact order line being returned (ownership + snapshot anchor)
+
+  // Immutable snapshot copied from OrderItem at request time — the return is
+  // never recomputed from current Product / Variant data.
+  productId    String
+  variantId    String?
+  name         String
+  variantLabel String?
+  sku          String?
+  unitPrice    Int
+
+  quantity     Int // units being returned (1 .. remaining returnable)
+  refundAmount Int // unitPrice * quantity snapshot
+
+  restockQuantity Int     @default(0) // admin sets at receipt; damaged/opened -> 0
+  condition       String? // RESELLABLE | DAMAGED | OPENED
+
+  returnRequest ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  orderItem     OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+
+  @@unique([returnRequestId, orderItemId])
+  @@index([returnRequestId])
+  @@index([orderItemId])
 }
 
 // ----------------------------------------------------------------------------
@@ -798,7 +892,7 @@ model SignInDevice {
 
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | return_requested | return_inbound | return_approved | return_rejected | return_received | return_refund_initiated | return_refund_completed | refund_notification | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

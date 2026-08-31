@@ -29,6 +29,9 @@
 --             explicit colour <-> image relation (Step 20).
 -- 2026-08-31: + SignInDevice table for the new-device sign-in alert (Step 21 P2).
 -- 2026-08-31: + RateHit table (fixed-window rate limiter) for the contact form (Step 21 P5).
+-- 2026-09-01: + ReturnRequest / ReturnItem tables for Returns / RMA (Step 21 P3).
+--             Partial unique index return_one_open_per_order + return_number_seq
+--             + ReturnItem CHECK constraints live in 20260829140100_rls_and_grants.sql.
 -- ============================================================================
 
 -- CreateSchema
@@ -488,6 +491,50 @@ CREATE TABLE "OrderEvent" (
 );
 
 -- CreateTable
+CREATE TABLE "ReturnRequest" (
+    "id" TEXT NOT NULL,
+    "returnNumber" TEXT NOT NULL,
+    "orderId" TEXT NOT NULL,
+    "userId" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'REQUESTED',
+    "reason" TEXT NOT NULL,
+    "customerNote" TEXT,
+    "staffNote" TEXT,
+    "resolutionNote" TEXT,
+    "adminAssisted" BOOLEAN NOT NULL DEFAULT false,
+    "overriddenRules" TEXT,
+    "refundAmount" INTEGER,
+    "refundMethod" TEXT,
+    "refundReference" TEXT,
+    "refundInitiatedAt" TIMESTAMP(3),
+    "refundCompletedAt" TIMESTAMP(3),
+    "restockedAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ReturnRequest_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ReturnItem" (
+    "id" TEXT NOT NULL,
+    "returnRequestId" TEXT NOT NULL,
+    "orderItemId" TEXT NOT NULL,
+    "productId" TEXT NOT NULL,
+    "variantId" TEXT,
+    "name" TEXT NOT NULL,
+    "variantLabel" TEXT,
+    "sku" TEXT,
+    "unitPrice" INTEGER NOT NULL,
+    "quantity" INTEGER NOT NULL,
+    "refundAmount" INTEGER NOT NULL,
+    "restockQuantity" INTEGER NOT NULL DEFAULT 0,
+    "condition" TEXT,
+
+    CONSTRAINT "ReturnItem_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "EmailLog" (
     "id" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -877,6 +924,30 @@ CREATE UNIQUE INDEX "SignInDevice_userId_uaHash_key" ON "SignInDevice"("userId",
 CREATE INDEX "RateHit_windowStart_idx" ON "RateHit"("windowStart");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "ReturnRequest_returnNumber_key" ON "ReturnRequest"("returnNumber");
+
+-- CreateIndex
+CREATE INDEX "ReturnRequest_orderId_idx" ON "ReturnRequest"("orderId");
+
+-- CreateIndex
+CREATE INDEX "ReturnRequest_userId_idx" ON "ReturnRequest"("userId");
+
+-- CreateIndex
+CREATE INDEX "ReturnRequest_status_idx" ON "ReturnRequest"("status");
+
+-- CreateIndex
+CREATE INDEX "ReturnRequest_createdAt_idx" ON "ReturnRequest"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "ReturnItem_returnRequestId_idx" ON "ReturnItem"("returnRequestId");
+
+-- CreateIndex
+CREATE INDEX "ReturnItem_orderItemId_idx" ON "ReturnItem"("orderItemId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ReturnItem_returnRequestId_orderItemId_key" ON "ReturnItem"("returnRequestId", "orderItemId");
+
+-- CreateIndex
 CREATE INDEX "StoreSetting_group_idx" ON "StoreSetting"("group");
 
 -- CreateIndex
@@ -1053,3 +1124,15 @@ ALTER TABLE "EmailLog" ADD CONSTRAINT "EmailLog_orderId_fkey" FOREIGN KEY ("orde
 
 -- AddForeignKey
 ALTER TABLE "SignInDevice" ADD CONSTRAINT "SignInDevice_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReturnRequest" ADD CONSTRAINT "ReturnRequest_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReturnRequest" ADD CONSTRAINT "ReturnRequest_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReturnItem" ADD CONSTRAINT "ReturnItem_returnRequestId_fkey" FOREIGN KEY ("returnRequestId") REFERENCES "ReturnRequest"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ReturnItem" ADD CONSTRAINT "ReturnItem_orderItemId_fkey" FOREIGN KEY ("orderItemId") REFERENCES "OrderItem"("id") ON DELETE CASCADE ON UPDATE CASCADE;
