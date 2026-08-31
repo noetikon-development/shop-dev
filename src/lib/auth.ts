@@ -32,7 +32,7 @@ export async function syncAppUser(supabaseUser: SupabaseUser): Promise<AppUser> 
   const linked = await prisma.user.findUnique({
     where: { supabaseUserId: supabaseUser.id },
   });
-  if (linked) return maybeSyncVerified(linked, supabaseUser);
+  if (linked) return maybeSyncLinked(linked, supabaseUser);
 
   const email = (supabaseUser.email ?? "").toLowerCase();
   const meta = (supabaseUser.user_metadata ?? {}) as { name?: string; phone?: string };
@@ -79,12 +79,38 @@ export async function syncAppUser(supabaseUser: SupabaseUser): Promise<AppUser> 
   }
 }
 
-async function maybeSyncVerified(user: AppUser, supabaseUser: SupabaseUser): Promise<AppUser> {
+/**
+ * Keep the application row in step with the Supabase Auth user for the fields
+ * Supabase owns: `emailVerified`, and `email` itself once a Supabase email
+ * change has completed (Step 21 P2). Runs on every authenticated request for a
+ * linked user, so it is the natural place to pick up a confirmed email change.
+ */
+async function maybeSyncLinked(user: AppUser, supabaseUser: SupabaseUser): Promise<AppUser> {
   const verified = supabaseUser.email_confirmed_at
     ? new Date(supabaseUser.email_confirmed_at)
     : null;
-  if (Boolean(user.emailVerified) === Boolean(verified)) return user;
-  return prisma.user.update({ where: { id: user.id }, data: { emailVerified: verified } });
+  const sbEmail = (supabaseUser.email ?? "").toLowerCase();
+  const emailDrifted = Boolean(sbEmail) && sbEmail !== user.email.toLowerCase();
+  const verifiedDrifted = Boolean(user.emailVerified) !== Boolean(verified);
+
+  if (!emailDrifted && !verifiedDrifted) return user;
+
+  const data: { emailVerified?: Date | null; email?: string } = {};
+  if (verifiedDrifted) data.emailVerified = verified;
+  if (emailDrifted) data.email = sbEmail;
+
+  try {
+    return await prisma.user.update({ where: { id: user.id }, data });
+  } catch {
+    // A rare unique-email collision with an orphan row — leave the app email
+    // stale rather than fail the request; the sync retries next time.
+    if (verifiedDrifted && !emailDrifted) {
+      return prisma.user
+        .update({ where: { id: user.id }, data: { emailVerified: verified } })
+        .catch(() => user);
+    }
+    return user;
+  }
 }
 
 /** The application User for the current request, or null when unauthenticated. Deduped per request. */

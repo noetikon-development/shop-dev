@@ -27,6 +27,7 @@
 --             CouponRedemption.createdAt (Step 18),
 --             ProductImage.optionValueId FK -> ProductOptionValue for the
 --             explicit colour <-> image relation (Step 20).
+-- 2026-08-31: + SignInDevice table for the new-device sign-in alert (Step 21 P2).
 -- ============================================================================
 
 -- CreateSchema
@@ -507,6 +508,18 @@ CREATE TABLE "EmailLog" (
 );
 
 -- CreateTable
+CREATE TABLE "SignInDevice" (
+    "id" TEXT NOT NULL,
+    "userId" TEXT NOT NULL,
+    "uaHash" TEXT NOT NULL,
+    "uaSummary" TEXT NOT NULL,
+    "firstSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "SignInDevice_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "StoreSetting" (
     "key" TEXT NOT NULL,
     "value" TEXT NOT NULL,
@@ -844,6 +857,12 @@ CREATE INDEX "EmailLog_userId_idx" ON "EmailLog"("userId");
 CREATE INDEX "EmailLog_createdAt_idx" ON "EmailLog"("createdAt");
 
 -- CreateIndex
+CREATE INDEX "SignInDevice_userId_idx" ON "SignInDevice"("userId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SignInDevice_userId_uaHash_key" ON "SignInDevice"("userId", "uaHash");
+
+-- CreateIndex
 CREATE INDEX "StoreSetting_group_idx" ON "StoreSetting"("group");
 
 -- CreateIndex
@@ -1017,3 +1036,6 @@ ALTER TABLE "EmailLog" ADD CONSTRAINT "EmailLog_userId_fkey" FOREIGN KEY ("userI
 -- AddForeignKey
 ALTER TABLE "EmailLog" ADD CONSTRAINT "EmailLog_orderId_fkey" FOREIGN KEY ("orderId") REFERENCES "Order"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 
+
+-- AddForeignKey
+ALTER TABLE "SignInDevice" ADD CONSTRAINT "SignInDevice_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE ON UPDATE CASCADE;

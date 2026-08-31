@@ -47,6 +47,7 @@ model User {
   answers   ProductAnswer[]
   carts     Cart[]
   emailLogs EmailLog[]
+  signInDevices SignInDevice[]
 
   couponRedemptions CouponRedemption[]
 
@@ -762,9 +763,28 @@ model OrderEvent {
 // triggered it. No credentials or message bodies are stored here.
 // ----------------------------------------------------------------------------
 
+// Known sign-in devices (Step 21 P2). One row per (user, user-agent hash) — a
+// coarse "have we seen this browser for this account before?" signal used to
+// drive the security "new sign-in" alert. Stores NO raw user-agent, NO IP, NO
+// token: a SHA-256 hash of the UA (+ server pepper) plus a short human summary
+// ("Chrome on Windows"). RLS on, no policy — app reads via the postgres role.
+model SignInDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  uaHash      String
+  uaSummary   String // e.g. "Chrome on Windows" — not PII, safe to show in email
+  firstSeenAt DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, uaHash])
+  @@index([userId])
+}
+
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | refund_notification | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

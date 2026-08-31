@@ -2,12 +2,25 @@
 
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
 import { z } from "zod";
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { prisma } from "@/lib/prisma";
 import { createClient } from "@/lib/supabase/server";
 import { syncAppUser } from "@/lib/auth";
 import { getSiteUrl } from "@/lib/site-url";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendPasswordChanged, sendEmailChanged, sendSignInAlert } from "@/lib/email/notifications";
+import { recordSignIn, summarizeUserAgent } from "@/lib/auth/devices";
+
+/** Best-effort User-Agent for this request — used only for a coarse device summary. */
+async function currentUserAgent(): Promise<string | null> {
+  try {
+    return (await headers()).get("user-agent");
+  } catch {
+    return null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Registration
@@ -98,6 +111,24 @@ export async function login(_prev: LoginState, formData: FormData): Promise<Logi
     return { error: "That email and password don’t match an account." };
   }
 
+  // New-device sign-in alert (Step 21 P2). Best-effort — a failure here must
+  // never block a valid login, and never sends on session refresh / page loads
+  // (this runs only on an explicit password sign-in).
+  try {
+    const { data: { user: sbUser } } = await supabase.auth.getUser();
+    if (sbUser) {
+      const appUser = await syncAppUser(sbUser);
+      const rec = await recordSignIn(appUser.id, await currentUserAgent());
+      if (rec.isNewDevice) {
+        scheduleEmail(() =>
+          sendSignInAlert(appUser.id, { deviceSummary: rec.deviceSummary, uaHash: rec.uaHash }),
+        );
+      }
+    }
+  } catch (err) {
+    console.error("[auth] sign-in alert", err);
+  }
+
   revalidatePath("/", "layout");
   redirect(redirectTo.startsWith("/") ? redirectTo : "/account");
 }
@@ -167,6 +198,16 @@ export async function resetPassword(
 
   const { error } = await supabase.auth.updateUser({ password: password.data });
   if (error) return { error: error.message };
+
+  // Password-changed security notice (Step 21 P2) — only after a real success.
+  try {
+    const appUser = await syncAppUser(user);
+    const deviceSummary = summarizeUserAgent(await currentUserAgent());
+    scheduleEmail(() => sendPasswordChanged(appUser.id, { deviceSummary }));
+  } catch (err) {
+    console.error("[auth] password-changed notice", err);
+  }
+
   revalidatePath("/", "layout");
   return { ok: true };
 }
@@ -209,6 +250,75 @@ export async function changePassword(
   // Apply the change on the real cookie-bound session.
   const { error } = await supabase.auth.updateUser({ password: next.data });
   if (error) return { error: error.message };
+
+  // Password-changed security notice (Step 21 P2) — only after a real success.
+  try {
+    const appUser = await syncAppUser(user);
+    const deviceSummary = summarizeUserAgent(await currentUserAgent());
+    scheduleEmail(() => sendPasswordChanged(appUser.id, { deviceSummary }));
+  } catch (err) {
+    console.error("[auth] password-changed notice", err);
+  }
+
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// Email change (Step 21 P2)
+// ---------------------------------------------------------------------------
+
+const changeEmailSchema = z.object({
+  newEmail: z.string().trim().toLowerCase().email("Enter a valid email address"),
+});
+
+export type EmailChangeState = { error?: string; ok?: boolean };
+
+/**
+ * Start a customer email change. Supabase Auth owns the mechanism: with "Secure
+ * email change" (the default) it sends a confirmation link to BOTH the current
+ * and the new address, and the change only takes effect once both are
+ * confirmed. This action never bypasses that. On a successful request it sends
+ * an app security notice to the CURRENT address (see sendEmailChanged) — that
+ * notice carries no token.
+ */
+export async function changeEmail(
+  _prev: EmailChangeState,
+  formData: FormData,
+): Promise<EmailChangeState> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user?.email) return { error: "Please sign in again." };
+
+  const parsed = changeEmailSchema.safeParse({ newEmail: formData.get("newEmail") });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  const newEmail = parsed.data.newEmail;
+
+  if (newEmail === user.email.toLowerCase()) {
+    return { error: "That's already the email on your account." };
+  }
+
+  // Supabase sends the confirmation link(s); it also rejects an address that
+  // already belongs to another account. The active session is required and is
+  // preserved (an email change does not rotate the refresh token).
+  const { error } = await supabase.auth.updateUser(
+    { email: newEmail },
+    { emailRedirectTo: `${getSiteUrl()}/auth/callback?next=/account/profile` },
+  );
+  if (error) {
+    return { error: /rate|too many/i.test(error.message) ? "Too many attempts — try again shortly." : error.message };
+  }
+
+  // Security notice to the CURRENT (old) address — best-effort, never blocks.
+  try {
+    const appUser = await syncAppUser(user);
+    const deviceSummary = summarizeUserAgent(await currentUserAgent());
+    scheduleEmail(() => sendEmailChanged(appUser.id, newEmail, { deviceSummary }));
+  } catch (err) {
+    console.error("[auth] email-changed notice", err);
+  }
+
   return { ok: true };
 }
 

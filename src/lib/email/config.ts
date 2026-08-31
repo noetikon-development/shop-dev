@@ -27,6 +27,8 @@ export type EmailConfig = {
   user: string;
   password: string;
   from: string;
+  /** True when EMAIL_FROM is explicitly set — per-message from overrides are then ignored. */
+  fromPinned: boolean;
   fromName: string;
   replyTo: string | null;
 };
@@ -61,6 +63,7 @@ export function getEmailConfig(): EmailConfig {
     // sender at your provider); the fallback is the store's transactional
     // address, never the raw SMTP login. No effect while email runs SKIPPED.
     from: (process.env.EMAIL_FROM || "orders@axiaro.shop").trim(),
+    fromPinned: Boolean((process.env.EMAIL_FROM ?? "").trim()),
     fromName: (process.env.EMAIL_FROM_NAME ?? SITE.brand).trim(),
     replyTo: (process.env.EMAIL_REPLY_TO ?? "").trim() || null,
   };

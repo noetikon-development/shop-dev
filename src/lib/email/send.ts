@@ -25,6 +25,9 @@ export type EmailType =
   | "order_delivered"
   | "order_cancelled"
   | "welcome"
+  | "password_changed"
+  | "email_changed"
+  | "sign_in_alert"
   | "refund_notification"
   | "email_verification"
   | "password_reset";
@@ -38,6 +41,12 @@ export type DispatchInput = {
   idempotencyKey: string;
   userId?: string | null;
   orderId?: string | null;
+  /**
+   * Preferred envelope-from for this message (e.g. "no-reply@axiaro.shop" for
+   * account-security notices). Ignored when EMAIL_FROM is pinned for the
+   * deployment — the provider's verified sender always wins there.
+   */
+  from?: string;
   /** Admin-initiated re-send: reuse an existing FAILED / SKIPPED log row. */
   retry?: boolean;
 };
@@ -122,9 +131,14 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
     .update({ where: { id: logId }, data: { status: "SENDING", attempts: { increment: 1 } } })
     .catch(() => {});
 
+  // Envelope-from: a per-message preference (e.g. no-reply@ for security mail)
+  // unless the deployment pinned EMAIL_FROM, in which case that verified sender
+  // always wins.
+  const fromAddr = cfg.fromPinned ? cfg.from : (input.from || cfg.from);
+
   try {
     const info = await transport.sendMail({
-      from: cfg.fromName ? `"${cfg.fromName}" <${cfg.from}>` : cfg.from,
+      from: cfg.fromName ? `"${cfg.fromName}" <${fromAddr}>` : fromAddr,
       to: input.to,
       subject: input.subject,
       text: input.text,

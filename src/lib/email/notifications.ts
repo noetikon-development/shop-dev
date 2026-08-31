@@ -11,8 +11,28 @@ import { renderOutForDelivery } from "@/lib/email/templates/out-for-delivery";
 import { renderOrderDelivered } from "@/lib/email/templates/order-delivered";
 import { renderOrderCancelled } from "@/lib/email/templates/order-cancelled";
 import { renderWelcome } from "@/lib/email/templates/welcome";
+import { renderPasswordChanged } from "@/lib/email/templates/password-changed";
+import { renderEmailChanged } from "@/lib/email/templates/email-changed";
+import { renderSignInAlert } from "@/lib/email/templates/sign-in-alert";
 import { renderRefundNotification } from "@/lib/email/templates/refund-notification";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
+import { createHash } from "node:crypto";
+import { maskEmail } from "@/lib/email/html";
+
+/** Account-security notices go from a no-reply address, not the orders inbox. */
+const SECURITY_FROM = "no-reply@axiaro.shop";
+
+/** UTC hour bucket, e.g. "2026-08-31T14" — deterministic idempotency window. */
+function hourBucket(at: Date = new Date()): string {
+  return at.toISOString().slice(0, 13);
+}
+/** UTC day bucket, e.g. "2026-08-31". */
+function dayBucket(at: Date = new Date()): string {
+  return at.toISOString().slice(0, 10);
+}
+function shortHash(input: string): string {
+  return createHash("sha256").update(input).digest("hex").slice(0, 16);
+}
 
 /**
  * High-level transactional-email API (Step 17 §3). Each function:
@@ -391,6 +411,136 @@ export async function sendWelcomeEmail(
 }
 
 // ---------------------------------------------------------------------------
+// Account-security notices (Step 21 P2). All go from no-reply@, carry NO
+// password / token / secret, and never throw. `userId` is the application
+// User.id; the authoritative account email is read here.
+// ---------------------------------------------------------------------------
+
+/** After a successful password change or reset. Key: PASSWORD_CHANGED:<userId>:<UTC hour>. */
+export async function sendPasswordChanged(
+  userId: string,
+  opts: { deviceSummary?: string | null; at?: Date } = {},
+): Promise<DispatchResult> {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+    if (!user?.email) return { ok: false, status: "FAILED", error: "user_not_found" };
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const at = opts.at ?? new Date();
+
+    const { subject, html, text } = renderPasswordChanged({
+      brand,
+      siteUrl,
+      accountEmail: user.email,
+      changedAt: at,
+      deviceSummary: opts.deviceSummary ?? null,
+      resetUrl: `${siteUrl}/forgot-password`,
+    });
+
+    return dispatchEmail({
+      type: "password_changed",
+      to: user.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `PASSWORD_CHANGED:${user.id}:${hourBucket(at)}`,
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error("[email] sendPasswordChanged", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * When a customer requests an email change. Sent to the CURRENT (old) address.
+ * Key: EMAIL_CHANGE:<userId>:<hash(newEmail)> — one notice per target address.
+ */
+export async function sendEmailChanged(
+  userId: string,
+  newEmail: string,
+  opts: { deviceSummary?: string | null; at?: Date } = {},
+): Promise<DispatchResult> {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+    if (!user?.email) return { ok: false, status: "FAILED", error: "user_not_found" };
+    const target = newEmail.trim().toLowerCase();
+    if (!target || target === user.email.toLowerCase()) {
+      return { ok: false, status: "FAILED", error: "no_change" };
+    }
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const at = opts.at ?? new Date();
+
+    const { subject, html, text } = renderEmailChanged({
+      brand,
+      siteUrl,
+      currentEmail: user.email,
+      newEmailMasked: maskEmail(target),
+      requestedAt: at,
+      deviceSummary: opts.deviceSummary ?? null,
+      resetUrl: `${siteUrl}/forgot-password`,
+    });
+
+    return dispatchEmail({
+      type: "email_changed",
+      to: user.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `EMAIL_CHANGE:${user.id}:${shortHash(target)}`,
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error("[email] sendEmailChanged", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * A successful password sign-in from a device we have not seen for this
+ * account. Only call when `recordSignIn` reports `isNewDevice`.
+ * Key: SIGNIN_ALERT:<userId>:<uaHash-16>:<UTC day>.
+ */
+export async function sendSignInAlert(
+  userId: string,
+  params: { deviceSummary: string; uaHash: string; at?: Date },
+): Promise<DispatchResult> {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId }, select: { id: true, email: true } });
+    if (!user?.email) return { ok: false, status: "FAILED", error: "user_not_found" };
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const at = params.at ?? new Date();
+
+    const { subject, html, text } = renderSignInAlert({
+      brand,
+      siteUrl,
+      accountEmail: user.email,
+      signedInAt: at,
+      deviceSummary: params.deviceSummary || "Unknown device",
+      resetUrl: `${siteUrl}/forgot-password`,
+    });
+
+    return dispatchEmail({
+      type: "sign_in_alert",
+      to: user.email,
+      subject,
+      html,
+      text,
+      from: SECURITY_FROM,
+      idempotencyKey: `SIGNIN_ALERT:${user.id}:${params.uaHash.slice(0, 16)}:${dayBucket(at)}`,
+      userId: user.id,
+    });
+  } catch (err) {
+    console.error("[email] sendSignInAlert", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Admin retry — re-run the matching notification for a FAILED / SKIPPED log,
 // reusing its idempotency key (so it never becomes a second row / second send).
 // ---------------------------------------------------------------------------
@@ -419,7 +569,9 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
     case "welcome":
       return log.userId ? sendWelcomeEmail(log.userId, { retry: true }) : { ok: false, status: "FAILED", error: "no_user" };
     default:
-      // refund_notification / auth emails carry no re-derivable payload here.
+      // refund_notification / auth emails / P2 security notices are not
+      // retryable here: they carry time-of-event content (or a single-use
+      // provider token) that must not be regenerated and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
   }
 }

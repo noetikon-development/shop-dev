@@ -8,11 +8,9 @@ import { updateProfile, type ProfileState } from "@/lib/auth-actions";
 export function ProfileForm({
   name,
   phone,
-  email,
 }: {
   name: string;
   phone: string;
-  email: string;
 }) {
   const [state, formAction, pending] = useActionState<ProfileState, FormData>(updateProfile, {});
 
@@ -31,13 +29,6 @@ export function ProfileForm({
           autoComplete="name"
           className="field"
         />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">Email</span>
-        <input value={email} disabled className="field bg-surface-sunken text-ink-faint" />
-        <span className="mt-1 block text-xs text-ink-faint">
-          Contact support to change the email on your account.
-        </span>
       </label>
       <label className="block">
         <span className="mb-1.5 block text-sm font-medium">Phone number</span>

@@ -29,6 +29,19 @@ export function esc(value: unknown): string {
     .replace(/'/g, "&#39;");
 }
 
+/**
+ * Partially mask an email address for a security notice — keeps the first
+ * character of the local part and the domain: `jane@example.com` -> `j***@example.com`.
+ */
+export function maskEmail(email: string): string {
+  const at = email.indexOf("@");
+  if (at < 1) return "***";
+  const local = email.slice(0, at);
+  const domain = email.slice(at);
+  const head = local.slice(0, 1);
+  return `${head}${"*".repeat(Math.max(3, local.length - 1))}${domain}`;
+}
+
 /** Peso formatting for centavos — plain, no Intl (stable across runtimes). */
 export function peso(centavos: number): string {
   const n = Math.round(centavos) / 100;
