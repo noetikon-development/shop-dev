@@ -19,8 +19,11 @@ export function RegisterForm() {
         </div>
         <h1 className="mt-5 text-2xl">Confirm your email</h1>
         <p className="mt-2 text-sm text-ink-soft">
-          We&apos;ve sent a verification link to your inbox. Click it to activate your account, then
-          sign in.
+          We&apos;ve sent a confirmation link to your inbox. Open it to activate your account, then
+          sign in. The link expires in 24 hours.
+        </p>
+        <p className="mt-2 text-xs text-ink-faint">
+          Didn&apos;t get it? Check your spam folder, or sign in to resend it.
         </p>
         <Link href="/login" className="btn btn-primary mt-6 w-full">
           Go to sign in
@@ -31,9 +34,9 @@ export function RegisterForm() {
 
   return (
     <div>
-      <h1 className="text-2xl">Create your account</h1>
+      <h1 className="text-2xl">Create your Axiaro account</h1>
       <p className="mt-1.5 text-sm text-ink-soft">
-        Save your details, track orders, and keep a wishlist.
+        Track orders, save addresses and keep a wishlist.
       </p>
 
       <form id="register-form" action={formAction} className="mt-7 space-y-4">

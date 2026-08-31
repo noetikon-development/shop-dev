@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * Password-changed security notice (Step 21 P2). Sent AFTER a successful
@@ -19,6 +19,7 @@ export type PasswordChangedData = {
 export function renderPasswordChanged(d: PasswordChangedData) {
   const subject = `Your ${d.brand} password was changed`;
   const when = d.changedAt.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const reason = reasonFor("security", d.brand);
 
   const rows =
     kvRow("Account", d.accountEmail) +
@@ -32,10 +33,15 @@ export function renderPasswordChanged(d: PasswordChangedData) {
     ${paragraph("If this was you, no action is needed.")}
     ${paragraph("If this wasn't you, reset your password now to lock the account, then review your recent orders.")}
     ${button("Reset your password", d.resetUrl)}
-    ${paragraph("This is an automated security notification — please don't reply.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: "If this wasn't you, secure your account now.",
+    reason,
+    security: true,
+  });
 
   const text = textBody([
     `Your password was changed`,
@@ -48,8 +54,7 @@ export function renderPasswordChanged(d: PasswordChangedData) {
     ``,
     `If this was you, no action is needed.`,
     `If this wasn't you, reset your password now: ${d.resetUrl}`,
-    ``,
-    `This is an automated security notification — please don't reply.`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

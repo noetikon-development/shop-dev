@@ -1,9 +1,10 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
- * Payment confirmation (Step 21 P4). Fired ONLY by a signature-verified PayMongo
- * payment webhook — never because an order exists. Confirms money captured and
- * that the order is now being prepared.
+ * Payment confirmation (Step 21 P4). DORMANT — fired ONLY by a
+ * signature-verified PayMongo payment webhook. Online payment is disabled, so no
+ * Payment row can exist and this never sends. Restyled to the Axiaro master
+ * design so it is ready when PayMongo is enabled; it is not activated here.
  *
  * No card number, no token, no provider secret. The only reference shown is the
  * store's own order number.
@@ -21,7 +22,8 @@ export type PaymentConfirmationData = {
 };
 
 export function renderPaymentConfirmation(d: PaymentConfirmationData) {
-  const subject = `Payment received for order ${d.orderNumber} — ${d.brand}`;
+  const subject = `Your ${d.brand} payment is confirmed`;
+  const reason = reasonFor("order", d.brand);
   const when = d.paidAt.toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
   const body = `
@@ -40,7 +42,8 @@ export function renderPaymentConfirmation(d: PaymentConfirmationData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Payment received for order ${d.orderNumber}`,
+    previewText: `Payment received for order ${d.orderNumber}.`,
+    reason,
   });
 
   const text = textBody([
@@ -55,6 +58,7 @@ export function renderPaymentConfirmation(d: PaymentConfirmationData) {
     `When:         ${when}`,
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

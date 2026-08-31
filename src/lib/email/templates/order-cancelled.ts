@@ -1,9 +1,9 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * Cancellation notification (Step 17 §10). States the order was cancelled and
- * the order total. It does NOT claim a refund was issued — PayMongo and refunds
- * are deferred; there is no payment or refund to report.
+ * the order total. It does NOT claim a refund was issued — the store's policy is
+ * pay on delivery, so a cancelled order was never charged.
  */
 
 export type OrderCancelledData = {
@@ -17,7 +17,8 @@ export type OrderCancelledData = {
 };
 
 export function renderOrderCancelled(d: OrderCancelledData) {
-  const subject = `Order ${d.orderNumber} cancelled — ${d.brand}`;
+  const subject = `Your ${d.brand} order was cancelled`;
+  const reasonLine = reasonFor("order", d.brand);
 
   const rows =
     kvRow("Order number", d.orderNumber) +
@@ -29,11 +30,16 @@ export function renderOrderCancelled(d: OrderCancelledData) {
     ${heading("Your order has been cancelled")}
     ${paragraph(`Hi ${d.customerName}, your order has been cancelled.`)}
     ${infoBox(rows)}
-    ${paragraph("This order was not charged. If you were expecting to pay on delivery, there is nothing owed.")}
+    ${paragraph("This order was not charged. As payment is arranged on delivery, there is nothing owed.")}
     ${button("View your order", d.orderUrl)}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: `Order ${d.orderNumber} cancelled` });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: `Order ${d.orderNumber} — nothing was charged.`,
+    reason: reasonLine,
+  });
 
   const text = textBody([
     `Your order has been cancelled`,
@@ -45,9 +51,10 @@ export function renderOrderCancelled(d: OrderCancelledData) {
     `Order total:  ${peso(d.grandTotal)}`,
     ...(d.reason ? [`Reason:       ${d.reason}`] : []),
     ``,
-    `This order was not charged.`,
+    `This order was not charged. As payment is arranged on delivery, there is nothing owed.`,
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reasonLine),
   ]);
 
   return { subject, html, text };

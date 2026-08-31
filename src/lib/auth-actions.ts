@@ -22,6 +22,42 @@ async function currentUserAgent(): Promise<string | null> {
   }
 }
 
+/**
+ * Map a Supabase Auth error to safe, customer-friendly copy. A raw provider
+ * string is NEVER returned — anything unrecognised falls back to `fallback`.
+ * Keeps the useful guidance (rate limit, weak password, reused password, bad
+ * address) without exposing provider internals, DB errors, tokens or identifiers.
+ */
+function friendlyAuthError(err: { message?: string; code?: string } | null, fallback: string): string {
+  const raw = `${err?.code ?? ""} ${err?.message ?? ""}`.toLowerCase();
+  if (!raw.trim()) return fallback;
+  if (/rate limit|too many|after \d+ seconds|for security purposes/.test(raw)) {
+    return "You've tried that a few times — please wait a minute and try again.";
+  }
+  if (/different from the old password|should be different/.test(raw)) {
+    return "Choose a password you haven't used on this account before.";
+  }
+  if (/password/.test(raw) && /(weak|at least|characters|short|strength|pwned|compromised)/.test(raw)) {
+    return "Choose a stronger password — at least 8 characters.";
+  }
+  if (/(invalid|unable to validate|not valid).*(email|address)|email.*(invalid|not valid)/.test(raw)) {
+    return "That doesn't look like a valid email address.";
+  }
+  if (/already (been )?registered|already in use|already exists/.test(raw)) {
+    return "An account with that email already exists. Try signing in instead.";
+  }
+  if (/signup.*(disabled|not allowed)|not allowed to sign ?up/.test(raw)) {
+    return "Sign-ups are temporarily unavailable. Please try again later.";
+  }
+  if (/email not confirmed/.test(raw)) {
+    return "Please confirm your email first — check your inbox for the verification link.";
+  }
+  if (/same.*(email|address)|no change/.test(raw)) {
+    return "That's already the email on your account.";
+  }
+  return fallback;
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -65,7 +101,7 @@ export async function registerUser(
   });
 
   if (error) {
-    return { error: error.message.replace(/\.$/, "") };
+    return { error: friendlyAuthError(error, "We couldn't create your account. Please try again.") };
   }
   // Supabase returns a user with an empty `identities` array when the email is
   // already registered (to avoid account enumeration).
@@ -149,7 +185,7 @@ export async function resendVerification(email: string) {
     email: clean,
     options: { emailRedirectTo: `${getSiteUrl()}/auth/callback?next=/account` },
   });
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyAuthError(error, "We couldn't send the email. Please try again shortly.") };
   return { ok: true };
 }
 
@@ -197,7 +233,7 @@ export async function resetPassword(
   }
 
   const { error } = await supabase.auth.updateUser({ password: password.data });
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyAuthError(error, "We couldn't update your password. Please try again.") };
 
   // Password-changed security notice (Step 21 P2) — only after a real success.
   try {
@@ -249,7 +285,7 @@ export async function changePassword(
 
   // Apply the change on the real cookie-bound session.
   const { error } = await supabase.auth.updateUser({ password: next.data });
-  if (error) return { error: error.message };
+  if (error) return { error: friendlyAuthError(error, "We couldn't update your password. Please try again.") };
 
   // Password-changed security notice (Step 21 P2) — only after a real success.
   try {
@@ -307,7 +343,7 @@ export async function changeEmail(
     { emailRedirectTo: `${getSiteUrl()}/auth/callback?next=/account/profile` },
   );
   if (error) {
-    return { error: /rate|too many/i.test(error.message) ? "Too many attempts — try again shortly." : error.message };
+    return { error: friendlyAuthError(error, "We couldn't start the email change. Please try again.") };
   }
 
   // Security notice to the CURRENT (old) address — best-effort, never blocks.

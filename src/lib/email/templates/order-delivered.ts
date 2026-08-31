@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * Delivery confirmation (Step 17 §9). Concise — order number, name, delivery
@@ -17,7 +17,8 @@ export type OrderDeliveredData = {
 
 export function renderOrderDelivered(d: OrderDeliveredData) {
   const verb = d.storePickup ? "collected" : "delivered";
-  const subject = `Order ${d.orderNumber} ${verb} — ${d.brand}`;
+  const subject = `Your ${d.brand} order has been ${verb}`;
+  const reason = reasonFor("order", d.brand);
   const dateStr = d.deliveredAt ? d.deliveredAt.toISOString().slice(0, 10) : null;
 
   const body = `
@@ -30,7 +31,12 @@ export function renderOrderDelivered(d: OrderDeliveredData) {
     ${paragraph("Changed your mind about something? You have 30 days to start a return from your order page.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: `Order ${d.orderNumber} ${verb}` });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: `Order ${d.orderNumber} — ${verb}${dateStr ? ` ${dateStr}` : ""}. 30-day returns if anything's off.`,
+    reason,
+  });
 
   const text = textBody([
     d.storePickup ? `Your order has been collected` : `Your order has been delivered`,
@@ -41,6 +47,7 @@ export function renderOrderDelivered(d: OrderDeliveredData) {
     ...(dateStr ? [`${d.storePickup ? "Collected" : "Delivered"}: ${dateStr}`] : []),
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

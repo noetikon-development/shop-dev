@@ -18,7 +18,7 @@ export function LoginForm() {
   return (
     <div>
       <h1 className="text-2xl">Welcome back</h1>
-      <p className="mt-1.5 text-sm text-ink-soft">Sign in to your AXIARO account.</p>
+      <p className="mt-1.5 text-sm text-ink-soft">Sign in to your Axiaro account.</p>
 
       <form action={formAction} className="mt-7 space-y-4">
         <input type="hidden" name="redirectTo" value={redirectTo} />
@@ -83,7 +83,7 @@ export function LoginForm() {
       </form>
 
       <p className="mt-6 text-center text-sm text-ink-soft">
-        New to AXIARO?{" "}
+        New to Axiaro?{" "}
         <Link
           href={`/register${redirectTo ? `?redirectTo=${encodeURIComponent(redirectTo)}` : ""}`}
           className="font-medium text-ink underline underline-offset-4"

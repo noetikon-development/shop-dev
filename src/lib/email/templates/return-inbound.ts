@@ -5,7 +5,7 @@ import { returnItemsHtml, returnItemsText, type ReturnEmailItem } from "@/lib/em
  * Internal "a return needs triage" notification (Step 21 P3). Sent to the
  * support inbox, NOT to a customer. From orders@axiaro.shop; Reply-To is set to
  * the customer's address at dispatch. Carries the customer's own note (escaped)
- * — never a staff note, token or secret.
+ * — never a staff note, token or secret. Uses the minimal internal footer.
  */
 
 export type ReturnInboundData = {
@@ -45,7 +45,7 @@ export function renderReturnInbound(d: ReturnInboundData) {
     ${paragraph("Open it in the admin to approve, reject or process.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject });
+  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, internal: true });
 
   const text = textBody([
     `New return request`,

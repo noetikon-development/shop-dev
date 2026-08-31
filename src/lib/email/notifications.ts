@@ -145,12 +145,6 @@ export async function sendOrderConfirmation(
       (typeof shippingAddress.firstName === "string" ? shippingAddress.firstName : null) ??
       "there";
 
-    // PayMongo deferred → never claim payment succeeded.
-    const paymentStateNote =
-      order.status === "PENDING_PAYMENT"
-        ? "This is not a payment confirmation — your order is awaiting payment."
-        : "";
-
     const { subject, html, text } = renderOrderConfirmation({
       brand,
       siteUrl,
@@ -172,7 +166,7 @@ export async function sendOrderConfirmation(
       shippingFee: order.shippingFee,
       grandTotal: order.grandTotal,
       shippingAddress,
-      paymentStateNote,
+      payOnDelivery: order.status === "PENDING_PAYMENT",
     });
 
     return dispatchEmail({
@@ -454,6 +448,7 @@ export async function sendWelcomeEmail(
       subject,
       html,
       text,
+      from: SECURITY_FROM,
       idempotencyKey: `WELCOME:${user.id}`,
       userId: user.id,
       retry: opts.retry,
@@ -933,7 +928,7 @@ export async function sendReturnRefundInitiated(returnId: string): Promise<Dispa
       orderNumber: ctx.order.orderNumber,
       customerName: ctx.customerName,
       refundAmount: ctx.ret.refundAmount,
-      refundMethod: ctx.ret.refundMethod || "your original payment method",
+      refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
     });
 
     return dispatchEmail({
@@ -970,7 +965,7 @@ export async function sendReturnRefundCompleted(returnId: string): Promise<Dispa
       orderNumber: ctx.order.orderNumber,
       customerName: ctx.customerName,
       refundAmount: ctx.ret.refundAmount,
-      refundMethod: ctx.ret.refundMethod || "your original payment method",
+      refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
       refundReference: ctx.ret.refundReference,
     });
 

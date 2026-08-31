@@ -8,8 +8,7 @@ import { SITE } from "@/lib/constants";
  * ever prefixed `NEXT_PUBLIC_` or sent to the browser. If the SMTP host / user /
  * password are not all set, the service runs in "not configured" mode: it still
  * records an `EmailLog` row (status SKIPPED) so the pipeline is observable, but
- * it never attempts a real send. This is deliberate for the demo — no
- * credentials are invented.
+ * it never attempts a real send. No credentials are ever invented.
  *
  * `EMAIL_MODE=log` forces the same skip behaviour even when SMTP is configured
  * (an explicit local/QA switch). Production email is never silently redirected

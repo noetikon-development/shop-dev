@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * "Out for delivery" notification (Step 21 P1). Fired when an admin moves a
@@ -20,7 +20,8 @@ export type OutForDeliveryData = {
 };
 
 export function renderOutForDelivery(d: OutForDeliveryData) {
-  const subject = `Order ${d.orderNumber} is out for delivery — ${d.brand}`;
+  const subject = `Your ${d.brand} order is out for delivery`;
+  const reason = reasonFor("order", d.brand);
 
   const rows =
     kvRow("Order number", d.orderNumber) +
@@ -38,7 +39,8 @@ export function renderOutForDelivery(d: OutForDeliveryData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Order ${d.orderNumber} is out for delivery`,
+    previewText: `Order ${d.orderNumber} — arriving today with ${d.courierLabel}.`,
+    reason,
   });
 
   const text = textBody([
@@ -52,6 +54,7 @@ export function renderOutForDelivery(d: OutForDeliveryData) {
     ...(d.trackingUrl ? [``, `Track your parcel: ${d.trackingUrl}`] : []),
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

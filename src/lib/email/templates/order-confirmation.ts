@@ -9,16 +9,18 @@ import {
   addressBlock,
   peso,
   textBody,
+  textFooter,
+  reasonFor,
 } from "@/lib/email/html";
 
 /**
- * Order confirmation (Step 17 §6). Built ONLY from the authoritative order
- * snapshot — items/prices/discount/shipping come from the OrderItem rows and the
- * order's immutable coupon/shipping snapshots, never from the browser or the
- * current Product/Coupon/ShippingMethod records.
+ * Order confirmation (Step 17 §6; Batch 3 Phase 2). Built ONLY from the
+ * authoritative order snapshot — items/prices/discount/shipping come from the
+ * OrderItem rows and the order's immutable coupon/shipping snapshots, never from
+ * the browser or the current Product/Coupon/ShippingMethod records.
  *
- * PayMongo is deferred: orders are PENDING_PAYMENT. This email says
- * "Your order has been received" and never claims payment succeeded.
+ * The store's policy is pay on delivery — this email confirms the order was
+ * received and never claims a payment has occurred.
  */
 
 export type OrderConfirmationData = {
@@ -36,13 +38,19 @@ export type OrderConfirmationData = {
   shippingFee: number;
   grandTotal: number;
   shippingAddress: Record<string, unknown>;
-  paymentStateNote: string;
+  /** true while the order is PENDING_PAYMENT (the normal pay-on-delivery state). */
+  payOnDelivery: boolean;
 };
 
 export function renderOrderConfirmation(d: OrderConfirmationData) {
-  const subject = `Order ${d.orderNumber} received — ${d.brand}`;
-
+  const subject = `Your ${d.brand} order is confirmed`;
+  const reason = reasonFor("order", d.brand);
   const dateStr = d.placedAt.toISOString().slice(0, 10);
+
+  const paymentLine = d.payOnDelivery
+    ? "Your order has been received. Payment is arranged on delivery."
+    : "Your order has been received.";
+
   const totalsRows =
     kvRow("Subtotal", peso(d.subtotal)) +
     (d.discountTotal > 0
@@ -52,8 +60,8 @@ export function renderOrderConfirmation(d: OrderConfirmationData) {
     kvRow("Total", peso(d.grandTotal), { strong: true, last: true });
 
   const body = `
-    ${heading("Thanks — your order has been received")}
-    ${paragraph(`Hi ${d.customerName}, we've received your order. ${d.paymentStateNote}`)}
+    ${heading("Your order is confirmed")}
+    ${paragraph(`Hi ${d.customerName}, thanks for your order — it's confirmed and we're getting it ready. ${paymentLine}`)}
     ${button("View your order", d.orderUrl)}
     ${infoBox(kvRow("Order number", d.orderNumber) + kvRow("Order date", dateStr, { last: true }))}
     <h2 style="margin:22px 0 10px;font-size:15px;color:#2b2926;">Items</h2>
@@ -67,14 +75,16 @@ export function renderOrderConfirmation(d: OrderConfirmationData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Order ${d.orderNumber} received`,
+    previewText: `Order ${d.orderNumber} · placed ${dateStr}${d.payOnDelivery ? " · pay on delivery" : ""}.`,
+    reason,
   });
 
   const addr = d.shippingAddress;
   const text = textBody([
-    `Thanks — your order has been received`,
+    `Your order is confirmed`,
     ``,
-    `Hi ${d.customerName}, we've received your order. ${d.paymentStateNote}`,
+    `Hi ${d.customerName}, thanks for your order — it's confirmed and we're getting it ready.`,
+    paymentLine,
     ``,
     `Order number: ${d.orderNumber}`,
     `Order date:   ${dateStr}`,
@@ -96,6 +106,7 @@ export function renderOrderConfirmation(d: OrderConfirmationData) {
     `  ${[addr.barangay, addr.city, addr.province, addr.postalCode].filter(Boolean).join(", ")}`,
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

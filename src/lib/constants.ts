@@ -1,5 +1,5 @@
 export const SITE = {
-  name: "AXIARO",
+  name: "Axiaro",
   /** Brand name as shown in browser/site labels and page titles. */
   brand: "Axiaro",
   tagline: "Considered things for everyday living",

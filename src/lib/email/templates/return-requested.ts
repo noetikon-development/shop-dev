@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 import { returnItemsHtml, returnItemsText, type ReturnEmailItem } from "@/lib/email/templates/_return-shared";
 
 /**
@@ -19,7 +19,8 @@ export type ReturnRequestedData = {
 };
 
 export function renderReturnRequested(d: ReturnRequestedData) {
-  const subject = `We've received your return request (${d.returnNumber}) — ${d.brand}`;
+  const subject = `We've received your return request`;
+  const reason = reasonFor("return", d.brand);
 
   const body = `
     ${heading("Your return request is in")}
@@ -38,7 +39,8 @@ export function renderReturnRequested(d: ReturnRequestedData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `We've received your return request ${d.returnNumber}`,
+    previewText: `Return ${d.returnNumber} for order ${d.orderNumber} — we'll reply within 1–2 business days.`,
+    reason,
   });
 
   const text = textBody([
@@ -57,6 +59,7 @@ export function renderReturnRequested(d: ReturnRequestedData) {
     `Please keep the items in their original condition and packaging until your return is approved.`,
     ``,
     `View your return: ${d.returnUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

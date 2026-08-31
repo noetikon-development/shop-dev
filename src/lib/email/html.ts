@@ -1,11 +1,14 @@
 /**
- * Email HTML primitives (Step 17). Conservative, table-based, inline-styled HTML
- * that renders on desktop, mobile and legacy email clients (Outlook included) —
- * no flexbox, grid, CSS variables or web fonts.
+ * Email HTML primitives (Step 17; Axiaro master design — Batch 3 Phase 2).
+ * Conservative, table-based, inline-styled HTML that renders on desktop, mobile
+ * and legacy email clients (Outlook included) — no flexbox, grid, CSS variables
+ * or web fonts. Single-column, ~600px, warm neutral palette.
  *
  * Every dynamic value passed into a template MUST go through `esc()` — customer
  * names, product names, addresses, notes etc. are untrusted and must never be
  * able to inject markup into an email.
+ *
+ * The written brand is "Axiaro" — it is never upper-cased programmatically.
  */
 
 const PALETTE = {
@@ -50,11 +53,93 @@ export function peso(centavos: number): string {
   return frac === "00" ? `₱${grouped}` : `₱${grouped}.${frac}`;
 }
 
+const SUPPORT_EMAIL = "support@axiaro.shop";
+
+/**
+ * "Why you received this" lines, by category. `{brand}` is substituted by
+ * `reasonFor()` so the copy always reads "Axiaro" (or a store override).
+ */
+export const REASONS = {
+  order: "You're receiving this because you placed an order with {brand}.",
+  return: "You're receiving this because you requested a return with {brand}.",
+  account: "You're receiving this because you have a {brand} account.",
+  security: "You're receiving this because of security activity on your {brand} account.",
+  support: "You're receiving this because you contacted {brand}.",
+} as const;
+
+export function reasonFor(kind: keyof typeof REASONS, brand: string): string {
+  return REASONS[kind].replace("{brand}", brand);
+}
+
+/** "a" / "an" for a following word (used for "an Axiaro account"). */
+export function article(word: string): string {
+  return /^[aeiou]/i.test(word.trim()) ? "an" : "a";
+}
+
 export type LayoutOptions = {
   brand: string;
   siteUrl: string;
   previewText?: string;
+  /**
+   * "Why you received this" line, category-specific, e.g.
+   * "You're receiving this because you placed an order with Axiaro."
+   */
+  reason?: string;
+  /**
+   * Account-security messages: the footer adds a "you can't reply / contact
+   * support if you need help" line. The body still carries the specific
+   * "if this wasn't you…" guidance.
+   */
+  security?: boolean;
+  /**
+   * Internal team notifications (support inbound, return inbound): a single
+   * minimal footer line — no marketing, no legal block, no policy links.
+   */
+  internal?: boolean;
+  /**
+   * Legal entity name + registered address for the footer. Rendered only when
+   * supplied — never invented. Both optional; the line is omitted if empty.
+   */
+  legal?: { name?: string | null; address?: string | null } | null;
 };
+
+function footerHtml(opts: LayoutOptions): string {
+  const domain = opts.siteUrl.replace(/^https?:\/\//, "");
+  const link = (href: string, text: string) =>
+    `<a href="${esc(href)}" style="color:${PALETTE.inkFaint};text-decoration:underline;">${esc(text)}</a>`;
+
+  if (opts.internal) {
+    return `${esc(opts.brand)} · internal notification · ${link(opts.siteUrl, domain)}`;
+  }
+
+  const legalName = opts.legal?.name?.trim();
+  const legalAddress = opts.legal?.address?.trim();
+  const legalLine =
+    legalName || legalAddress
+      ? `<br>${esc([legalName, legalAddress].filter(Boolean).join(" · "))}`
+      : "";
+
+  const reasonLine = opts.reason ? `<br><br>${esc(opts.reason)}` : "";
+
+  const securityLine = opts.security
+    ? `<br><br>This is an automated security message — you can't reply to it. If you need help, email ${link(
+        `mailto:${SUPPORT_EMAIL}`,
+        SUPPORT_EMAIL,
+      )}.`
+    : "";
+
+  return (
+    `<strong style="color:${PALETTE.inkSoft};">${esc(opts.brand)}</strong><br>` +
+    `${link(`mailto:${SUPPORT_EMAIL}`, SUPPORT_EMAIL)} &nbsp;·&nbsp; ${link(opts.siteUrl, domain)}` +
+    legalLine +
+    reasonLine +
+    securityLine +
+    `<br><br>${link(`${opts.siteUrl}/pages/privacy`, "Privacy")} &nbsp;·&nbsp; ${link(
+      `${opts.siteUrl}/pages/terms`,
+      "Terms",
+    )}`
+  );
+}
 
 /** Wraps body HTML in the branded shell. `bodyHtml` is already-escaped markup. */
 export function layout(bodyHtml: string, opts: LayoutOptions): string {
@@ -74,10 +159,10 @@ ${preview}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${PALETTE.paper};">
   <tr>
     <td align="center" style="padding:32px 16px;">
-      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:${PALETTE.surface};border:1px solid ${PALETTE.line};border-radius:10px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:100%;background:${PALETTE.surface};border:1px solid ${PALETTE.line};border-radius:12px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
         <tr>
-          <td style="padding:26px 32px;border-bottom:1px solid ${PALETTE.line};">
-            <a href="${esc(opts.siteUrl)}" style="text-decoration:none;color:${PALETTE.ink};font-size:20px;font-weight:700;letter-spacing:0.14em;">${esc(opts.brand.toUpperCase())}</a>
+          <td style="padding:24px 32px;border-bottom:1px solid ${PALETTE.line};">
+            <a href="${esc(opts.siteUrl)}" style="text-decoration:none;color:${PALETTE.ink};font-size:19px;font-weight:700;letter-spacing:0.08em;">${esc(opts.brand)}</a>
           </td>
         </tr>
         <tr>
@@ -86,9 +171,8 @@ ${preview}
           </td>
         </tr>
         <tr>
-          <td style="padding:22px 32px;border-top:1px solid ${PALETTE.line};color:${PALETTE.inkFaint};font-size:12px;line-height:1.6;">
-            This is a transactional message about your interaction with ${esc(opts.brand)}.<br>
-            <a href="${esc(opts.siteUrl)}" style="color:${PALETTE.inkFaint};">${esc(opts.siteUrl.replace(/^https?:\/\//, ""))}</a>
+          <td style="padding:22px 32px;border-top:1px solid ${PALETTE.line};color:${PALETTE.inkFaint};font-size:12px;line-height:1.7;">
+            ${footerHtml(opts)}
           </td>
         </tr>
       </table>
@@ -111,9 +195,16 @@ export function paragraph(text: string): string {
 export function button(label: string, href: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">
     <tr><td style="border-radius:6px;background:${PALETTE.ink};">
-      <a href="${esc(href)}" style="display:inline-block;padding:11px 22px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;">${esc(label)}</a>
+      <a href="${esc(href)}" style="display:inline-block;padding:12px 24px;color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;">${esc(label)}</a>
     </td></tr>
   </table>`;
+}
+
+/** A plain underlined text link for a secondary action (never a second button). */
+export function textLink(label: string, href: string): string {
+  return `<p style="margin:0 0 16px;font-size:13px;color:${PALETTE.inkSoft};">
+    <a href="${esc(href)}" style="color:${PALETTE.clay};text-decoration:underline;">${esc(label)}</a>
+  </p>`;
 }
 
 export function infoBox(rowsHtml: string): string {
@@ -178,4 +269,16 @@ export function addressBlock(a: Record<string, unknown>): string {
 /** Build a plain-text version from lines (already plain, no markup). */
 export function textBody(lines: string[]): string {
   return lines.join("\n").replace(/\n{3,}/g, "\n\n").trim() + "\n";
+}
+
+/** Standard plain-text footer block for the customer emails. */
+export function textFooter(brand: string, siteUrl: string, reason?: string): string[] {
+  const domain = siteUrl.replace(/^https?:\/\//, "");
+  return [
+    ``,
+    `--`,
+    `${brand} · ${SUPPORT_EMAIL} · ${domain}`,
+    ...(reason ? [reason] : []),
+    `Privacy: ${siteUrl}/pages/privacy   Terms: ${siteUrl}/pages/terms`,
+  ];
 }

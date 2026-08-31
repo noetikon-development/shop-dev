@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * "Preparing your order" notification (Step 21 P1). Fired when an admin moves an
@@ -17,7 +17,8 @@ export type OrderProcessingData = {
 };
 
 export function renderOrderProcessing(d: OrderProcessingData) {
-  const subject = `Order ${d.orderNumber} is being prepared — ${d.brand}`;
+  const subject = `Your ${d.brand} order is being prepared`;
+  const reason = reasonFor("order", d.brand);
   const totalUnits = d.items.reduce((n, i) => n + i.quantity, 0);
   const itemSummary = `${totalUnits} item${totalUnits === 1 ? "" : "s"}`;
 
@@ -39,7 +40,8 @@ export function renderOrderProcessing(d: OrderProcessingData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Order ${d.orderNumber} is being prepared`,
+    previewText: `Order ${d.orderNumber} — ${itemSummary}, packing now.`,
+    reason,
   });
 
   const text = textBody([
@@ -53,6 +55,7 @@ export function renderOrderProcessing(d: OrderProcessingData) {
     ...listLines.map((l) => `- ${l}`),
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

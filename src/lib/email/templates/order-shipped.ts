@@ -1,4 +1,15 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, addressBlock, textBody } from "@/lib/email/html";
+import {
+  layout,
+  heading,
+  paragraph,
+  button,
+  infoBox,
+  kvRow,
+  addressBlock,
+  textBody,
+  textFooter,
+  reasonFor,
+} from "@/lib/email/html";
 
 /**
  * Shipment notification (Step 17 §7). Uses the Step 13 fulfilment data on the
@@ -19,7 +30,8 @@ export type OrderShippedData = {
 };
 
 export function renderOrderShipped(d: OrderShippedData) {
-  const subject = `Order ${d.orderNumber} is on its way — ${d.brand}`;
+  const subject = `Your ${d.brand} order is on its way`;
+  const reason = reasonFor("order", d.brand);
   const shippedStr = d.shippedAt ? d.shippedAt.toISOString().slice(0, 10) : null;
 
   const rows =
@@ -38,7 +50,12 @@ export function renderOrderShipped(d: OrderShippedData) {
     ${paragraph("You can also follow the delivery from your order page.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: `Order ${d.orderNumber} shipped` });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: `Order ${d.orderNumber} · ${d.courierLabel}${d.trackingNumber ? ` · tracking ${d.trackingNumber}` : ""}.`,
+    reason,
+  });
 
   const text = textBody([
     `Your order has shipped`,
@@ -52,6 +69,7 @@ export function renderOrderShipped(d: OrderShippedData) {
     ...(d.trackingUrl ? [``, `Track your parcel: ${d.trackingUrl}`] : []),
     ``,
     `View your order: ${d.orderUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

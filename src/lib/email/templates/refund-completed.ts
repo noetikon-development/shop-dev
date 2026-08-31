@@ -1,8 +1,9 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
- * Refund completed (Step 21 P4). Fired by a signature-verified PayMongo
- * `refund.updated = succeeded` webhook. Money has left the store's account.
+ * Refund completed (Step 21 P4). DORMANT — fired by a signature-verified
+ * PayMongo `refund.updated = succeeded` webhook. Online payment is disabled, so
+ * this never sends. When it does, `methodLabel` is a real, known method.
  */
 
 export type RefundCompletedData = {
@@ -18,7 +19,8 @@ export type RefundCompletedData = {
 };
 
 export function renderRefundCompleted(d: RefundCompletedData) {
-  const subject = `Your refund for order ${d.orderNumber} is complete — ${d.brand}`;
+  const subject = `Your refund is complete`;
+  const reason = reasonFor("return", d.brand);
 
   const body = `
     ${heading("Your refund is complete")}
@@ -35,7 +37,8 @@ export function renderRefundCompleted(d: RefundCompletedData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Your refund for order ${d.orderNumber} is complete`,
+    previewText: `Refund of ${peso(d.amount)} for return ${d.returnNumber} is complete.`,
+    reason,
   });
 
   const text = textBody([
@@ -49,6 +52,7 @@ export function renderRefundCompleted(d: RefundCompletedData) {
     `Return reference:  ${d.returnNumber}`,
     ``,
     `View your return: ${d.returnUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

@@ -84,6 +84,15 @@ export async function syncAppUser(supabaseUser: SupabaseUser): Promise<AppUser> 
  * Supabase owns: `emailVerified`, and `email` itself once a Supabase email
  * change has completed (Step 21 P2). Runs on every authenticated request for a
  * linked user, so it is the natural place to pick up a confirmed email change.
+ *
+ * It is also where the customer welcome email is triggered (Batch 3 Phase 2):
+ * `registerUser` creates the app row at sign-up, so the "row created" branch in
+ * `syncAppUser` never fires for the normal flow. Instead we send the welcome
+ * the first time this account's email flips to verified — i.e. the first
+ * confirmed sign-in. `sendWelcomeEmail` re-checks the admin-role / pending-invite
+ * guard, and the `WELCOME:<userId>` idempotency key makes it a single send
+ * forever (session refresh, repeat login and resend-verification cannot produce
+ * a second one).
  */
 async function maybeSyncLinked(user: AppUser, supabaseUser: SupabaseUser): Promise<AppUser> {
   const verified = supabaseUser.email_confirmed_at
@@ -92,6 +101,7 @@ async function maybeSyncLinked(user: AppUser, supabaseUser: SupabaseUser): Promi
   const sbEmail = (supabaseUser.email ?? "").toLowerCase();
   const emailDrifted = Boolean(sbEmail) && sbEmail !== user.email.toLowerCase();
   const verifiedDrifted = Boolean(user.emailVerified) !== Boolean(verified);
+  const justVerified = verifiedDrifted && Boolean(verified);
 
   if (!emailDrifted && !verifiedDrifted) return user;
 
@@ -99,18 +109,21 @@ async function maybeSyncLinked(user: AppUser, supabaseUser: SupabaseUser): Promi
   if (verifiedDrifted) data.emailVerified = verified;
   if (emailDrifted) data.email = sbEmail;
 
+  let updated: AppUser = user;
   try {
-    return await prisma.user.update({ where: { id: user.id }, data });
+    updated = await prisma.user.update({ where: { id: user.id }, data });
   } catch {
     // A rare unique-email collision with an orphan row — leave the app email
     // stale rather than fail the request; the sync retries next time.
     if (verifiedDrifted && !emailDrifted) {
-      return prisma.user
+      updated = await prisma.user
         .update({ where: { id: user.id }, data: { emailVerified: verified } })
         .catch(() => user);
     }
-    return user;
   }
+
+  if (justVerified) scheduleEmail(() => sendWelcomeEmail(user.id));
+  return updated;
 }
 
 /** The application User for the current request, or null when unauthenticated. Deduped per request. */

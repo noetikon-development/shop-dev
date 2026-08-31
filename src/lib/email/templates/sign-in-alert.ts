@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * New-device sign-in alert (Step 21 P2). Sent only when a successful password
@@ -19,6 +19,7 @@ export type SignInAlertData = {
 export function renderSignInAlert(d: SignInAlertData) {
   const subject = `New sign-in to your ${d.brand} account`;
   const when = d.signedInAt.toISOString().slice(0, 16).replace("T", " ") + " UTC";
+  const reason = reasonFor("security", d.brand);
 
   const body = `
     ${heading("New sign-in to your account")}
@@ -31,10 +32,15 @@ export function renderSignInAlert(d: SignInAlertData) {
     ${paragraph("If this was you, you can ignore this message — we won't email you again for this device.")}
     ${paragraph("If this wasn't you, reset your password now to secure the account.")}
     ${button("Reset your password", d.resetUrl)}
-    ${paragraph("This is an automated security notification — please don't reply.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: `${d.deviceSummary} · ${when}. Not you? Reset your password.`,
+    reason,
+    security: true,
+  });
 
   const text = textBody([
     `New sign-in to your account`,
@@ -47,8 +53,7 @@ export function renderSignInAlert(d: SignInAlertData) {
     ``,
     `If this was you, you can ignore this message.`,
     `If this wasn't you, reset your password now: ${d.resetUrl}`,
-    ``,
-    `This is an automated security notification — please don't reply.`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * "We can't approve this return" (Step 21 P3). Includes the admin's
@@ -17,7 +17,8 @@ export type ReturnRejectedData = {
 };
 
 export function renderReturnRejected(d: ReturnRejectedData) {
-  const subject = `Update on your return ${d.returnNumber} — ${d.brand}`;
+  const subject = `An update on your return request`;
+  const reason = reasonFor("return", d.brand);
 
   const reasonHtml = d.resolutionNote
     ? `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.resolutionNote).replace(/\n/g, "<br>")}</p>`
@@ -35,7 +36,8 @@ export function renderReturnRejected(d: ReturnRejectedData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Update on your return ${d.returnNumber}`,
+    previewText: `We've reviewed return ${d.returnNumber}.`,
+    reason,
   });
 
   const text = textBody([
@@ -52,6 +54,7 @@ export function renderReturnRejected(d: ReturnRejectedData) {
     `If you think this is a mistake, contact support: ${d.supportUrl}`,
     ``,
     `View your return: ${d.returnUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, esc, textBody, textFooter, reasonFor } from "@/lib/email/html";
 import { returnItemsHtml, returnItemsText, type ReturnEmailItem } from "@/lib/email/templates/_return-shared";
 
 /**
@@ -21,7 +21,8 @@ export type ReturnApprovedData = {
 };
 
 export function renderReturnApproved(d: ReturnApprovedData) {
-  const subject = `Your return ${d.returnNumber} is approved — ${d.brand}`;
+  const subject = `Your return has been approved`;
+  const reason = reasonFor("return", d.brand);
 
   const instructionsHtml = d.instructions
     ? `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.instructions).replace(/\n/g, "<br>")}</p>`
@@ -47,7 +48,8 @@ export function renderReturnApproved(d: ReturnApprovedData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Your return ${d.returnNumber} is approved`,
+    previewText: `Return ${d.returnNumber} approved — how to send it back.`,
+    reason,
   });
 
   const text = textBody([
@@ -69,6 +71,7 @@ export function renderReturnApproved(d: ReturnApprovedData) {
     ``,
     `View your return: ${d.returnUrl}`,
     ...(d.policyUrl ? [`Full returns policy: ${d.policyUrl}`] : []),
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

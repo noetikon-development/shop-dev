@@ -1,9 +1,10 @@
-import { layout, heading, paragraph, button, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, textLink, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
- * Welcome email (Step 17 §5). Sent once per customer (idempotency key
- * WELCOME:<userId>). Contains only the store name, the customer's first name,
- * a short welcome and links — no sensitive information.
+ * Welcome email (Step 17 §5; Batch 3 Phase 2). Sent once per customer
+ * (idempotency key WELCOME:<userId>) after their first confirmed sign-in.
+ * Contains only the store name, the customer's first name, a short welcome and
+ * links — no sensitive information.
  */
 
 export type WelcomeData = {
@@ -15,25 +16,33 @@ export type WelcomeData = {
 
 export function renderWelcome(d: WelcomeData) {
   const subject = `Welcome to ${d.brand}`;
-  const hi = d.firstName ? `Hi ${d.firstName},` : "Hi,";
+  const hi = d.firstName ? `Hi ${d.firstName},` : "Hi there,";
+  const reason = reasonFor("account", d.brand);
 
   const body = `
     ${heading(`Welcome to ${d.brand}`)}
-    ${paragraph(`${hi} thanks for creating an account. Your orders, addresses and wishlist now live in one place.`)}
+    ${paragraph(`${hi} thanks for creating an account. From here you can track every order, save delivery addresses, keep a wishlist and start a return — all in one place.`)}
     ${button("Go to your account", d.accountUrl)}
-    ${paragraph("Have a look around whenever you're ready — we design our pieces in-house and price them without the markup.")}
-    ${button("Start shopping", d.siteUrl)}
+    ${textLink("or browse the shop", d.siteUrl)}
+    ${paragraph("We design our pieces in-house and price them without the markup. Free delivery on orders over ₱2,500.")}
   `;
 
-  const html = layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: `Welcome to ${d.brand}` });
+  const html = layout(body, {
+    brand: d.brand,
+    siteUrl: d.siteUrl,
+    previewText: "Your account is ready — orders, addresses and your wishlist in one place.",
+    reason,
+  });
 
   const text = textBody([
     `Welcome to ${d.brand}`,
     ``,
-    `${hi} thanks for creating an account. Your orders, addresses and wishlist now live in one place.`,
+    `${hi} thanks for creating an account. From here you can track every order, save`,
+    `delivery addresses, keep a wishlist and start a return — all in one place.`,
     ``,
     `Your account: ${d.accountUrl}`,
-    `Start shopping: ${d.siteUrl}`,
+    `Browse the shop: ${d.siteUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

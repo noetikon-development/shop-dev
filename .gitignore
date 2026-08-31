@@ -49,3 +49,6 @@ next-env.d.ts
 
 .vercel
 .env*
+
+# Batch 3: generated Supabase Auth template output (paste into dashboard)
+scripts/.supabase-templates/

@@ -3,7 +3,7 @@ import Image from "next/image";
 import { cn } from "@/lib/utils";
 
 /**
- * Store logo. Defaults to the supplied AXIARO mark (public/axiaro-logo.png) —
+ * Store logo. Defaults to the supplied Axiaro mark (public/axiaro-logo.png) —
  * rendered as-is, no recreation, no wordmark. A store admin can override it from
  * Settings → Store identity (Step 16): pass the configured `src` + `alt` and it
  * renders that instead. Size via `className` (set a height; width stays auto).
@@ -18,7 +18,7 @@ export function Logo({
   alt?: string | null;
 }) {
   return (
-    <Link href="/" aria-label={`${alt || "AXIARO"} — home`} className="inline-flex items-center">
+    <Link href="/" aria-label={`${alt || "Axiaro"} — home`} className="inline-flex items-center">
       {src ? (
         // Custom uploaded logo — dimensions unknown, so a plain <img> sized by CSS.
         // eslint-disable-next-line @next/next/no-img-element
@@ -26,7 +26,7 @@ export function Logo({
       ) : (
         <Image
           src="/axiaro-logo.png"
-          alt="AXIARO"
+          alt="Axiaro"
           width={472}
           height={397}
           priority

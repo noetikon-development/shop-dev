@@ -3,7 +3,8 @@ import { layout, heading, paragraph, infoBox, kvRow, esc, textBody } from "@/lib
 /**
  * Internal notification for a new contact-form message (Step 21 P5). Sent to the
  * store's support inbox, not to a customer. `Reply-To` is set to the customer's
- * address at dispatch time so the team can reply straight back.
+ * address at dispatch time so the team can reply straight back. Uses the minimal
+ * internal footer.
  *
  * Every field here is untrusted customer input — name / email / subject / message
  * all pass through `esc()`. No password, token or secret is ever included.
@@ -40,6 +41,7 @@ export function renderSupportInbound(d: SupportInboundData) {
     brand: d.brand,
     siteUrl: d.siteUrl,
     previewText: `New contact-form message: ${d.subject}`,
+    internal: true,
   });
 
   const text = textBody([

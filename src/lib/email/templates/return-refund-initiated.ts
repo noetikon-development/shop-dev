@@ -1,10 +1,11 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * "Your refund is being processed" (Step 21 P3). Fired on
  * RECEIVED → REFUND_INITIATED. This is BOOKKEEPING — the store records the
- * refund and processes it through their own provider / bank; the wording never
- * implies an automatic card refund.
+ * refund and arranges it through their own bank / provider. The wording never
+ * implies an automatic card refund and never names a payment method the
+ * customer did not use (a pay-on-delivery order has no card on file).
  */
 
 export type ReturnRefundInitiatedData = {
@@ -15,43 +16,52 @@ export type ReturnRefundInitiatedData = {
   orderNumber: string;
   customerName: string;
   refundAmount: number; // centavos
-  refundMethod: string; // e.g. "Original payment method", "Store credit"
+  /** The method an admin recorded (e.g. "GCash", "Bank transfer"), or null. */
+  refundMethod: string | null;
 };
 
 export function renderReturnRefundInitiated(d: ReturnRefundInitiatedData) {
-  const subject = `Your refund for return ${d.returnNumber} is being processed — ${d.brand}`;
+  const subject = `Your refund is being processed`;
+  const reason = reasonFor("return", d.brand);
+
+  const rows =
+    kvRow("Refund amount", peso(d.refundAmount)) +
+    (d.refundMethod ? kvRow("Refund method", d.refundMethod) : "") +
+    kvRow("Return reference", d.returnNumber, { last: true });
+
+  const methodLine = d.refundMethod
+    ? `We're sending it via ${d.refundMethod}.`
+    : `Our team will confirm how the refund will reach you.`;
 
   const body = `
     ${heading("Your refund is being processed")}
-    ${paragraph(`Hi ${d.customerName}, we've started your refund for return ${d.returnNumber} (order ${d.orderNumber}).`)}
-    ${infoBox(
-      kvRow("Refund amount", peso(d.refundAmount)) +
-        kvRow("Refunded to", d.refundMethod) +
-        kvRow("Return reference", d.returnNumber, { last: true }),
-    )}
-    ${paragraph("Depending on the original payment method it can take a few business days for the refund to reach you. We'll email you again once it's completed.")}
+    ${paragraph(`Hi ${d.customerName}, we've started your refund of ${peso(d.refundAmount)} for return ${d.returnNumber} (order ${d.orderNumber}). ${methodLine}`)}
+    ${infoBox(rows)}
+    ${paragraph("It can take a few business days for the refund to reach you. We'll email you again once it's complete.")}
     ${button("View your return", d.returnUrl)}
   `;
 
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Your refund for return ${d.returnNumber} is being processed`,
+    previewText: `Refund of ${peso(d.refundAmount)} for return ${d.returnNumber} is on its way.`,
+    reason,
   });
 
   const text = textBody([
     `Your refund is being processed`,
     ``,
-    `Hi ${d.customerName}, we've started your refund for return ${d.returnNumber} (order ${d.orderNumber}).`,
+    `Hi ${d.customerName}, we've started your refund of ${peso(d.refundAmount)} for return ${d.returnNumber}`,
+    `(order ${d.orderNumber}). ${methodLine}`,
     ``,
     `Refund amount:     ${peso(d.refundAmount)}`,
-    `Refunded to:       ${d.refundMethod}`,
+    ...(d.refundMethod ? [`Refund method:     ${d.refundMethod}`] : []),
     `Return reference:  ${d.returnNumber}`,
     ``,
-    `Depending on the original payment method it can take a few business days for the`,
-    `refund to reach you. We'll email you again once it's completed.`,
+    `It can take a few business days for the refund to reach you. We'll email you again once it's complete.`,
     ``,
     `View your return: ${d.returnUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

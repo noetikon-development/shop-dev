@@ -1,10 +1,10 @@
-import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, button, infoBox, kvRow, peso, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
- * Refund issued (Step 21 P4). Fired when a provider-side refund has been
- * requested for a return that settled a real PayMongo payment. This is the
- * money-moving counterpart of the P3 `return_refund_initiated` bookkeeping
- * notice — only one of the two is sent per return.
+ * Refund issued (Step 21 P4). DORMANT — fired only when a provider-side refund
+ * has been requested for a return that settled a real PayMongo payment. Online
+ * payment is disabled, so this never sends. When it does, `methodLabel` is a
+ * real, known method ("your card", "your GCash account").
  */
 
 export type RefundIssuedData = {
@@ -19,7 +19,8 @@ export type RefundIssuedData = {
 };
 
 export function renderRefundIssued(d: RefundIssuedData) {
-  const subject = `Your refund for order ${d.orderNumber} has been issued — ${d.brand}`;
+  const subject = `Your refund has been issued`;
+  const reason = reasonFor("return", d.brand);
 
   const body = `
     ${heading("Your refund has been issued")}
@@ -37,7 +38,8 @@ export function renderRefundIssued(d: RefundIssuedData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `Your refund for order ${d.orderNumber} has been issued`,
+    previewText: `Refund of ${peso(d.amount)} for return ${d.returnNumber} has been issued.`,
+    reason,
   });
 
   const text = textBody([
@@ -54,6 +56,7 @@ export function renderRefundIssued(d: RefundIssuedData) {
     `It can take a few business days for the refund to appear. We'll email again once complete.`,
     ``,
     `View your return: ${d.returnUrl}`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };

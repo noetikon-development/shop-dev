@@ -1,4 +1,4 @@
-import { layout, heading, paragraph, infoBox, kvRow, textBody } from "@/lib/email/html";
+import { layout, heading, paragraph, infoBox, kvRow, textBody, textFooter, reasonFor } from "@/lib/email/html";
 
 /**
  * Customer acknowledgement for a contact-form message (Step 21 P5). Confirms we
@@ -16,7 +16,8 @@ export type SupportAckData = {
 };
 
 export function renderSupportAck(d: SupportAckData) {
-  const subject = `We've received your message — ${d.brand}`;
+  const subject = `We've received your message`;
+  const reason = reasonFor("support", d.brand);
 
   const body = `
     ${heading("Thanks for getting in touch")}
@@ -28,7 +29,8 @@ export function renderSupportAck(d: SupportAckData) {
   const html = layout(body, {
     brand: d.brand,
     siteUrl: d.siteUrl,
-    previewText: `We've received your message and will reply within ${d.responseWindow}.`,
+    previewText: `Thanks for getting in touch — we'll reply within ${d.responseWindow}.`,
+    reason,
   });
 
   const text = textBody([
@@ -41,6 +43,7 @@ export function renderSupportAck(d: SupportAckData) {
     ``,
     `There's nothing more you need to do — we'll reply to this email address.`,
     `Please don't reply to this message; it's sent from an unmonitored address.`,
+    ...textFooter(d.brand, d.siteUrl, reason),
   ]);
 
   return { subject, html, text };
