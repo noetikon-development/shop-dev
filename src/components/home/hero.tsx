@@ -23,7 +23,7 @@ export function Hero() {
             </Link>
           </div>
           <div className="flex flex-wrap gap-x-8 gap-y-2 pt-4 text-xs text-ink-faint">
-            <span>10-year furniture guarantee</span>
+            <span>Designed in-house</span>
             <span>30-day returns</span>
             <span>Assembly help included</span>
           </div>

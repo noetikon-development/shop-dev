@@ -1,7 +1,7 @@
 /**
  * Step 19 — Legal / storefront completion.
  *
- * The single source of truth for the AXIARO storefront's legal and
+ * The single source of truth for the Axiaro storefront's legal and
  * informational pages: Privacy, Terms, Shipping, Returns, Cancellation, About,
  * Contact and FAQ. Content is stored as CMS `ContentPage` rows (Step 16
  * architecture) so an administrator can edit any of it in /admin/content/pages
@@ -13,11 +13,11 @@
  * row's `updatedAt` (which only moves when this content or an admin actually
  * changes it — never on a page render).
  *
- * The copy is demo content written to match what the platform can actually do
- * today: PayMongo / online payment is NOT live, refunds are handled manually,
- * delivery is the Philippines only, and the shipping options are the three
- * configured ShippingMethod rows. It is not legal advice — a real launch must
- * have it reviewed by the business's own legal owner.
+ * The copy is written to match what the store can actually do today: online
+ * payment is not enabled, refunds are handled manually, delivery is the
+ * Philippines only, and the shipping options are the configured ShippingMethod
+ * rows. It is general information, not legal advice — the policy pages should be
+ * reviewed by a qualified professional before being relied on commercially.
  *
  * Run on its own:  npm run db:seed:legal
  * Also runs as part of:  npm run db:seed:cms  and  npm run db:seed
@@ -34,15 +34,12 @@ export type LegalPageSeed = {
   body: string;
 };
 
-const DEMO_NOTE =
-  "> **Demo store.** AXIARO is a demonstration store. This page is sample copy that reflects how the platform currently works — it is not legal advice. Before any real commercial launch, the business owner must have this reviewed and adapted by a qualified professional.\n\n";
-
 const PAYMENT_NOTE =
   "Online card, GCash and Maya payments are **not active on this store yet**. When you place an order it is recorded as *awaiting payment* and our team contacts you to arrange payment separately. No card or wallet details are collected or stored by the store.";
 
 // ---------------------------------------------------------------------------
 
-const PRIVACY = `${DEMO_NOTE}AXIARO ("we", "us", "the store") operates this online store. This policy explains what personal information we collect, why we collect it, how we use and protect it, and the choices you have. It applies to this website and the orders placed through it.
+const PRIVACY = `Axiaro ("we", "us", "the store") operates this online store. This policy explains what personal information we collect, why we collect it, how we use and protect it, and the choices you have. It applies to this website and the orders placed through it.
 
 # Information we collect
 
@@ -62,7 +59,7 @@ The delivery address, and billing address where different, that you enter at che
 We use cookies that are strictly necessary to keep you signed in and to keep your shopping cart and checkout working. These cannot be switched off without breaking core functionality.
 
 ## Website usage information
-Basic technical information that your browser sends with every request — such as your device type and pages viewed — may be processed by our hosting provider to run the site securely and to diagnose faults. This demo store does not run advertising or cross-site tracking.
+Basic technical information that your browser sends with every request — such as your device type and pages viewed — may be processed by our hosting provider to run the site securely and to diagnose faults. This store does not run advertising or cross-site tracking.
 
 # How we use your information
 
@@ -104,7 +101,7 @@ Questions about privacy or your data can be sent through our **[Contact us](/pag
 
 // ---------------------------------------------------------------------------
 
-const TERMS = `${DEMO_NOTE}These Terms & Conditions govern your use of the AXIARO store and any order you place. By using the site or placing an order you agree to them. Please read them together with our **[Privacy policy](/pages/privacy)**, **[Shipping & delivery](/pages/shipping)**, **[Returns & refunds](/pages/returns)** and **[Cancellation policy](/pages/cancellation)**.
+const TERMS = `These Terms & Conditions govern your use of the Axiaro store and any order you place. By using the site or placing an order you agree to them. Please read them together with our **[Privacy policy](/pages/privacy)**, **[Shipping & delivery](/pages/shipping)**, **[Returns & refunds](/pages/returns)** and **[Cancellation policy](/pages/cancellation)**.
 
 # Using this website
 
@@ -116,7 +113,7 @@ You are responsible for the accuracy of the information on your account and for 
 
 # Product information
 
-We describe our products as accurately as we can. Product illustrations on this demo store are an in-house graphic system rather than photographs, and colours can vary between screens. Minor variation in natural materials is normal and is not a fault.
+We describe our products as accurately as we can. Product illustrations on this store are an in-house graphic system rather than photographs, and colours can vary between screens. Minor variation in natural materials is normal and is not a fault.
 
 # Pricing
 
@@ -148,7 +145,7 @@ Discount codes are applied at checkout, cannot be exchanged for cash, and may be
 
 # Intellectual property
 
-The AXIARO name, store design, text and graphics are owned by us or our licensors and may not be copied or reused without permission, except that you may keep a copy of your own order records.
+The Axiaro name, store design, text and graphics are owned by us or our licensors and may not be copied or reused without permission, except that you may keep a copy of your own order records.
 
 # Limitation of liability
 
@@ -164,7 +161,7 @@ Questions about these terms can be sent through our **[Contact us](/pages/contac
 
 // ---------------------------------------------------------------------------
 
-const SHIPPING = `${DEMO_NOTE}This page explains how delivery works for AXIARO orders. The options and fees shown at checkout are always the current ones — if anything below differs from checkout, checkout is correct.
+const SHIPPING = `This page explains how delivery works for Axiaro orders. The options and fees shown at checkout are always the current ones — if anything below differs from checkout, checkout is correct.
 
 # Where we deliver
 
@@ -211,7 +208,7 @@ Delivery questions can be sent through our **[Contact us](/pages/contact)** page
 
 // ---------------------------------------------------------------------------
 
-const RETURNS = `${DEMO_NOTE}We want you to be happy with your order. This page explains when and how you can return an item and how refunds are handled on this store.
+const RETURNS = `We want you to be happy with your order. This page explains when and how you can return an item and how refunds are handled on this store.
 
 # Refunds on this store
 
@@ -254,7 +251,7 @@ Start a return, or ask a question, through the **[Contact us](/pages/contact)** 
 
 // ---------------------------------------------------------------------------
 
-const CANCELLATION = `${DEMO_NOTE}This page explains when you can cancel an AXIARO order and what happens to any payment.
+const CANCELLATION = `This page explains when you can cancel an Axiaro order and what happens to any payment.
 
 # Before your order is prepared for dispatch
 
@@ -292,7 +289,7 @@ To cancel an order, use the **[Contact us](/pages/contact)** page and include yo
 
 const ABOUT = `# Our approach
 
-AXIARO designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
+Axiaro designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
 
 # What we care about
 
@@ -304,9 +301,9 @@ AXIARO designs homeware and a small wardrobe in-house, works directly with a sho
 
 Browse the catalogue, add pieces to your bag, and check out with delivery or free store pickup. You can shop as a guest or create an account to save addresses, track orders and keep a wishlist. After you place an order our team contacts you to arrange payment, then prepares it for dispatch.
 
-# About this store
+# Product imagery
 
-AXIARO is a demonstration store built to showcase a complete e-commerce platform. Product imagery is an in-house illustration system rather than photography, and some details — such as company registration and a published payment method — are intentionally left for a real operator to configure. Store and contact details shown across the site are drawn from the store's own settings.
+Selected products are represented using Axiaro's in-house product illustration system rather than photographs. Store and contact details shown across the site are managed from the store's own settings.
 
 # Get in touch
 
@@ -328,9 +325,7 @@ We aim to reply within one business day.
 - Arranging payment for an order that is awaiting payment
 - Delivery questions and delayed parcels
 - Returns, refunds and cancellations
-- Account and sign-in help
-
-_AXIARO is a demonstration store. The contact details shown here come from the store's settings and can be updated by an administrator._`;
+- Account and sign-in help`;
 
 // ---------------------------------------------------------------------------
 
@@ -379,74 +374,74 @@ Use the **[Contact us](/pages/contact)** page. Include your order number if your
 export const LEGAL_PAGES: LegalPageSeed[] = [
   {
     slug: "privacy",
-    title: "Privacy policy",
-    excerpt: "What personal information AXIARO collects, how it is used, and the choices you have.",
-    seoTitle: "Privacy policy",
+    title: "Privacy Policy",
+    excerpt: "What personal information Axiaro collects, how it is used, and the choices you have.",
+    seoTitle: "Privacy Policy",
     seoDescription:
-      "How AXIARO collects, uses, retains and protects your personal information, and how to exercise your rights.",
+      "How Axiaro collects, uses, retains and protects your personal information, and how to exercise your rights.",
     body: PRIVACY,
   },
   {
     slug: "terms",
-    title: "Terms & conditions",
-    excerpt: "The terms that apply to using the AXIARO store and placing an order.",
-    seoTitle: "Terms & conditions",
+    title: "Terms & Conditions",
+    excerpt: "The terms that apply to using the Axiaro store and placing an order.",
+    seoTitle: "Terms & Conditions",
     seoDescription:
-      "The terms governing use of the AXIARO store, orders, pricing, payment, delivery, returns and liability.",
+      "The terms governing use of the Axiaro store, orders, pricing, payment, delivery, returns and liability.",
     body: TERMS,
   },
   {
     slug: "shipping",
-    title: "Shipping & delivery",
-    excerpt: "Delivery options, fees, timeframes and tracking for AXIARO orders.",
-    seoTitle: "Shipping & delivery",
+    title: "Shipping & Delivery",
+    excerpt: "Delivery options, fees, timeframes and tracking for Axiaro orders.",
+    seoTitle: "Shipping & Delivery",
     seoDescription:
-      "AXIARO delivery options and fees: standard and express delivery within the Philippines, free store pickup, and order tracking.",
+      "Axiaro delivery options and fees: standard and express delivery within the Philippines, free store pickup, and order tracking.",
     body: SHIPPING,
   },
   {
     slug: "returns",
-    title: "Returns & refunds",
+    title: "Returns & Refunds",
     excerpt: "When you can return an item, how to do it, and how refunds are handled.",
-    seoTitle: "Returns & refunds",
+    seoTitle: "Returns & Refunds",
     seoDescription:
-      "AXIARO returns policy: 30-day return window, how to return an item, faulty items, and how manual refunds are processed.",
+      "Axiaro returns policy: 30-day return window, how to return an item, faulty items, and how manual refunds are processed.",
     body: RETURNS,
   },
   {
     slug: "cancellation",
-    title: "Cancellation policy",
+    title: "Cancellation Policy",
     excerpt: "When an order can be cancelled and what happens to any payment.",
-    seoTitle: "Cancellation policy",
+    seoTitle: "Cancellation Policy",
     seoDescription:
-      "How to cancel an AXIARO order before it ships, what happens after dispatch, and the payment and refund implications.",
+      "How to cancel an Axiaro order before it ships, what happens after dispatch, and the payment and refund implications.",
     body: CANCELLATION,
   },
   {
     slug: "about",
-    title: "About AXIARO",
+    title: "About Axiaro",
     excerpt: "Why we make what we make, and how the store works.",
-    seoTitle: "About AXIARO",
+    seoTitle: "About Axiaro",
     seoDescription:
-      "AXIARO designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.",
+      "Axiaro designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.",
     body: ABOUT,
   },
   {
     slug: "contact",
-    title: "Contact us",
-    excerpt: "How to reach the AXIARO team about an order or a question.",
-    seoTitle: "Contact us",
+    title: "Contact Us",
+    excerpt: "How to reach the Axiaro team about an order or a question.",
+    seoTitle: "Contact Us",
     seoDescription:
-      "Contact AXIARO about an order, a return, a cancellation or a question. We aim to reply within one business day.",
+      "Contact Axiaro about an order, a return, a cancellation or a question. We aim to reply within one business day.",
     body: CONTACT,
   },
   {
     slug: "faq",
-    title: "Frequently asked questions",
+    title: "Frequently Asked Questions",
     excerpt: "Ordering, payment, shipping, returns and support — answered.",
-    seoTitle: "Frequently asked questions",
+    seoTitle: "Frequently Asked Questions",
     seoDescription:
-      "Answers to common questions about ordering from AXIARO: accounts, payment, delivery, tracking, returns and support.",
+      "Answers to common questions about ordering from Axiaro: accounts, payment, delivery, tracking, returns and support.",
     body: FAQ,
   },
 ];

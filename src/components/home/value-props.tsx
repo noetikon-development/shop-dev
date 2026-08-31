@@ -1,9 +1,9 @@
-import { Truck, RotateCcw, ShieldCheck, Wrench } from "lucide-react";
+import { Truck, RotateCcw, Sparkles, Wrench } from "lucide-react";
 
 const PROPS = [
   { icon: Truck, title: "Free shipping over ₱2,500", copy: "Flat ₱150 below that. Express available." },
   { icon: RotateCcw, title: "30-day returns", copy: "Changed your mind? Send it back, no fuss." },
-  { icon: ShieldCheck, title: "10-year guarantee", copy: "On the frame of every piece of furniture." },
+  { icon: Sparkles, title: "Considered, in-house design", copy: "Drawn, specced and refined by our own team." },
   { icon: Wrench, title: "Assembly help", copy: "Clear instructions, and a hand if you want one." },
 ];
 

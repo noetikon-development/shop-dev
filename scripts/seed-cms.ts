@@ -1,9 +1,13 @@
 /**
  * Seeds the Step 16 CMS content:
- *   - homepage ContentBlocks that reproduce the built-in homepage (so the demo
+ *   - homepage ContentBlocks that reproduce the built-in homepage (so it
  *     looks identical but is now editable in /admin/content/homepage);
- *   - demo ContentPages (About, Contact, FAQ, policies) — clearly marked as demo
- *     content, NOT legal advice.
+ *   - core informational ContentPages (Assembly & care, Cookie policy). The
+ *     legal / policy pages live in scripts/seed-legal-content.ts.
+ *
+ * The copy reflects what the store can actually do today. It is general
+ * information, not legal advice — a real launch should have the policy pages
+ * reviewed by a qualified professional.
  *
  * NON-DESTRUCTIVE: rows are created only if missing (matched by key / slug).
  * Existing rows — including admin edits — are left untouched. Run:
@@ -36,7 +40,7 @@ const HOMEPAGE_BLOCKS: BlockSeed[] = [
       secondaryCtaLabel: "See what's new",
       secondaryCtaHref: "/c/new",
       imageMediaId: "",
-      notes: ["10-year furniture guarantee", "30-day returns", "Assembly help included"],
+      notes: ["Designed in-house", "30-day returns", "Assembly help included"],
     },
   },
   { key: "homepage.categories.default", type: "category_tiles", title: "Category tiles", position: 1, data: { heading: "" } },
@@ -107,7 +111,7 @@ const HOMEPAGE_BLOCKS: BlockSeed[] = [
       items: [
         { icon: "truck", title: "Free shipping over ₱2,500", body: "Flat ₱150 below that. Express available." },
         { icon: "returns", title: "30-day returns", body: "Changed your mind? Send it back, no fuss." },
-        { icon: "shield", title: "10-year guarantee", body: "On the frame of every piece of furniture." },
+        { icon: "sparkles", title: "Considered, in-house design", body: "Drawn, specced and refined by our own team." },
         { icon: "wrench", title: "Assembly help", body: "Clear instructions, and a hand if you want one." },
       ],
     },
@@ -130,9 +134,6 @@ const HOMEPAGE_BLOCKS: BlockSeed[] = [
   },
 ];
 
-const DEMO_NOTE =
-  "> **Demo content.** This page is placeholder copy for the AXIARO demo store. It is not legal advice — replace it with text reviewed for your business before going live.\n\n";
-
 type PageSeed = {
   slug: string;
   title: string;
@@ -151,15 +152,14 @@ const PAGES: PageSeed[] = [
     title: "Assembly & care",
     excerpt: "Keep your pieces looking their best.",
     body:
-      "## Assembly\n\nFlat-packed furniture includes step-by-step instructions and all the hardware you need. If you'd rather not, assembly help is available at checkout in supported areas.\n\n## Care\n\n- **Wood:** dust with a soft dry cloth; avoid direct sun and heat sources.\n- **Textiles:** most covers are machine-washable — check the label on the product page.\n- **Metal & stone:** wipe with a damp cloth, dry immediately.\n\n_This is demo content for the AXIARO showcase store._",
+      "## Assembly\n\nFlat-packed furniture includes step-by-step instructions and all the hardware you need. If you'd rather not, assembly help is available at checkout in supported areas.\n\n## Care\n\n- **Wood:** dust with a soft dry cloth; avoid direct sun and heat sources.\n- **Textiles:** most covers are machine-washable — check the label on the product page.\n- **Metal & stone:** wipe with a damp cloth, dry immediately.\n\n_Selected products are represented using Axiaro's in-house product illustration system rather than photographs. Care guidance for your specific item is shown on its product page._",
   },
   {
     slug: "cookies",
     title: "Cookie policy",
     excerpt: "How this site uses cookies.",
     body:
-      DEMO_NOTE +
-      "## What cookies we use\n\n- **Essential:** sign-in, cart and checkout. These can't be turned off.\n- **Preferences:** remembering small choices like a filter or a tab.\n\nThis demo store does not use advertising or cross-site tracking cookies.",
+      "## What cookies we use\n\n- **Essential:** sign-in, cart and checkout. These can't be turned off.\n- **Preferences:** remembering small choices like a filter or a tab.\n\nThis store does not use advertising or cross-site tracking cookies.",
   },
 ];
 
