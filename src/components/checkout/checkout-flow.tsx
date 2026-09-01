@@ -233,7 +233,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             {summary.lines.map((l) => (
               <li key={l.variantId} className="flex gap-3">
                 <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                  <ProductImage src={l.imageUrl} alt={l.name} />
+                  <ProductImage src={l.imageUrl} alt={l.name} compact sizes="48px" />
                   <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-[10px] font-semibold text-paper">
                     {l.quantity}
                   </span>

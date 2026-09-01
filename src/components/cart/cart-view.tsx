@@ -68,7 +68,7 @@ export function CartView() {
                 href={`/p/${l.slug}`}
                 className="h-28 w-24 shrink-0 overflow-hidden rounded-sm bg-surface-sunken"
               >
-                <ProductImage src={l.imageUrl} alt={l.name} />
+                <ProductImage src={l.imageUrl} alt={l.name} compact sizes="96px" />
               </Link>
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex justify-between gap-3">

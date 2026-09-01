@@ -216,7 +216,7 @@ export function ProductImages({
                       className="flex items-center gap-3 rounded-md border border-line bg-surface p-2.5"
                     >
                       <div className="h-14 w-14 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                        <ProductImage src={img.url} alt={img.alt} seedOverride={`${img.id}-admin`} />
+                        <ProductImage src={img.url} alt={img.alt} allowArt sizes="56px" />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm text-ink">{img.alt || "—"}</p>

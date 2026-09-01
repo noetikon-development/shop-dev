@@ -111,7 +111,7 @@ export function CartDrawer() {
                   onClick={closeCart}
                   className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken"
                 >
-                  <ProductImage src={l.imageUrl} alt={l.name} />
+                  <ProductImage src={l.imageUrl} alt={l.name} compact sizes="64px" />
                 </Link>
                 <div className="min-w-0 flex-1">
                   <div className="flex justify-between gap-2">

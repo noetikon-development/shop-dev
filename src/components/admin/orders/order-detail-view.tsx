@@ -120,7 +120,7 @@ export function OrderDetailView({
                     <td className="px-5 py-3">
                       <div className="flex items-center gap-3">
                         <div className="h-11 w-9 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                          <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} />
+                          <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} allowArt sizes="40px" />
                         </div>
                         <div className="min-w-0">
                           {it.productId ? (

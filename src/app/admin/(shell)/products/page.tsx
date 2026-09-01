@@ -59,7 +59,8 @@ export default async function AdminProductsPage({
             <ProductImage
               src={r.images[0]?.url ?? `art:accessory:${r.slug}`}
               alt={r.images[0]?.alt ?? r.name}
-              seedOverride={`${r.slug}-admin`}
+              allowArt
+              sizes="40px"
             />
           </div>
           <div className="min-w-0">

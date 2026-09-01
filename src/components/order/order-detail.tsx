@@ -62,7 +62,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
             {order.items.map((it) => (
               <li key={it.id} className="flex gap-4 py-4">
                 <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                  <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} />
+                  <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} compact sizes="64px" />
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{it.name}</p>

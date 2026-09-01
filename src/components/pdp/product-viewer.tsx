@@ -153,7 +153,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                 aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
                 aria-pressed={activeImage === i}
               >
-                <ProductImage src={img.url} alt="" seedOverride={`${product.slug}-thumb-${i}`} />
+                <ProductImage src={img.url} alt="" sizes="64px" />
               </button>
             ))}
           </div>
@@ -167,7 +167,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
               <ProductImage
                 src={mainImage.url}
                 alt={mainImage.alt || product.name}
-                seedOverride={`${product.slug}-main-${activeImage}`}
+                sizes="(max-width: 1024px) 100vw, 45vw"
                 priority
               />
             </div>

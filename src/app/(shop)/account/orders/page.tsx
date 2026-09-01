@@ -59,7 +59,7 @@ export default async function OrdersPage() {
                       key={it.id}
                       className="h-12 w-10 overflow-hidden rounded-sm border border-line bg-surface-sunken"
                     >
-                      <ProductImage src={it.imageUrl ?? "art:accessory:o"} alt={it.name} />
+                      <ProductImage src={it.imageUrl ?? "art:accessory:o"} alt={it.name} compact sizes="40px" />
                     </div>
                   ))}
                 </div>
