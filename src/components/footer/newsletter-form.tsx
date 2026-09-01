@@ -6,19 +6,25 @@ import { ArrowRight, Check } from "lucide-react";
 /**
  * First-order discount prompt (footer).
  *
- * This is a demo store: no marketing list is maintained and no email is sent or
- * stored. Submitting simply reveals the real, active WELCOME10 promo code so the
- * message is accurate about what actually happens.
+ * There is no newsletter backend: no marketing list is stored and no email is
+ * sent. Submitting simply reveals the configured message (by default the real,
+ * active WELCOME10 promo code) so the copy is accurate about what happens. The
+ * wording is editable in Admin → Content → Footer.
  */
-export function NewsletterForm() {
+export function NewsletterForm({
+  ctaLabel = "",
+  successText = "Use code WELCOME10 at checkout for 10% off your first order.",
+}: {
+  ctaLabel?: string;
+  successText?: string;
+}) {
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
 
   if (done) {
     return (
       <p className="inline-flex items-center gap-2 text-sm text-success">
-        <Check size={16} /> Use code <span className="font-medium">WELCOME10</span> at checkout for
-        10% off your first order.
+        <Check size={16} className="shrink-0" /> {successText}
       </p>
     );
   }
@@ -43,9 +49,9 @@ export function NewsletterForm() {
       <button
         type="submit"
         className="btn btn-primary shrink-0 !px-3.5 !py-2.5"
-        aria-label="Get my discount code"
+        aria-label={ctaLabel || "Get my discount code"}
       >
-        <ArrowRight size={16} />
+        {ctaLabel ? <span className="text-sm">{ctaLabel}</span> : <ArrowRight size={16} />}
       </button>
     </form>
   );

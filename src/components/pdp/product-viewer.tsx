@@ -11,13 +11,14 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
-import { FREE_SHIPPING_THRESHOLD, STANDARD_SHIPPING_FEE } from "@/lib/constants";
+import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
   const openCart = useUI((s) => s.openCart);
   const add = useCart((s) => s.add);
+  const { freeShippingThreshold, standardShippingRate } = useStorefrontConfig();
   const [adding, setAdding] = useState(false);
   const wished = useWishlist((s) => s.ids.includes(product.id));
   const toggleWish = useWishlistToggle();
@@ -363,15 +364,19 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           <div className="flex items-start gap-3">
             <Truck size={17} className="mt-0.5 shrink-0 text-ink-soft" />
             <p className="text-ink-soft">
-              {product.freeShipping || activePrice >= FREE_SHIPPING_THRESHOLD ? (
+              {product.freeShipping ||
+              (freeShippingThreshold > 0 && activePrice >= freeShippingThreshold) ? (
                 <>
                   <span className="font-medium text-ink">Free standard shipping.</span> Estimated
                   delivery {estimatedDelivery()}.
                 </>
               ) : (
                 <>
-                  Standard shipping {formatPrice(STANDARD_SHIPPING_FEE)} · Estimated delivery{" "}
-                  {estimatedDelivery()}. Free over {formatPrice(FREE_SHIPPING_THRESHOLD)}.
+                  Standard shipping {formatPrice(standardShippingRate)} · Estimated delivery{" "}
+                  {estimatedDelivery()}.
+                  {freeShippingThreshold > 0 && (
+                    <> Free over {formatPrice(freeShippingThreshold)}.</>
+                  )}
                 </>
               )}
             </p>

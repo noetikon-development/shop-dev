@@ -3,10 +3,12 @@
 import { useCart } from "@/lib/cart-store";
 import { computeTotals } from "@/lib/pricing";
 import { formatPrice } from "@/lib/utils";
+import { useStorefrontConfig } from "@/components/storefront-config-provider";
 
 export function useOrderTotals(shippingMethodId?: string) {
   const lines = useCart((s) => s.lines);
   const coupon = useCart((s) => s.coupon);
+  const config = useStorefrontConfig();
   return computeTotals({
     lines: lines
       .filter((l) => !l.unavailable)
@@ -14,6 +16,7 @@ export function useOrderTotals(shippingMethodId?: string) {
     shippingMethodId,
     discount: coupon?.valid ? coupon.discount : 0,
     couponCode: coupon?.code ?? null,
+    shipping: { freeThreshold: config.freeShippingThreshold, methods: config.shippingMethods },
   });
 }
 

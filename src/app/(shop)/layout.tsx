@@ -1,5 +1,7 @@
 import { getCurrentUser } from "@/lib/auth";
 import { getWishlistProductIds } from "@/lib/wishlist";
+import { getStorefrontConfig } from "@/lib/storefront-config";
+import { StorefrontConfigProvider } from "@/components/storefront-config-provider";
 import { SiteHeader } from "@/components/header/site-header";
 import { SiteFooter } from "@/components/footer/site-footer";
 import { CartDrawer } from "@/components/cart/cart-drawer";
@@ -12,15 +14,20 @@ export const dynamic = "force-dynamic";
 
 export default async function ShopLayout({ children }: LayoutProps<"/">) {
   const user = await getCurrentUser();
-  const wishlistIds = user ? await getWishlistProductIds(user.id) : [];
+  const [wishlistIds, storefrontConfig] = await Promise.all([
+    user ? getWishlistProductIds(user.id) : Promise.resolve([]),
+    getStorefrontConfig(),
+  ]);
 
   return (
     <CartProvider userId={user?.id ?? null}>
-      <WishlistHydrator ids={wishlistIds} />
-      <SiteHeader />
-      <main className="flex-1">{children}</main>
-      <SiteFooter />
-      <CartDrawer />
+      <StorefrontConfigProvider value={storefrontConfig}>
+        <WishlistHydrator ids={wishlistIds} />
+        <SiteHeader />
+        <main className="flex-1">{children}</main>
+        <SiteFooter />
+        <CartDrawer />
+      </StorefrontConfigProvider>
     </CartProvider>
   );
 }

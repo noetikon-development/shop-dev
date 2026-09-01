@@ -8,7 +8,7 @@ import { useCart } from "@/lib/cart-store";
 import { useUI } from "@/lib/ui-store";
 import { computeTotals } from "@/lib/pricing";
 import { formatPrice } from "@/lib/utils";
-import { FREE_SHIPPING_THRESHOLD } from "@/lib/constants";
+import { useStorefrontConfig } from "@/components/storefront-config-provider";
 
 export function CartDrawer() {
   const { cartOpen, closeCart } = useUI();
@@ -17,6 +17,7 @@ export function CartDrawer() {
   const setQuantity = useCart((s) => s.setQuantity);
   const remove = useCart((s) => s.removeItem);
 
+  const config = useStorefrontConfig();
   const purchasable = lines.filter((l) => !l.unavailable);
   const totals = computeTotals({
     lines: purchasable.map((l) => ({
@@ -25,12 +26,13 @@ export function CartDrawer() {
     })),
     discount: coupon?.valid ? coupon.discount : 0,
     couponCode: coupon?.code ?? null,
+    shipping: { freeThreshold: config.freeShippingThreshold, methods: config.shippingMethods },
   });
 
-  const freeShipPct = Math.min(
-    100,
-    Math.round((totals.subtotal / FREE_SHIPPING_THRESHOLD) * 100),
-  );
+  const freeShipPct =
+    config.freeShippingThreshold > 0
+      ? Math.min(100, Math.round((totals.subtotal / config.freeShippingThreshold) * 100))
+      : 100;
 
   return (
     <SlideOver

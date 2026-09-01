@@ -107,6 +107,45 @@ export const categoryTilesSchema = z.object({
   heading: shortText.default(""),
 });
 
+// --- footer (Phase 5A) -----------------------------------------------------
+//
+// A single `area:"global"` block (`footer.default`). Structured, editable
+// wording + link lists for the site-wide footer. Authoritative business values
+// (support email, social URLs, legal name) are NOT stored here — the footer
+// component reads those from Store Settings and merges them in.
+
+export const footerLinkSchema = z.object({
+  label: shortText.default(""),
+  href: linkHref.default(""),
+  /** Hidden from the storefront when false — kept so it can be re-enabled. */
+  enabled: z.boolean().default(true),
+});
+
+export const footerColumnSchema = z.object({
+  heading: shortText.default(""),
+  links: z.array(footerLinkSchema).max(12).default([]),
+});
+
+export const footerSchema = z.object({
+  brandDescription: longText.default(""),
+  newsletter: z
+    .object({
+      heading: shortText.default(""),
+      body: shortText.default(""),
+      ctaLabel: shortText.default(""),
+      successText: longText.default(""),
+    })
+    .default({ heading: "", body: "", ctaLabel: "", successText: "" }),
+  shopColumn: footerColumnSchema.default({ heading: "", links: [] }),
+  helpColumn: footerColumnSchema.default({ heading: "", links: [] }),
+  companyColumn: footerColumnSchema.default({ heading: "", links: [] }),
+  legalLinks: z.array(footerLinkSchema).max(8).default([]),
+  /** `{year}` and `{brand}` tokens are substituted at render time. */
+  copyright: shortText.default(""),
+});
+
+export type FooterData = z.infer<typeof footerSchema>;
+
 // --- registry --------------------------------------------------------------
 
 export type BlockTypeKey =
@@ -115,7 +154,8 @@ export type BlockTypeKey =
   | "product_rail"
   | "value_props"
   | "rich_text"
-  | "category_tiles";
+  | "category_tiles"
+  | "footer";
 
 export const BLOCK_TYPES: Record<
   BlockTypeKey,
@@ -127,9 +167,15 @@ export const BLOCK_TYPES: Record<
   feature_grid: { label: "Feature cards", description: "Two or more editorial cards linking into the catalogue.", schema: featureGridSchema },
   value_props: { label: "Value props", description: "The row of short reassurance points (shipping, returns…).", schema: valuePropsSchema },
   rich_text: { label: "Rich text", description: "A heading and a block of formatted text.", schema: richTextSchema },
+  footer: { label: "Footer", description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.", schema: footerSchema },
 };
 
 export const BLOCK_TYPE_KEYS = Object.keys(BLOCK_TYPES) as BlockTypeKey[];
+
+/** Block types an admin can add as a homepage section (footer is site-wide, edited on its own page). */
+export const HOMEPAGE_BLOCK_TYPE_KEYS = BLOCK_TYPE_KEYS.filter(
+  (k) => k !== "footer",
+) as Exclude<BlockTypeKey, "footer">[];
 
 export function isBlockType(v: string): v is BlockTypeKey {
   return v in BLOCK_TYPES;

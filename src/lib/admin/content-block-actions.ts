@@ -31,6 +31,7 @@ export type BlockActionState = {
 function revalidate() {
   revalidateTag("content", "max");
   revalidatePath("/admin/content/homepage");
+  revalidatePath("/admin/content/footer");
   revalidatePath("/", "layout");
   revalidatePath("/");
 }

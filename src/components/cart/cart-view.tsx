@@ -8,7 +8,7 @@ import { CouponField } from "@/components/cart/coupon-field";
 import { OrderSummaryLines } from "@/components/cart/order-summary";
 import { useCart } from "@/lib/cart-store";
 import { formatPrice } from "@/lib/utils";
-import { FREE_SHIPPING_THRESHOLD } from "@/lib/constants";
+import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { computeTotals } from "@/lib/pricing";
 
 export function CartView() {
@@ -17,14 +17,19 @@ export function CartView() {
   const setQuantity = useCart((s) => s.setQuantity);
   const remove = useCart((s) => s.removeItem);
 
+  const config = useStorefrontConfig();
   const purchasable = lines.filter((l) => !l.unavailable);
   const totals = computeTotals({
     lines: purchasable.map((l) => ({
       unitPrice: l.unitPrice,
       quantity: Math.min(l.quantity, l.available),
     })),
+    shipping: { freeThreshold: config.freeShippingThreshold, methods: config.shippingMethods },
   });
-  const freeShipPct = Math.min(100, Math.round((totals.subtotal / FREE_SHIPPING_THRESHOLD) * 100));
+  const freeShipPct =
+    config.freeShippingThreshold > 0
+      ? Math.min(100, Math.round((totals.subtotal / config.freeShippingThreshold) * 100))
+      : 100;
 
   if (!hydrated) {
     return <div className="h-64 animate-pulse rounded-lg bg-surface-sunken" />;

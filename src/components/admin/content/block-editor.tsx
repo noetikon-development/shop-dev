@@ -13,7 +13,7 @@ import {
 } from "@/lib/admin/content-block-actions";
 import {
   BLOCK_TYPES,
-  BLOCK_TYPE_KEYS,
+  HOMEPAGE_BLOCK_TYPE_KEYS,
   PRODUCT_RAIL_SOURCES,
   HERO_PANEL_LABELS,
   type BlockTypeKey,
@@ -170,7 +170,7 @@ export function BlockEditor({
               onChange={(e) => setType(e.target.value as BlockTypeKey)}
               disabled={editing}
             >
-              {BLOCK_TYPE_KEYS.map((k) => (
+              {HOMEPAGE_BLOCK_TYPE_KEYS.map((k) => (
                 <option key={k} value={k}>
                   {BLOCK_TYPES[k].label}
                 </option>

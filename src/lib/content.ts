@@ -1,7 +1,12 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
-import { parseBlockData, type BlockTypeKey } from "@/lib/content-blocks";
+import {
+  parseBlockData,
+  footerSchema,
+  type BlockTypeKey,
+  type FooterData,
+} from "@/lib/content-blocks";
 
 /**
  * Storefront-facing CMS reads (Step 16). Cached with the `content` tag so an
@@ -98,4 +103,37 @@ const loadHomepageBlocks = unstable_cache(
 
 export function getHomepageBlocks(): Promise<PublicBlock[]> {
   return loadHomepageBlocks();
+}
+
+/**
+ * The site-wide footer content (Phase 5A). One PUBLISHED `area:"global"` block
+ * keyed `footer.default`. Returns `null` when the block is absent or not
+ * published — the footer component then falls back to its built-in structure,
+ * so the storefront footer never disappears.
+ */
+const loadFooterBlock = unstable_cache(
+  async (): Promise<FooterData | null> => {
+    const row = await prisma.contentBlock.findFirst({
+      where: { area: "global", type: "footer", status: "PUBLISHED" },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: { data: true },
+    });
+    if (!row) return null;
+    const parsed = footerSchema.safeParse(safeJson(row.data));
+    return parsed.success ? parsed.data : null;
+  },
+  ["content-footer-block"],
+  { revalidate: 300, tags: ["content"] },
+);
+
+function safeJson(raw: string): unknown {
+  try {
+    return JSON.parse(raw || "{}");
+  } catch {
+    return {};
+  }
+}
+
+export function getFooterBlock(): Promise<FooterData | null> {
+  return loadFooterBlock();
 }

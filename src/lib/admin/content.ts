@@ -90,6 +90,13 @@ function blockSummary(type: string, data: Record<string, unknown>): string {
       return String(data.heading ?? "") || "Text block";
     case "category_tiles":
       return "Category grid";
+    case "footer": {
+      const cols = ["shopColumn", "helpColumn", "companyColumn"].reduce((n, k) => {
+        const c = data[k] as { links?: unknown[] } | undefined;
+        return n + (Array.isArray(c?.links) ? c.links.length : 0);
+      }, 0);
+      return `${cols} footer link(s)`;
+    }
     default:
       return "—";
   }

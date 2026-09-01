@@ -196,6 +196,15 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     live: true,
   },
   {
+    path: "/admin/content/footer",
+    label: "Footer",
+    description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.",
+    group: "content",
+    accepts: ["view_content"],
+    emptyLabel: "The footer is using its built-in defaults.",
+    live: true,
+  },
+  {
     path: "/admin/content/pages",
     label: "Pages",
     description: "Standalone content pages (About, policies, guides).",
