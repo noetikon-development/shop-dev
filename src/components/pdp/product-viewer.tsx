@@ -209,7 +209,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
       {/* Purchase panel */}
       <div>
-        <p className="eyebrow">{product.brand}</p>
+        <p className="eyebrow-brand">{product.brand}</p>
         <h1 className="mt-2 text-3xl sm:text-display">{product.name}</h1>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">

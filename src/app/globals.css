@@ -135,6 +135,16 @@
     color: var(--color-ink-faint);
   }
 
+  /* Same eyebrow scale/weight/colour, but preserves the source casing —
+     used for proper nouns (e.g. the product brand) that must not be
+     up-cased. Tighter tracking suits a lower-case word. */
+  .eyebrow-brand {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-faint);
+  }
+
   /* Buttons — base is the "md" size; .btn-sm / .btn-lg adjust padding + text. */
   .btn {
     display: inline-flex;
