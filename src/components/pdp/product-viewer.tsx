@@ -15,6 +15,7 @@ import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button } from "@/components/ui/button";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
+import { isPhotoRef } from "@/lib/art-ref";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -89,15 +90,27 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   // Images are never matched by filename, slug, upload order or content, and a
   // photo assigned to another colour is NEVER shown for the selected colour.
   const galleryImages = useMemo<GalleryImage[]>(() => {
-    if (colourValueId) {
-      const forColour = product.images.filter((i) => i.optionValueId === colourValueId);
-      if (forColour.length > 0) return forColour;
-    }
-    const productLevel = product.images.filter((i) => i.optionValueId == null);
-    if (productLevel.length > 0) return productLevel;
-    // Nothing for this colour and nothing product-level. Do not borrow another
-    // colour's photos — show the illustration instead.
-    return [{ url: `art:${product.art}:${product.slug}`, alt: product.name, optionValueId: null }];
+    const resolve = (): GalleryImage[] => {
+      if (colourValueId) {
+        const forColour = product.images.filter((i) => i.optionValueId === colourValueId);
+        if (forColour.length > 0) return forColour;
+      }
+      const productLevel = product.images.filter((i) => i.optionValueId == null);
+      if (productLevel.length > 0) return productLevel;
+      // Nothing for this colour and nothing product-level. Do not borrow another
+      // colour's photos — show the illustration instead.
+      return [{ url: `art:${product.art}:${product.slug}`, alt: product.name, optionValueId: null }];
+    };
+
+    // Presentation-layer de-duplication (Phase 5D Stage 6). Entries that render
+    // as real photography stay individually navigable. Entries that render as
+    // the "photography coming soon" placeholder are visually identical to one
+    // another, so collapse them to a single gallery slot. No image data is
+    // touched — only what the gallery shows. If this selection has any real
+    // photo, the placeholder slots drop out entirely.
+    const resolved = resolve();
+    const photos = resolved.filter((i) => isPhotoRef(i.url));
+    return photos.length > 0 ? photos : resolved.slice(0, 1);
   }, [colourValueId, product.images, product.art, product.slug, product.name]);
 
   // Clamp the active index to the current gallery (it is reset to 0 on a colour
@@ -137,26 +150,28 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
       {/* Gallery */}
       <div className="lg:sticky lg:top-24 lg:self-start">
         <div className="flex gap-3">
-          <div
-            className="hidden w-16 shrink-0 flex-col gap-2.5 sm:flex"
-            role="group"
-            aria-label={`${product.name} — image thumbnails`}
-          >
-            {galleryImages.map((img, i) => (
-              <button
-                key={img.url + i}
-                onClick={() => setActiveImage(i)}
-                className={cn(
-                  "aspect-square overflow-hidden rounded-sm border transition-colors",
-                  activeImage === i ? "border-ink" : "border-line hover:border-line-strong",
-                )}
-                aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
-                aria-pressed={activeImage === i}
-              >
-                <ProductImage src={img.url} alt="" sizes="64px" />
-              </button>
-            ))}
-          </div>
+          {galleryImages.length > 1 && (
+            <div
+              className="hidden w-16 shrink-0 flex-col gap-2.5 sm:flex"
+              role="group"
+              aria-label={`${product.name} — image thumbnails`}
+            >
+              {galleryImages.map((img, i) => (
+                <button
+                  key={img.url + i}
+                  onClick={() => setActiveImage(i)}
+                  className={cn(
+                    "aspect-square overflow-hidden rounded-sm border transition-colors",
+                    activeImage === i ? "border-ink" : "border-line hover:border-line-strong",
+                  )}
+                  aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
+                  aria-pressed={activeImage === i}
+                >
+                  <ProductImage src={img.url} alt="" sizes="64px" />
+                </button>
+              ))}
+            </div>
+          )}
 
           <div className="relative flex-1 overflow-hidden rounded-lg bg-surface-sunken">
             <div
@@ -188,24 +203,30 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           </div>
         </div>
 
-        <div
-          className="mt-3 flex gap-2 sm:hidden"
-          role="group"
-          aria-label={`${product.name} — image thumbnails`}
-        >
-          {galleryImages.map((img, i) => (
-            <button
-              key={img.url + i}
-              onClick={() => setActiveImage(i)}
-              className={cn(
-                "h-1.5 flex-1 rounded-full transition-colors",
-                activeImage === i ? "bg-ink" : "bg-line-strong",
-              )}
-              aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
-              aria-pressed={activeImage === i}
-            />
-          ))}
-        </div>
+        {galleryImages.length > 1 && (
+          <div
+            className="mt-3 flex justify-center gap-1 sm:hidden"
+            role="group"
+            aria-label={`${product.name} — image navigation`}
+          >
+            {galleryImages.map((img, i) => (
+              <button
+                key={img.url + i}
+                onClick={() => setActiveImage(i)}
+                className="tap flex items-center justify-center"
+                aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
+                aria-pressed={activeImage === i}
+              >
+                <span
+                  className={cn(
+                    "block h-1.5 rounded-full transition-all",
+                    activeImage === i ? "w-5 bg-ink" : "w-1.5 bg-line-strong",
+                  )}
+                />
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Purchase panel */}
@@ -315,20 +336,23 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
         )}
 
         {/* Quantity + add */}
-        <div className="mt-6 flex flex-wrap items-stretch gap-3">
-          <QuantityStepper
-            value={qty}
-            onChange={setQty}
-            max={stock || 99}
-            size="md"
-            ariaLabel={`Quantity — ${product.name}`}
-          />
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-stretch">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium sm:sr-only">Quantity</span>
+            <QuantityStepper
+              value={qty}
+              onChange={setQty}
+              max={stock || 99}
+              size="md"
+              ariaLabel={`Quantity — ${product.name}`}
+            />
+          </div>
 
           <Button
             size="lg"
             onClick={addToBag}
             disabled={outOfStock || comboUnavailable || adding}
-            className="flex-1"
+            className="w-full sm:flex-1"
           >
             <ShoppingBag size={16} />
             {comboUnavailable

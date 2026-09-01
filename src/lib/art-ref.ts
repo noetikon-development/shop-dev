@@ -14,3 +14,13 @@ export function parseArtRef(url: string | null | undefined): { kind: ArtKind; se
 export function artKindFromRef(url: string | null | undefined): ArtKind {
   return parseArtRef(url)?.kind ?? "accessory";
 }
+
+/**
+ * True when a reference renders as real photography (a Storage / public URL),
+ * false for an `art:` illustration ref or an empty value — those all render as
+ * the identical "photography coming soon" placeholder. Used to de-duplicate the
+ * PDP gallery at the presentation layer without touching image data.
+ */
+export function isPhotoRef(url: string | null | undefined): boolean {
+  return Boolean(url) && !url!.startsWith("art:");
+}

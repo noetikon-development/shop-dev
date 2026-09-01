@@ -45,6 +45,21 @@ export function FilterControls({
     apply({ color: next.join(",") || null });
   };
 
+  // The colour facet is unbounded (a category can carry dozens of distinct
+  // colour names; /c/all currently ~58). Show a capped set by default and let
+  // the shopper expand to the full list — every colour stays reachable, and a
+  // colour that is already selected is never hidden behind the cap.
+  const COLOUR_CAP = 12;
+  const [showAllColours, setShowAllColours] = useState(false);
+  const visibleColours = useMemo(() => {
+    if (showAllColours || colorFacets.length <= COLOUR_CAP) return colorFacets;
+    const head = colorFacets.slice(0, COLOUR_CAP);
+    const spilledSelected = colorFacets
+      .slice(COLOUR_CAP)
+      .filter((c) => selectedColors.includes(c.name));
+    return [...head, ...spilledSelected];
+  }, [showAllColours, colorFacets, selectedColors]);
+
   const minFloor = Math.floor(priceBounds.min / 100);
   const maxCeil = Math.ceil(priceBounds.max / 100);
   const [minVal, setMinVal] = useState(sp.get("min") ?? "");
@@ -87,13 +102,19 @@ export function FilterControls({
 
       {colorFacets.length > 0 && (
         <FilterGroup title="Colour">
-          <div className="flex flex-wrap gap-2">
-            {colorFacets.map((c) => {
+          <div
+            className={cn(
+              "flex flex-wrap gap-2",
+              showAllColours && colorFacets.length > COLOUR_CAP && "max-h-64 overflow-y-auto pr-1",
+            )}
+          >
+            {visibleColours.map((c) => {
               const active = selectedColors.includes(c.name);
               return (
                 <button
                   key={c.name}
                   onClick={() => toggleColor(c.name)}
+                  aria-pressed={active}
                   className={cn(
                     "inline-flex items-center gap-2 rounded-full border py-1.5 pl-1.5 pr-3 text-xs transition-colors",
                     active
@@ -110,6 +131,15 @@ export function FilterControls({
               );
             })}
           </div>
+          {colorFacets.length > COLOUR_CAP && (
+            <button
+              onClick={() => setShowAllColours((v) => !v)}
+              aria-expanded={showAllColours}
+              className="mt-2.5 text-xs font-medium text-ink-soft underline underline-offset-2 hover:text-ink"
+            >
+              {showAllColours ? "Show fewer colours" : `Show all ${colorFacets.length} colours`}
+            </button>
+          )}
         </FilterGroup>
       )}
 

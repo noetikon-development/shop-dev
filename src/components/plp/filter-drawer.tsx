@@ -27,7 +27,7 @@ export function FilterDrawer({
         <SlidersHorizontal size={15} />
         Filters
         {activeCount > 0 && (
-          <span className="grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-[11px] text-paper">
+          <span className="grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-micro text-paper">
             {activeCount}
           </span>
         )}
