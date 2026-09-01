@@ -180,7 +180,7 @@ export function SectionHeading({
     <div className={cn("flex items-end justify-between gap-4", className)}>
       <div>
         {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
-        <h2 className="text-2xl sm:text-[1.75rem]">{title}</h2>
+        <h2 className="text-2xl sm:text-title">{title}</h2>
       </div>
       {action && (
         <Link

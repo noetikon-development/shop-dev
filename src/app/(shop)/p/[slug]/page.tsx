@@ -90,7 +90,7 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
       {/* Details */}
       <div className="container-page mt-16 grid gap-12 lg:grid-cols-[1fr_1.4fr] lg:gap-20">
         <div>
-          <h2 className="text-2xl">About this piece</h2>
+          <h2 className="text-2xl sm:text-title">About this piece</h2>
           <div className="mt-4 space-y-4 text-[15px] leading-relaxed text-ink-soft">
             {product.description.split("\n").map((para, i) => (
               <p key={i}>{para}</p>

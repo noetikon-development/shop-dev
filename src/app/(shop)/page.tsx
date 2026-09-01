@@ -31,7 +31,7 @@ export default async function HomePage() {
   ]);
 
   return (
-    <div className="space-y-16 pb-8 sm:space-y-20">
+    <div className="space-y-section pb-8 sm:space-y-section-lg">
       <Hero />
       <CategoryTiles categories={tree} />
       <ProductRail

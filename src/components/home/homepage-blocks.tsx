@@ -43,7 +43,7 @@ export async function HomepageBlocks({
   const media = await resolveMediaUrls(ids.filter(Boolean));
 
   return (
-    <div className="space-y-16 pb-8 sm:space-y-20">
+    <div className="space-y-section pb-8 sm:space-y-section-lg">
       {await Promise.all(
         blocks.map(async (block) => {
           switch (block.type) {
@@ -130,7 +130,7 @@ function HeroBlock({ data, media }: { data: Record<string, unknown>; media: Medi
       <div className="grid overflow-hidden rounded-lg border border-line bg-surface lg:grid-cols-2">
         <div className="flex flex-col justify-center gap-6 p-8 sm:p-12 lg:p-16">
           {str(data.eyebrow) && <p className="eyebrow">{str(data.eyebrow)}</p>}
-          <h1 className="text-balance text-4xl leading-[1.05] sm:text-5xl lg:text-[3.4rem]">
+          <h1 className="text-balance text-4xl sm:text-5xl lg:text-hero">
             {str(data.heading) || "Considered things for everyday living"}
           </h1>
           {str(data.body) && <p className="max-w-md text-pretty text-ink-soft">{str(data.body)}</p>}

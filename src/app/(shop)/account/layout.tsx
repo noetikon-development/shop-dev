@@ -9,7 +9,7 @@ export default async function AccountLayout({ children }: LayoutProps<"/account"
   return (
     <div className="container-page py-8 sm:py-12">
       <header className="mb-8">
-        <h1 className="text-3xl sm:text-[2.5rem]">My account</h1>
+        <h1 className="text-3xl sm:text-display">My account</h1>
         <p className="mt-1.5 text-sm text-ink-soft">
           Signed in as {user.name ?? user.email}
         </p>

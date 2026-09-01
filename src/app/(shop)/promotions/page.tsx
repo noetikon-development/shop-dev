@@ -34,7 +34,7 @@ export default async function PromotionsPage() {
     <div className="pb-10">
       <div className="container-page py-10">
         <p className="eyebrow">Promotions</p>
-        <h1 className="mt-2 max-w-2xl text-3xl sm:text-[2.75rem]">
+        <h1 className="mt-2 max-w-2xl text-3xl sm:text-display">
           Codes and markdowns, all in one place
         </h1>
         <p className="mt-3 max-w-xl text-ink-soft">

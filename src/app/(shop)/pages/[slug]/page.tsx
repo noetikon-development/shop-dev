@@ -48,7 +48,7 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
   return (
     <article className="container-page py-10 sm:py-16">
       <div className="mx-auto max-w-2xl">
-        <h1 className="text-3xl sm:text-[2.5rem]">{page.title}</h1>
+        <h1 className="text-3xl sm:text-display">{page.title}</h1>
         {page.excerpt && <p className="mt-3 text-pretty text-ink-soft">{page.excerpt}</p>}
         <p className="mt-2 text-xs text-ink-faint">
           Last updated {formatDate(page.updatedAt)}

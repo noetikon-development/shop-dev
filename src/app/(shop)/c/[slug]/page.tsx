@@ -128,7 +128,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps<"
       </nav>
 
       <header className="mt-4 max-w-2xl">
-        <h1 className="text-3xl sm:text-[2.5rem]">{title}</h1>
+        <h1 className="text-3xl sm:text-display">{title}</h1>
         {description && <p className="mt-2.5 text-ink-soft">{description}</p>}
       </header>
 
