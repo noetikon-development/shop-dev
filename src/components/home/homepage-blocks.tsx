@@ -236,7 +236,13 @@ function FeatureGridBlock({
             </div>
             <div className="relative min-h-44 bg-surface-sunken">
               {url ? (
-                <Image src={url} alt={str(f.title)} fill className="object-cover transition-transform duration-500 group-hover:scale-105" sizes="(max-width: 768px) 100vw, 50vw" />
+                <Image
+                  src={url}
+                  alt={mediaAltOf(media, f.imageMediaId) || str(f.title)}
+                  fill
+                  className="object-cover transition-transform duration-500 group-hover:scale-105"
+                  sizes="(max-width: 768px) 100vw, 50vw"
+                />
               ) : (
                 <ProductArt kind="decor" seed={`feature-${i}`} className="transition-transform duration-500 group-hover:scale-105" />
               )}

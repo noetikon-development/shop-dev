@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Card, FormField, Select, notify, usePersistentAction } from "@/components/admin/ui";
 import { MediaPickerField } from "@/components/admin/media/media-picker";
+import { FEATURE_CARD_IMAGE_SPEC } from "@/lib/media-constants";
 import {
   createBlockAction,
   updateBlockAction,
@@ -287,9 +288,13 @@ export function BlockEditor({
               </div>
               <MediaPickerField
                 name={`__feat-${i}-image`}
-                label="Card image (optional)"
+                label="Card image"
+                hint="A real lifestyle photo. Leave empty to keep the built-in illustration. Set the image's alt text in Media."
                 assets={mediaAssets}
                 defaultValue={featureImages[i] ?? ""}
+                uploadFolder="homepage"
+                showSpecHints
+                spec={FEATURE_CARD_IMAGE_SPEC}
               />
             </div>
           ))}

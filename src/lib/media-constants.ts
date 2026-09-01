@@ -62,6 +62,18 @@ export const CATEGORY_IMAGE_SPEC: ImageSpec = {
   recommendation: "1600×1200px, 4:3, sRGB, WebP, quality 82–85, 150–500 KB",
 };
 
+export const FEATURE_CARD_IMAGE_SPEC: ImageSpec = {
+  label: "Feature card",
+  width: 1600,
+  height: 1067,
+  ratio: 3 / 2,
+  minBytes: 150 * 1024,
+  maxBytes: 500 * 1024,
+  preferredType: "image/webp",
+  recommendation:
+    "1600×1067px, 3:2 landscape, subject centred with margin (the card centre-crops), sRGB, WebP, quality 82–85, 150–500 KB",
+};
+
 export type ImageSpecWarning = string;
 
 /**
