@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Minus, Plus, Trash2, ShoppingBag, ArrowRight, AlertTriangle } from "lucide-react";
+import { Trash2, ShoppingBag, ArrowRight, AlertTriangle } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { PriceTag } from "@/components/ui/primitives";
 import { CouponField } from "@/components/cart/coupon-field";
@@ -12,6 +12,8 @@ import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { QuantityStepper } from "@/components/ui/quantity-stepper";
+import { FreeShippingMeter } from "@/components/ui/free-shipping-meter";
 import { computeTotals } from "@/lib/pricing";
 
 export function CartView() {
@@ -29,11 +31,6 @@ export function CartView() {
     })),
     shipping: { freeThreshold: config.freeShippingThreshold, methods: config.shippingMethods },
   });
-  const freeShipPct =
-    config.freeShippingThreshold > 0
-      ? Math.min(100, Math.round((totals.subtotal / config.freeShippingThreshold) * 100))
-      : 100;
-
   if (!hydrated) {
     return <Skeleton className="h-64 rounded-lg" />;
   }
@@ -56,27 +53,13 @@ export function CartView() {
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_360px]">
       <div>
-        {!totals.freeShippingApplied ? (
-          <div className="mb-6 rounded-md border border-line bg-surface p-4">
-            <p className="text-sm text-ink-soft">
-              Add{" "}
-              <span className="font-semibold text-ink">
-                {formatPrice(totals.amountToFreeShipping)}
-              </span>{" "}
-              more for free standard shipping
-            </p>
-            <div className="mt-2.5 h-1.5 overflow-hidden rounded-full bg-surface-sunken">
-              <div
-                className="h-full rounded-full bg-clay transition-all duration-500"
-                style={{ width: `${freeShipPct}%` }}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="mb-6 rounded-md bg-sage-50 px-4 py-3 text-sm font-medium text-sage">
-            Your order qualifies for free standard shipping.
-          </div>
-        )}
+        <FreeShippingMeter
+          subtotal={totals.subtotal}
+          threshold={config.freeShippingThreshold}
+          applied={totals.freeShippingApplied}
+          remaining={totals.amountToFreeShipping}
+          className="mb-6"
+        />
 
         <ul className="divide-y divide-line border-y border-line">
           {lines.map((l) => (
@@ -117,27 +100,13 @@ export function CartView() {
                   {l.unavailable ? (
                     <span className="text-sm text-ink-faint">—</span>
                   ) : (
-                    <div className="inline-flex items-center rounded-sm border border-line-strong">
-                      <button
-                        onClick={() => setQuantity(l.variantId, l.quantity - 1)}
-                        disabled={l.quantity <= 1}
-                        className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                        aria-label="Decrease quantity"
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span className="w-9 text-center text-sm font-medium tabular-nums">
-                        {l.quantity}
-                      </span>
-                      <button
-                        onClick={() => setQuantity(l.variantId, l.quantity + 1)}
-                        disabled={l.quantity >= l.available}
-                        className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                        aria-label="Increase quantity"
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
+                    <QuantityStepper
+                      value={l.quantity}
+                      onChange={(n) => setQuantity(l.variantId, n)}
+                      max={l.available}
+                      size="sm"
+                      ariaLabel={`Quantity — ${l.name}`}
+                    />
                   )}
 
                   <div className="flex items-center gap-4">
@@ -170,7 +139,7 @@ export function CartView() {
 
       <aside className="lg:sticky lg:top-28 lg:h-fit">
         <div className="card-surface p-5">
-          <h2 className="text-lg">Order summary</h2>
+          <h2 className="text-subtitle">Order summary</h2>
           <div className="mt-4">
             <CouponField />
           </div>

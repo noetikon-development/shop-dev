@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Heart, Check, Truck, RotateCcw, Minus, Plus, ShoppingBag } from "lucide-react";
+import { Heart, Check, Truck, RotateCcw, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { Stars, PriceTag, ProductBadges } from "@/components/ui/primitives";
@@ -13,6 +13,7 @@ import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button } from "@/components/ui/button";
+import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
@@ -315,25 +316,13 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
         {/* Quantity + add */}
         <div className="mt-6 flex flex-wrap items-stretch gap-3">
-          <div className="inline-flex items-center rounded-sm border border-line-strong">
-            <button
-              onClick={() => setQty((q) => Math.max(1, q - 1))}
-              className="grid h-12 w-11 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-              disabled={qty <= 1}
-              aria-label="Decrease quantity"
-            >
-              <Minus size={15} />
-            </button>
-            <span className="w-10 text-center text-sm font-medium tabular-nums">{qty}</span>
-            <button
-              onClick={() => setQty((q) => Math.min(stock || 99, q + 1))}
-              className="grid h-12 w-11 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-              disabled={qty >= (stock || 99)}
-              aria-label="Increase quantity"
-            >
-              <Plus size={15} />
-            </button>
-          </div>
+          <QuantityStepper
+            value={qty}
+            onChange={setQty}
+            max={stock || 99}
+            size="md"
+            ariaLabel={`Quantity — ${product.name}`}
+          />
 
           <Button
             size="lg"

@@ -35,7 +35,7 @@ function renderInline(text: string, keyOf: () => string): ReactNode[] {
     else if (m[4] !== undefined) nodes.push(<em key={keyOf()}>{renderInline(m[4], keyOf)}</em>);
     else if (m[6] !== undefined)
       nodes.push(
-        <code key={keyOf()} className="rounded bg-surface-sunken px-1 py-0.5 text-[0.85em]">
+        <code key={keyOf()} className="rounded-sm bg-surface-sunken px-1 py-0.5 text-[0.85em]">
           {m[6]}
         </code>,
       );

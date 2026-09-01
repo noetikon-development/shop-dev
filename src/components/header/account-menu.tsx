@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { User, Package, Heart, MapPin, LogOut, KeyRound } from "lucide-react";
 import { signOut } from "@/lib/auth-actions";
 import { buttonClasses } from "@/components/ui/button";
+import { useDisclosure } from "@/lib/use-disclosure";
 
 export function AccountMenu({
   signedIn,
@@ -13,21 +13,16 @@ export function AccountMenu({
   signedIn: boolean;
   name?: string | null;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onClick);
-    return () => document.removeEventListener("mousedown", onClick);
-  }, []);
+  const { open, setOpen, toggle, triggerRef, contentRef } = useDisclosure<
+    HTMLButtonElement,
+    HTMLDivElement
+  >();
 
   return (
-    <div ref={ref} className="relative">
+    <div className="relative">
       <button
-        onClick={() => setOpen((v) => !v)}
+        ref={triggerRef}
+        onClick={toggle}
         className="grid h-10 w-10 tap place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
         aria-label="Account"
         aria-expanded={open}
@@ -36,7 +31,10 @@ export function AccountMenu({
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-md border border-line bg-paper py-1.5 shadow-pop">
+        <div
+          ref={contentRef}
+          className="absolute right-0 top-full z-50 mt-2 w-56 overflow-hidden rounded-md border border-line bg-paper py-1.5 shadow-pop"
+        >
           {signedIn ? (
             <>
               <p className="px-3.5 py-2 text-xs text-ink-faint">

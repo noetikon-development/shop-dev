@@ -1,7 +1,5 @@
-import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ChevronRight } from "lucide-react";
 import {
   getProductBySlug,
   getProductReviews,
@@ -11,6 +9,7 @@ import {
 import { getCurrentUser } from "@/lib/auth";
 import { reviewEligibility, getMyReview } from "@/lib/reviews";
 import { getPublicQA, getMyQuestions } from "@/lib/qa";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { ProductViewer } from "@/components/pdp/product-viewer";
 import { DetailsAccordion } from "@/components/pdp/details-accordion";
 import { Reviews } from "@/components/pdp/reviews";
@@ -70,17 +69,13 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
   return (
     <div className="pb-10">
       <div className="container-page py-5">
-        <nav className="flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
-          <Link href="/" className="hover:text-ink">
-            Home
-          </Link>
-          <ChevronRight size={12} />
-          <Link href={`/c/${product.categorySlug}`} className="hover:text-ink">
-            {product.categoryName}
-          </Link>
-          <ChevronRight size={12} />
-          <span className="text-ink">{product.name}</span>
-        </nav>
+        <Breadcrumbs
+          items={[
+            { label: "Home", href: "/" },
+            { label: product.categoryName, href: `/c/${product.categorySlug}` },
+            { label: product.name },
+          ]}
+        />
       </div>
 
       <div className="container-page">
@@ -90,8 +85,8 @@ export default async function ProductPage({ params }: PageProps<"/p/[slug]">) {
       {/* Details */}
       <div className="container-page mt-16 grid gap-12 lg:grid-cols-[1fr_1.4fr] lg:gap-20">
         <div>
-          <h2 className="text-2xl sm:text-title">About this piece</h2>
-          <div className="mt-4 space-y-4 text-[15px] leading-relaxed text-ink-soft">
+          <h2 className="text-subtitle sm:text-title">About this piece</h2>
+          <div className="mt-4 space-y-4 text-body text-ink-soft">
             {product.description.split("\n").map((para, i) => (
               <p key={i}>{para}</p>
             ))}

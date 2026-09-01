@@ -18,6 +18,11 @@
   --color-ink-faint: #6f6a60;
   --color-line: #e6e0d7;
   --color-line-strong: #d6cec1;
+  /* Perceivable border for interactive form controls (inputs, selects,
+     radio cards, the quantity stepper). Meets WCAG 1.4.11 non-text
+     contrast (>=3:1) on paper / surface / sunken, where the quiet
+     --color-line-strong (~1.2:1 on paper) does not. */
+  --color-field-border: #8a8170;
 
   --color-clay: #b5533a;
   --color-clay-dark: #8f4231;
@@ -50,8 +55,20 @@
   --text-subtitle: 1.25rem; --text-subtitle--line-height: 1.3;
   --text-body: 0.9375rem;   --text-body--line-height: 1.6;
   --text-meta: 0.8125rem;   --text-meta--line-height: 1.5;
+  /* micro: badges, chips, counters — the one step below meta. Matches the
+     .eyebrow size so proper-noun eyebrows and merch badges share a scale. */
+  --text-micro: 0.6875rem;  --text-micro--line-height: 1.4;
 
-  /* Radii — restrained, not pill-y */
+  /* Radii — restrained, not pill-y. Canonical rule:
+       lg  — large editorial surfaces: hero, feature cards, PDP gallery,
+             empty states
+       md  — cards & panels: product-card image, category tile, .card-surface,
+             cart / checkout summary, mega-menu panel, notice boxes
+       sm  — controls & small elements: buttons, inputs, chips, thumbnails,
+             skeletons, inline code
+       full — pills, swatches, avatars, progress bars
+     Bare `rounded` (4px) and `rounded-xs` are retired from the storefront —
+     fold into `sm`. `--radius-xs` is kept only for the admin panel. */
   --radius-xs: 3px;
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -189,7 +206,7 @@
   .field {
     width: 100%;
     background: var(--color-surface);
-    border: 1px solid var(--color-line-strong);
+    border: 1px solid var(--color-field-border);
     border-radius: var(--radius-sm);
     padding: 0.8125rem 0.9375rem;
     font-size: 0.9375rem;

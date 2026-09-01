@@ -33,7 +33,7 @@ export function Reviews({
 
   return (
     <section id="reviews" className="scroll-mt-28">
-      <h2 className="text-2xl">Reviews</h2>
+      <h2 className="text-subtitle sm:text-title">Reviews</h2>
 
       <div className="mt-6 grid gap-8 sm:grid-cols-[220px_1fr] sm:gap-12">
         <div>

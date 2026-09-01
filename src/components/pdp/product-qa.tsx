@@ -66,7 +66,7 @@ export function ProductQA({
   return (
     <section id="qa" className="scroll-mt-28">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-2xl">Questions &amp; answers</h2>
+        <h2 className="text-subtitle sm:text-title">Questions &amp; answers</h2>
         {signedIn ? (
           !asking && (
             <button type="button" onClick={() => setAsking(true)} className="btn btn-outline py-2 text-sm">

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Minus, Plus, Trash2, ShoppingBag, AlertTriangle } from "lucide-react";
+import { Trash2, ShoppingBag, AlertTriangle } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
 import { ProductImage } from "@/components/product-image";
 import { useCart } from "@/lib/cart-store";
@@ -10,6 +10,8 @@ import { computeTotals } from "@/lib/pricing";
 import { formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button, buttonClasses } from "@/components/ui/button";
+import { QuantityStepper } from "@/components/ui/quantity-stepper";
+import { FreeShippingMeter } from "@/components/ui/free-shipping-meter";
 
 export function CartDrawer() {
   const { cartOpen, closeCart } = useUI();
@@ -29,11 +31,6 @@ export function CartDrawer() {
     couponCode: coupon?.code ?? null,
     shipping: { freeThreshold: config.freeShippingThreshold, methods: config.shippingMethods },
   });
-
-  const freeShipPct =
-    config.freeShippingThreshold > 0
-      ? Math.min(100, Math.round((totals.subtotal / config.freeShippingThreshold) * 100))
-      : 100;
 
   return (
     <SlideOver
@@ -97,27 +94,14 @@ export function CartDrawer() {
         </div>
       ) : (
         <div className="px-5 py-4">
-          {!totals.freeShippingApplied ? (
-            <div className="mb-4 rounded-md bg-surface p-3">
-              <p className="text-xs text-ink-soft">
-                You&apos;re{" "}
-                <span className="font-semibold text-ink">
-                  {formatPrice(totals.amountToFreeShipping)}
-                </span>{" "}
-                away from free shipping
-              </p>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-surface-sunken">
-                <div
-                  className="h-full rounded-full bg-clay transition-all duration-500"
-                  style={{ width: `${freeShipPct}%` }}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="mb-4 rounded-md bg-sage-50 p-3 text-xs font-medium text-sage">
-              You&apos;ve unlocked free shipping.
-            </div>
-          )}
+          <FreeShippingMeter
+            subtotal={totals.subtotal}
+            threshold={config.freeShippingThreshold}
+            applied={totals.freeShippingApplied}
+            remaining={totals.amountToFreeShipping}
+            size="sm"
+            className="mb-4"
+          />
 
           <ul className="divide-y divide-line">
             {lines.map((l) => (
@@ -156,27 +140,13 @@ export function CartDrawer() {
                     </p>
                   ) : (
                     <div className="mt-2 flex items-center justify-between">
-                      <div className="inline-flex items-center rounded-sm border border-line-strong">
-                        <button
-                          onClick={() => setQuantity(l.variantId, l.quantity - 1)}
-                          className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                          disabled={l.quantity <= 1}
-                          aria-label="Decrease quantity"
-                        >
-                          <Minus size={13} />
-                        </button>
-                        <span className="w-7 text-center text-xs font-medium tabular-nums">
-                          {l.quantity}
-                        </span>
-                        <button
-                          onClick={() => setQuantity(l.variantId, l.quantity + 1)}
-                          className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
-                          disabled={l.quantity >= l.available}
-                          aria-label="Increase quantity"
-                        >
-                          <Plus size={13} />
-                        </button>
-                      </div>
+                      <QuantityStepper
+                        value={l.quantity}
+                        onChange={(n) => setQuantity(l.variantId, n)}
+                        max={l.available}
+                        size="sm"
+                        ariaLabel={`Quantity — ${l.name}`}
+                      />
                       <span className="text-sm font-medium tabular-nums">
                         {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
                       </span>

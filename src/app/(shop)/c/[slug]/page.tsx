@@ -1,11 +1,12 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { ChevronRight } from "lucide-react";
 import { getCategoryBySlug, listProducts } from "@/lib/data";
 import { getSiteSettings } from "@/lib/site-settings";
 import { parseListingParams, buildQuery, countActiveFilters } from "@/lib/listing-params";
 import { ProductGrid } from "@/components/product-grid";
+import { Breadcrumbs } from "@/components/ui/breadcrumbs";
+import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FilterControls } from "@/components/plp/filter-controls";
 import { FilterDrawer } from "@/components/plp/filter-drawer";
@@ -109,29 +110,18 @@ export default async function CategoryPage({ params, searchParams }: PageProps<"
 
   return (
     <div className="container-page py-6 sm:py-8">
-      {/* Breadcrumb */}
-      <nav className="flex flex-wrap items-center gap-1.5 text-xs text-ink-faint">
-        <Link href="/" className="hover:text-ink">
-          Home
-        </Link>
-        <ChevronRight size={12} />
-        {!special && cat?.parent ? (
-          <>
-            <Link href={`/c/${cat.parent.slug}`} className="hover:text-ink">
-              {cat.parent.name}
-            </Link>
-            <ChevronRight size={12} />
-            <span className="text-ink">{title}</span>
-          </>
-        ) : (
-          <span className="text-ink">{title}</span>
-        )}
-      </nav>
+      <Breadcrumbs
+        className="mb-4"
+        items={[
+          { label: "Home", href: "/" },
+          ...(!special && cat?.parent
+            ? [{ label: cat.parent.name, href: `/c/${cat.parent.slug}` }]
+            : []),
+          { label: title },
+        ]}
+      />
 
-      <header className="mt-4 max-w-2xl">
-        <h1 className="text-3xl sm:text-display">{title}</h1>
-        {description && <p className="mt-2.5 text-ink-soft">{description}</p>}
-      </header>
+      <PageHeader title={title} description={description ?? undefined} className="mb-0" />
 
       {/* Subcategory chips */}
       {!special && cat && cat.children.length > 0 && (

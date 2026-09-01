@@ -44,7 +44,7 @@ export function Stars({
         })}
       </span>
       {showNumber && (
-        <span className="text-xs font-medium tabular-nums">
+        <span className="text-meta font-medium tabular-nums">
           {value.toFixed(1)}
           {count != null && <span className="text-ink-faint"> ({count})</span>}
         </span>
@@ -66,9 +66,9 @@ export function PriceTag({
 }) {
   const pct = discountPercent(price, compareAt);
   const sizes = {
-    sm: "text-sm",
-    md: "text-base",
-    lg: "text-2xl",
+    sm: "text-body",
+    md: "text-subtitle",
+    lg: "text-title",
   };
   return (
     <span className={cn("inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5", className)}>
@@ -80,7 +80,7 @@ export function PriceTag({
           <span
             className={cn(
               "tabular-nums text-ink-faint line-through",
-              size === "lg" ? "text-base" : "text-xs",
+              size === "lg" ? "text-body" : "text-meta",
             )}
           >
             {formatPrice(compareAt!)}
@@ -109,7 +109,7 @@ export function ProductBadges({
           <span
             key={b}
             className={cn(
-              "rounded-xs px-2 py-1 text-[10px] font-semibold uppercase tracking-wider",
+              "rounded-sm px-2 py-1 text-micro font-semibold uppercase tracking-wider",
               meta.className,
             )}
           >
@@ -137,7 +137,7 @@ export function Pill({
   className?: string;
 }) {
   const cls = cn(
-    "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-sm transition-colors",
+    "inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-body transition-colors",
     active
       ? "border-ink bg-ink text-paper"
       : "border-line-strong bg-surface text-ink-soft hover:border-ink hover:text-ink",
@@ -175,12 +175,12 @@ export function SectionHeading({
     <div className={cn("flex items-end justify-between gap-4", className)}>
       <div>
         {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
-        <h2 className="text-2xl sm:text-title">{title}</h2>
+        <h2 className="text-subtitle sm:text-title">{title}</h2>
       </div>
       {action && (
         <Link
           href={action.href}
-          className="link-underline shrink-0 pb-1 text-sm font-medium text-ink-soft hover:text-ink"
+          className="link-underline shrink-0 pb-1 text-meta font-medium text-ink-soft hover:text-ink"
         >
           {action.label}
         </Link>

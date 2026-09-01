@@ -7,11 +7,12 @@ import { Lock, ShoppingBag, MapPin, Truck, CreditCard, Check, Tag, X } from "luc
 import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { Button, buttonClasses } from "@/components/ui/button";
+import { RadioCard } from "@/components/ui/radio-card";
 import { useCart } from "@/lib/cart-store";
 import { placeOrder } from "@/lib/checkout-actions";
 import { applyCoupon, removeCoupon } from "@/lib/cart-actions";
 import { countryName } from "@/lib/countries";
-import { formatPrice, cn } from "@/lib/utils";
+import { formatPrice } from "@/lib/utils";
 import type { CheckoutData } from "@/lib/checkout";
 import type { AddressDTO } from "@/lib/addresses";
 
@@ -176,37 +177,31 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
         <Section step={3} icon={<Truck size={15} />} title="Delivery method">
           <div className="space-y-3">
             {summary.shippingMethods.map((m) => (
-              <label
+              <RadioCard
                 key={m.id}
-                className={cn(
-                  "flex cursor-pointer items-center justify-between rounded-md border p-4 transition-colors",
-                  methodId === m.id ? "border-ink bg-surface" : "border-line-strong",
-                )}
+                name="delivery"
+                value={m.id}
+                checked={methodId === m.id}
+                onSelect={() => setMethodId(m.id)}
+                className="items-center"
               >
-                <span className="flex items-center gap-3">
-                  <input
-                    type="radio"
-                    name="delivery"
-                    checked={methodId === m.id}
-                    onChange={() => setMethodId(m.id)}
-                    className="accent-ink"
-                  />
+                <span className="flex flex-1 items-center justify-between gap-3">
                   <span>
                     <span className="block text-sm font-medium">{m.name}</span>
                     {m.description && (
                       <span className="block text-xs text-ink-faint">{m.description}</span>
                     )}
                   </span>
+                  <span className="shrink-0 text-sm font-medium tabular-nums">
+                    {m.effectiveRate === 0 ? "Free" : formatPrice(m.effectiveRate)}
+                    {m.freeApplied && (
+                      <span className="ml-1 text-xs font-normal text-ink-faint line-through">
+                        {formatPrice(m.rate)}
+                      </span>
+                    )}
+                  </span>
                 </span>
-                <span className="text-sm font-medium tabular-nums">
-                  {m.effectiveRate === 0 ? "Free" : formatPrice(m.effectiveRate)}
-                  {m.freeApplied && (
-                    <span className="ml-1 text-xs font-normal text-ink-faint line-through">
-                      {formatPrice(m.rate)}
-                    </span>
-                  )}
-                </span>
-              </label>
+              </RadioCard>
             ))}
           </div>
         </Section>
@@ -356,21 +351,15 @@ function AddressRadioList({
         {addresses.map((a) => {
           const isDefault = markerFor === "shipping" ? a.defaultShipping : a.defaultBilling;
           return (
-            <label
+            <RadioCard
               key={a.id}
-              className={cn(
-                "flex cursor-pointer gap-3 rounded-md border p-3.5 text-sm transition-colors",
-                selectedId === a.id ? "border-ink bg-surface" : "border-line-strong",
-              )}
+              name={`addr-${markerFor}`}
+              value={a.id}
+              checked={selectedId === a.id}
+              onSelect={onSelect}
+              align="start"
             >
-              <input
-                type="radio"
-                name={`addr-${markerFor}`}
-                checked={selectedId === a.id}
-                onChange={() => onSelect(a.id)}
-                className="mt-0.5 accent-ink"
-              />
-              <span className="min-w-0">
+              <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
                   <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
                     {a.label}
@@ -393,7 +382,7 @@ function AddressRadioList({
                   {countryName(a.country)} · {a.phone}
                 </span>
               </span>
-            </label>
+            </RadioCard>
           );
         })}
       </div>

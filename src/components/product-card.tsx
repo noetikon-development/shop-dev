@@ -79,20 +79,20 @@ export function ProductCard({
             type="button"
             onClick={quickAdd}
             disabled={adding}
-            className="absolute inset-x-3 bottom-3 flex translate-y-2 items-center justify-center gap-1.5 rounded-sm bg-ink/95 py-2.5 text-xs font-medium text-paper opacity-0 backdrop-blur transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 focus-visible:translate-y-0 focus-visible:opacity-100 disabled:opacity-60"
+            className="absolute inset-x-3 bottom-3 flex translate-y-2 items-center justify-center gap-1.5 rounded-sm bg-ink/95 py-2.5 text-meta font-medium text-paper opacity-0 backdrop-blur transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 focus-visible:translate-y-0 focus-visible:opacity-100 disabled:opacity-60"
           >
             <Plus size={14} /> {adding ? "Adding…" : "Quick add"}
           </button>
         )}
 
         {!product.inStock && (
-          <div className="absolute inset-x-3 bottom-3 rounded-sm bg-surface/95 py-2 text-center text-xs font-medium text-ink-soft">
+          <div className="absolute inset-x-3 bottom-3 rounded-sm bg-surface/95 py-2 text-center text-meta font-medium text-ink-soft">
             Out of stock
           </div>
         )}
 
         {product.inStock && product.stockStatus === "LOW_STOCK" && (
-          <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-[10px] font-medium text-warning backdrop-blur">
+          <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-micro font-medium text-warning backdrop-blur">
             Low stock
           </div>
         )}
@@ -100,18 +100,18 @@ export function ProductCard({
 
       <div className="mt-3.5 flex flex-1 flex-col">
         {showCategory && (
-          <p className="eyebrow mb-1 !text-[10px]">{product.categoryName}</p>
+          <p className="eyebrow mb-1">{product.categoryName}</p>
         )}
-        <h3 className="text-[0.95rem] font-medium leading-snug text-ink">
+        <h3 className="text-body font-medium leading-snug text-ink">
           <Link href={href} className="link-underline">
             {product.name}
           </Link>
         </h3>
-        <p className="mt-1 line-clamp-1 text-[13px] text-ink-faint">{product.shortDescription}</p>
+        <p className="mt-1 line-clamp-1 text-meta text-ink-faint">{product.shortDescription}</p>
 
         <div className="mt-2.5 flex items-center gap-2">
           <Stars value={product.ratingAvg} size={13} showNumber={false} />
-          <span className="text-[11px] text-ink-faint">
+          <span className="text-micro text-ink-faint">
             {product.ratingAvg.toFixed(1)} · {compactNumber(product.soldCount)} sold
           </span>
         </div>
@@ -128,7 +128,7 @@ export function ProductCard({
                 />
               ))}
               {product.colorSwatches.length > 4 && (
-                <span className="text-[10px] text-ink-faint">
+                <span className="text-micro text-ink-faint">
                   +{product.colorSwatches.length - 4}
                 </span>
               )}
@@ -137,7 +137,7 @@ export function ProductCard({
         </div>
 
         {product.freeShipping && (
-          <p className="mt-2 text-[11px] font-medium text-success">Free shipping</p>
+          <p className="mt-2 text-micro font-medium text-success">Free shipping</p>
         )}
       </div>
     </div>
