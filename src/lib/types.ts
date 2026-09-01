@@ -102,6 +102,8 @@ export type ResolvedNavItem = {
   /** From the referenced category (mega-menu panel copy); null for plain links. */
   description: string | null;
   heroColor: string | null;
+  /** CMS category image for the mega-menu panel; null → quiet heroColor fallback. */
+  imageUrl: string | null;
   /** True when the destination is the Sale collection — preserves the accent styling. */
   isSale: boolean;
   children: ResolvedNavChild[];

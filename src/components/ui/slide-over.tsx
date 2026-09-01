@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -21,14 +21,21 @@ export function SlideOver({
   children: React.ReactNode;
   footer?: React.ReactNode;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     document.addEventListener("keydown", onKey);
     document.body.style.overflow = "hidden";
+    // Move focus into the panel so keyboard users land inside the drawer.
+    panelRef.current?.focus();
     return () => {
       document.removeEventListener("keydown", onKey);
       document.body.style.overflow = "";
+      // Return focus to whatever opened the drawer.
+      previouslyFocused?.focus?.();
     };
   }, [open, onClose]);
 
@@ -42,10 +49,12 @@ export function SlideOver({
     >
       <div className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={onClose} />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
+        tabIndex={-1}
         className={cn(
-          "absolute inset-y-0 flex w-full flex-col bg-paper shadow-pop transition-transform duration-300 ease-[cubic-bezier(.16,1,.3,1)]",
+          "absolute inset-y-0 flex w-full flex-col bg-paper shadow-pop outline-none transition-transform duration-300 ease-[cubic-bezier(.16,1,.3,1)]",
           width,
           side === "right"
             ? cn("right-0", open ? "translate-x-0" : "translate-x-full")

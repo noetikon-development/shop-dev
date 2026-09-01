@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { getSiteSettings } from "@/lib/site-settings";
 import { getResolvedNav } from "@/lib/navigation";
@@ -9,6 +8,7 @@ import { MenuTrigger } from "@/components/header/menu-trigger";
 import { HeaderSearch } from "@/components/header/search";
 import { AccountMenu } from "@/components/header/account-menu";
 import { CartButton, WishlistButton } from "@/components/header/cart-button";
+import { UtilityLinks } from "@/components/header/utility-links";
 
 export async function SiteHeader() {
   const [nav, user, settings] = await Promise.all([
@@ -56,15 +56,9 @@ export async function SiteHeader() {
             <HeaderSearch />
           </div>
 
-          <div className="hidden h-11 items-center justify-between xl:flex">
+          <div className="hidden h-11 items-center justify-between border-t border-line/70 xl:flex">
             <MegaMenu nav={nav} />
-            <div className="flex items-center gap-5 text-xs text-ink-faint">
-              {nav.utility.map((u) => (
-                <Link key={u.href} href={u.href} className="hover:text-ink">
-                  {u.label}
-                </Link>
-              ))}
-            </div>
+            <UtilityLinks links={nav.utility} />
           </div>
         </div>
       </header>

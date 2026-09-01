@@ -131,6 +131,7 @@ function resolveNav(
       href,
       description: cat?.description ?? null,
       heroColor: cat?.heroColor ?? null,
+      imageUrl: cat?.imageUrl ?? null,
       isSale: href === "/c/sale",
       children,
     });
