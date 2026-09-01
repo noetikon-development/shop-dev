@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Loader2, Plus, Trash2, RotateCcw } from "lucide-react";
+import { Loader2, Plus, Trash2, RotateCcw, ChevronUp, ChevronDown } from "lucide-react";
 import { Card, FormField, notify, usePersistentAction } from "@/components/admin/ui";
 import { saveFooterAction } from "@/lib/admin/content-footer-actions";
 import { type FooterActionState } from "@/lib/footer-defaults";
@@ -9,20 +9,25 @@ import type { FooterData } from "@/lib/content-blocks";
 
 const EMPTY: FooterActionState = {};
 
-type FooterLink = { label: string; href: string; enabled: boolean };
+export type FooterCategoryOption = { value: string; label: string; depth: number };
+
+type FooterLink = { label: string; href: string; enabled: boolean; categorySlug?: string };
 type Column = { heading: string; links: FooterLink[] };
 
-const BLANK_LINK: FooterLink = { label: "", href: "", enabled: true };
+const BLANK_LINK: FooterLink = { label: "", href: "", enabled: true, categorySlug: "" };
 
 export function FooterEditor({
   initial,
   fallback,
   canManage,
+  categoryOptions,
 }: {
   initial: FooterData | null;
   /** The built-in footer content, offered as a "reset to defaults" starting point. */
   fallback: FooterData;
   canManage: boolean;
+  /** Category / collection options for the Shop column's link references. */
+  categoryOptions: FooterCategoryOption[];
 }) {
   const { state, onSubmit, pending } = usePersistentAction<FooterActionState>(saveFooterAction, EMPTY);
   const doneRef = useRef(false);
@@ -129,10 +134,11 @@ export function FooterEditor({
 
         <ColumnEditor
           title="Shop column"
-          hint="Leave the links empty to show the top categories automatically."
+          hint="Pick a category for each link so the label can be renamed without ever breaking the destination. Leave every link empty to fall back to the top categories automatically."
           column={data.shopColumn}
           onChange={(c) => setColumn("shopColumn", c)}
           canManage={canManage}
+          categoryOptions={categoryOptions}
         />
         <ColumnEditor
           title="Help column"
@@ -221,12 +227,14 @@ function ColumnEditor({
   column,
   onChange,
   canManage,
+  categoryOptions,
 }: {
   title: string;
   hint?: string;
   column: Column;
   onChange: (c: Column) => void;
   canManage: boolean;
+  categoryOptions?: FooterCategoryOption[];
 }) {
   return (
     <Section title={title} hint={hint}>
@@ -243,6 +251,7 @@ function ColumnEditor({
         links={column.links}
         onChange={(links) => onChange({ ...column, links })}
         canManage={canManage}
+        categoryOptions={categoryOptions}
       />
     </Section>
   );
@@ -252,35 +261,63 @@ function LinkList({
   links,
   onChange,
   canManage,
+  categoryOptions,
 }: {
   links: FooterLink[];
   onChange: (links: FooterLink[]) => void;
   canManage: boolean;
+  categoryOptions?: FooterCategoryOption[];
 }) {
   const update = (i: number, patch: Partial<FooterLink>) =>
     onChange(links.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
   const remove = (i: number) => onChange(links.filter((_, idx) => idx !== i));
+  const move = (i: number, dir: -1 | 1) => {
+    const to = i + dir;
+    if (to < 0 || to >= links.length) return;
+    const next = [...links];
+    const [x] = next.splice(i, 1);
+    next.splice(to, 0, x);
+    onChange(next);
+  };
 
   return (
     <div className="space-y-2">
       {links.map((l, i) => (
-        <div key={i} className="flex items-center gap-2">
+        <div key={i} className="flex flex-wrap items-center gap-2">
           <input
             aria-label="Link label"
             placeholder="Label"
             disabled={!canManage}
-            className="field text-sm"
+            className="field min-w-32 flex-1 text-sm"
             value={l.label}
             onChange={(e) => update(i, { label: e.target.value })}
           />
-          <input
-            aria-label="Link destination"
-            placeholder="/pages/about or https://…"
-            disabled={!canManage}
-            className="field text-sm"
-            value={l.href}
-            onChange={(e) => update(i, { href: e.target.value })}
-          />
+          {categoryOptions && (
+            <select
+              aria-label="Category or collection"
+              disabled={!canManage}
+              className="field w-44 shrink-0 text-sm"
+              value={l.categorySlug ?? ""}
+              onChange={(e) => update(i, { categorySlug: e.target.value })}
+            >
+              <option value="">— Custom link —</option>
+              {categoryOptions.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.depth > 0 ? `  ${o.label}` : o.label}
+                </option>
+              ))}
+            </select>
+          )}
+          {!(categoryOptions && l.categorySlug) && (
+            <input
+              aria-label="Link destination"
+              placeholder="/pages/about or https://…"
+              disabled={!canManage}
+              className="field min-w-40 flex-1 text-sm"
+              value={l.href}
+              onChange={(e) => update(i, { href: e.target.value })}
+            />
+          )}
           <label className="flex shrink-0 items-center gap-1 text-xs text-ink-soft">
             <input
               type="checkbox"
@@ -291,6 +328,28 @@ function LinkList({
             />
             Shown
           </label>
+          {canManage && (
+            <span className="flex shrink-0 items-center">
+              <button
+                type="button"
+                onClick={() => move(i, -1)}
+                disabled={i === 0}
+                aria-label="Move up"
+                className="grid h-7 w-7 place-items-center text-ink-faint hover:text-ink disabled:opacity-30"
+              >
+                <ChevronUp size={14} />
+              </button>
+              <button
+                type="button"
+                onClick={() => move(i, 1)}
+                disabled={i === links.length - 1}
+                aria-label="Move down"
+                className="grid h-7 w-7 place-items-center text-ink-faint hover:text-ink disabled:opacity-30"
+              >
+                <ChevronDown size={14} />
+              </button>
+            </span>
+          )}
           {canManage && (
             <button
               type="button"

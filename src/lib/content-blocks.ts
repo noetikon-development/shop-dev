@@ -31,6 +31,13 @@ export const linkHref = z
     "Use an internal path (/c/all) or a full https:// URL.",
   );
 const mediaId = z.string().trim().max(40).regex(/^$|^[a-z0-9]{20,40}$/i, "Invalid image reference").default("");
+/** A category / virtual-collection slug the nav or footer references (destination is derived from it). */
+const categorySlugRef = z
+  .string()
+  .trim()
+  .max(120)
+  .regex(/^$|^[a-z0-9][a-z0-9-]*$/i, "Invalid category reference")
+  .default("");
 
 // --- per-type payload schemas ------------------------------------------------
 
@@ -117,6 +124,18 @@ export const categoryTilesSchema = z.object({
 export const footerLinkSchema = z.object({
   label: shortText.default(""),
   href: linkHref.default(""),
+  /**
+   * Optional Category / virtual-collection slug. When set, the footer derives
+   * the destination as `/c/<slug>` and ignores `href` — so an admin can rename
+   * the footer label without ever being able to break the category route.
+   * Backward compatible: links saved before Phase 5C simply omit it.
+   */
+  categorySlug: z
+    .string()
+    .trim()
+    .max(120)
+    .regex(/^$|^[a-z0-9][a-z0-9-]*$/i, "Invalid category reference")
+    .optional(),
   /** Hidden from the storefront when false — kept so it can be re-enabled. */
   enabled: z.boolean().default(true),
 });
@@ -146,6 +165,58 @@ export const footerSchema = z.object({
 
 export type FooterData = z.infer<typeof footerSchema>;
 
+// --- navigation (Phase 5C) -----------------------------------------------------
+//
+// A single `area:"global"` block (`nav.primary`). It drives the header
+// (desktop primary nav + mega-menu), the mobile menu and the header utility
+// links from ONE configuration — there is no separate desktop/mobile content.
+//
+// Destinations are NOT stored when a category can derive them: an item that
+// references a category slug always resolves to `/c/<slug>`, and the CMS
+// controls only the label, order and visibility. `Category` stays the single
+// source of truth for slugs / hierarchy / product relationships — this block
+// only *references* it.
+
+/** Header utility links whose route is owned by the app (label + visibility only). */
+export const NAV_UTILITY_KEYS = ["track", "promotions", "all-categories"] as const;
+export type NavUtilityKey = (typeof NAV_UTILITY_KEYS)[number];
+
+export const navChildSchema = z.object({
+  /** Display label. Blank falls back to the referenced category's name. */
+  label: shortText.default(""),
+  /** Category / virtual-collection slug — destination is derived as `/c/<slug>`. */
+  categorySlug: categorySlugRef,
+  /** Manual destination, only used when `categorySlug` is blank. */
+  href: linkHref.default(""),
+  enabled: z.boolean().default(true),
+});
+
+export const navItemSchema = z.object({
+  label: shortText.default(""),
+  categorySlug: categorySlugRef,
+  href: linkHref.default(""),
+  enabled: z.boolean().default(true),
+  /**
+   * Explicit dropdown children. Empty = derive the dropdown from the referenced
+   * category's sub-categories (or render the item as a plain link when it has
+   * none). Non-empty = use exactly these, in this order.
+   */
+  children: z.array(navChildSchema).max(40).default([]),
+});
+
+export const navUtilitySchema = z.object({
+  key: z.enum(NAV_UTILITY_KEYS),
+  label: shortText.default(""),
+  enabled: z.boolean().default(true),
+});
+
+export const navSchema = z.object({
+  items: z.array(navItemSchema).max(24).default([]),
+  utility: z.array(navUtilitySchema).max(8).default([]),
+});
+
+export type NavData = z.infer<typeof navSchema>;
+
 // --- registry --------------------------------------------------------------
 
 export type BlockTypeKey =
@@ -155,7 +226,8 @@ export type BlockTypeKey =
   | "value_props"
   | "rich_text"
   | "category_tiles"
-  | "footer";
+  | "footer"
+  | "navigation";
 
 export const BLOCK_TYPES: Record<
   BlockTypeKey,
@@ -168,14 +240,19 @@ export const BLOCK_TYPES: Record<
   value_props: { label: "Value props", description: "The row of short reassurance points (shipping, returns…).", schema: valuePropsSchema },
   rich_text: { label: "Rich text", description: "A heading and a block of formatted text.", schema: richTextSchema },
   footer: { label: "Footer", description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.", schema: footerSchema },
+  navigation: { label: "Navigation", description: "The header menu, mega-menu and mobile menu — labels, order and visibility.", schema: navSchema },
 };
 
 export const BLOCK_TYPE_KEYS = Object.keys(BLOCK_TYPES) as BlockTypeKey[];
 
-/** Block types an admin can add as a homepage section (footer is site-wide, edited on its own page). */
+/**
+ * Block types an admin can add as a homepage section. The site-wide blocks
+ * (`footer`, `navigation`) are edited on their own pages, never added to a page.
+ */
+export const SITE_WIDE_BLOCK_TYPE_KEYS = ["footer", "navigation"] as const;
 export const HOMEPAGE_BLOCK_TYPE_KEYS = BLOCK_TYPE_KEYS.filter(
-  (k) => k !== "footer",
-) as Exclude<BlockTypeKey, "footer">[];
+  (k) => !(SITE_WIDE_BLOCK_TYPE_KEYS as readonly string[]).includes(k),
+) as Exclude<BlockTypeKey, "footer" | "navigation">[];
 
 export function isBlockType(v: string): v is BlockTypeKey {
   return v in BLOCK_TYPES;

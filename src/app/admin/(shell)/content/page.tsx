@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, LayoutTemplate, ImageIcon, PanelBottom } from "lucide-react";
+import { FileText, LayoutTemplate, ImageIcon, PanelBottom, PanelTop } from "lucide-react";
 import { requireAnyPermission } from "@/lib/admin/rbac";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, Card } from "@/components/admin/ui";
@@ -10,7 +10,7 @@ export const metadata: Metadata = { title: "Content" };
 export default async function AdminContentHubPage() {
   await requireAnyPermission(["view_content"]);
 
-  const [pageCount, publishedPages, blockCount, publishedBlocks, mediaCount, footerBlock] =
+  const [pageCount, publishedPages, blockCount, publishedBlocks, mediaCount, footerBlock, navBlock] =
     await Promise.all([
       prisma.contentPage.count(),
       prisma.contentPage.count({ where: { status: "PUBLISHED" } }),
@@ -18,6 +18,7 @@ export default async function AdminContentHubPage() {
       prisma.contentBlock.count({ where: { area: "homepage", status: "PUBLISHED" } }),
       prisma.mediaAsset.count(),
       prisma.contentBlock.findUnique({ where: { key: "footer.default" }, select: { status: true } }),
+      prisma.contentBlock.findUnique({ where: { key: "nav.primary" }, select: { status: true } }),
     ]);
 
   const cards = [
@@ -27,6 +28,13 @@ export default async function AdminContentHubPage() {
       title: "Homepage",
       body: `${publishedBlocks} of ${blockCount} section${blockCount === 1 ? "" : "s"} published`,
       hint: "Hero, product rails, feature cards and value props.",
+    },
+    {
+      href: "/admin/content/navigation",
+      icon: <PanelTop size={18} />,
+      title: "Navigation",
+      body: navBlock?.status === "PUBLISHED" ? "Published" : "Using built-in defaults",
+      hint: "Header menu, mega-menu and mobile menu — labels, order and visibility.",
     },
     {
       href: "/admin/content/footer",

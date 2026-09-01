@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
-import { getCategoryTree } from "@/lib/data";
 import { getSiteSettings } from "@/lib/site-settings";
+import { getResolvedNav } from "@/lib/navigation";
 import { Logo } from "@/components/logo";
 import { MegaMenu } from "@/components/header/mega-menu";
 import { MobileMenu } from "@/components/header/mobile-menu";
@@ -11,12 +11,11 @@ import { AccountMenu } from "@/components/header/account-menu";
 import { CartButton, WishlistButton } from "@/components/header/cart-button";
 
 export async function SiteHeader() {
-  const [tree, user, settings] = await Promise.all([
-    getCategoryTree(),
+  const [nav, user, settings] = await Promise.all([
+    getResolvedNav(),
     getCurrentUser(),
     getSiteSettings(),
   ]);
-  const featured = tree.filter((c) => c.featured);
   const displayName = user?.name?.split(" ")[0] ?? user?.email?.split("@")[0];
   const announcements = settings.announcements;
 
@@ -58,23 +57,19 @@ export async function SiteHeader() {
           </div>
 
           <div className="hidden h-11 items-center justify-between xl:flex">
-            <MegaMenu tree={featured} />
+            <MegaMenu nav={nav} />
             <div className="flex items-center gap-5 text-xs text-ink-faint">
-              <Link href="/track" className="hover:text-ink">
-                Track order
-              </Link>
-              <Link href="/promotions" className="hover:text-ink">
-                Promotions
-              </Link>
-              <Link href="/c/all" className="hover:text-ink">
-                All categories
-              </Link>
+              {nav.utility.map((u) => (
+                <Link key={u.href} href={u.href} className="hover:text-ink">
+                  {u.label}
+                </Link>
+              ))}
             </div>
           </div>
         </div>
       </header>
 
-      <MobileMenu tree={tree} signedIn={Boolean(user)} />
+      <MobileMenu nav={nav} signedIn={Boolean(user)} />
     </>
   );
 }

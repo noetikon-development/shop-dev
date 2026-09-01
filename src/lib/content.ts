@@ -4,8 +4,10 @@ import { prisma } from "@/lib/prisma";
 import {
   parseBlockData,
   footerSchema,
+  navSchema,
   type BlockTypeKey,
   type FooterData,
+  type NavData,
 } from "@/lib/content-blocks";
 
 /**
@@ -136,4 +138,29 @@ function safeJson(raw: string): unknown {
 
 export function getFooterBlock(): Promise<FooterData | null> {
   return loadFooterBlock();
+}
+
+/**
+ * The primary-navigation content (Phase 5C). One PUBLISHED `area:"global"`
+ * block keyed `nav.primary`. Returns `null` when the block is absent, not
+ * published or malformed — `getResolvedNav()` then falls back to the built-in
+ * navigation, so the header never loses its menu.
+ */
+const loadNavBlock = unstable_cache(
+  async (): Promise<NavData | null> => {
+    const row = await prisma.contentBlock.findFirst({
+      where: { area: "global", type: "navigation", status: "PUBLISHED" },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: { data: true },
+    });
+    if (!row) return null;
+    const parsed = navSchema.safeParse(safeJson(row.data));
+    return parsed.success ? parsed.data : null;
+  },
+  ["content-nav-block"],
+  { revalidate: 300, tags: ["content"] },
+);
+
+export function getNavBlock(): Promise<NavData | null> {
+  return loadNavBlock();
 }

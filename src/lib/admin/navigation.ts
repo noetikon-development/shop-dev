@@ -196,6 +196,15 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     live: true,
   },
   {
+    path: "/admin/content/navigation",
+    label: "Navigation",
+    description: "The header menu, mega-menu and mobile menu — labels, order and visibility.",
+    group: "content",
+    accepts: ["view_content"],
+    emptyLabel: "Navigation is using its built-in defaults.",
+    live: true,
+  },
+  {
     path: "/admin/content/footer",
     label: "Footer",
     description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.",

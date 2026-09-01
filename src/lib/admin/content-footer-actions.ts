@@ -5,7 +5,10 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { footerSchema } from "@/lib/content-blocks";
+import { getCategoryTree } from "@/lib/data";
 import { FOOTER_BLOCK_KEY, type FooterActionState } from "@/lib/footer-defaults";
+import { NAV_SPECIAL_SLUGS } from "@/lib/nav-defaults";
+import type { CategoryNode } from "@/lib/types";
 
 /**
  * Site-footer content administration (Phase 5A). Requires `manage_content`.
@@ -40,6 +43,24 @@ export async function saveFooterAction(
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "The footer content is invalid." };
   }
+
+  // A Shop-column link that references a category must reference a real one.
+  const referenced = parsed.data.shopColumn.links
+    .map((l) => l.categorySlug)
+    .filter((s): s is string => Boolean(s));
+  if (referenced.length > 0) {
+    const tree = await getCategoryTree();
+    const slugs = new Set<string>();
+    const walk = (n: CategoryNode) => {
+      slugs.add(n.slug);
+      n.children.forEach(walk);
+    };
+    tree.forEach(walk);
+    const known = (s: string) => slugs.has(s) || (NAV_SPECIAL_SLUGS as readonly string[]).includes(s);
+    const bad = referenced.find((s) => !known(s));
+    if (bad) return { ok: false, error: `Unknown category reference in the Shop column: ${bad}.` };
+  }
+
   const dataStr = JSON.stringify(parsed.data);
 
   const existing = await prisma.contentBlock.findUnique({ where: { key: FOOTER_BLOCK_KEY } });

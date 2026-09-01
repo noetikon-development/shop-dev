@@ -85,6 +85,33 @@ export type CategoryNode = {
   productCount?: number;
 };
 
+/**
+ * Fully-resolved primary navigation (Phase 5C). Produced server-side by
+ * `getResolvedNav()` from the `nav.primary` ContentBlock + the category tree,
+ * then handed to the header / mega-menu / mobile-menu as plain, safe data.
+ */
+export type ResolvedNavChild = {
+  label: string;
+  href: string;
+  productCount?: number;
+};
+
+export type ResolvedNavItem = {
+  label: string;
+  href: string;
+  /** From the referenced category (mega-menu panel copy); null for plain links. */
+  description: string | null;
+  heroColor: string | null;
+  /** True when the destination is the Sale collection — preserves the accent styling. */
+  isSale: boolean;
+  children: ResolvedNavChild[];
+};
+
+export type ResolvedNav = {
+  items: ResolvedNavItem[];
+  utility: { label: string; href: string }[];
+};
+
 export type ReviewView = {
   id: string;
   rating: number;

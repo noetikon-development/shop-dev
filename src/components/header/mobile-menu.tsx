@@ -6,13 +6,13 @@ import { ChevronRight, ChevronDown, User, Heart, Package } from "lucide-react";
 import { SlideOver } from "@/components/ui/slide-over";
 import { useUI } from "@/lib/ui-store";
 import { cn } from "@/lib/utils";
-import type { CategoryNode } from "@/lib/types";
+import type { ResolvedNav } from "@/lib/types";
 
 export function MobileMenu({
-  tree,
+  nav,
   signedIn,
 }: {
-  tree: CategoryNode[];
+  nav: ResolvedNav;
   signedIn: boolean;
 }) {
   const { menuOpen, toggleMenu } = useUI();
@@ -22,61 +22,60 @@ export function MobileMenu({
   return (
     <SlideOver open={menuOpen} onClose={close} title="Menu" side="left" width="max-w-sm">
       <div className="px-4 py-3">
-        <Link
-          href="/c/new"
-          onClick={close}
-          className="block border-b border-line py-3 text-[15px] font-medium"
-        >
-          New In
-        </Link>
-
-        {tree.map((cat) => (
-          <div key={cat.id} className="border-b border-line">
-            <div className="flex items-center">
-              <Link
-                href={`/c/${cat.slug}`}
-                onClick={close}
-                className="flex-1 py-3 text-[15px] font-medium"
-              >
-                {cat.name}
-              </Link>
-              <button
-                onClick={() => setExpanded(expanded === cat.id ? null : cat.id)}
-                aria-label={`Toggle ${cat.name}`}
-                className="grid h-9 w-9 tap place-items-center text-ink-soft"
-              >
-                <ChevronDown
-                  size={17}
-                  className={cn("transition-transform", expanded === cat.id && "rotate-180")}
-                />
-              </button>
+        {nav.items.map((item) =>
+          item.children.length === 0 ? (
+            <Link
+              key={item.href}
+              href={item.href}
+              onClick={close}
+              className={cn(
+                "block border-b border-line py-3 text-[15px] font-medium",
+                item.isSale && "text-sale",
+              )}
+            >
+              {item.label}
+            </Link>
+          ) : (
+            <div key={item.href} className="border-b border-line">
+              <div className="flex items-center">
+                <Link
+                  href={item.href}
+                  onClick={close}
+                  className="flex-1 py-3 text-[15px] font-medium"
+                >
+                  {item.label}
+                </Link>
+                <button
+                  onClick={() => setExpanded(expanded === item.href ? null : item.href)}
+                  aria-label={`Toggle ${item.label}`}
+                  aria-expanded={expanded === item.href}
+                  className="grid h-9 w-9 tap place-items-center text-ink-soft"
+                >
+                  <ChevronDown
+                    size={17}
+                    className={cn("transition-transform", expanded === item.href && "rotate-180")}
+                  />
+                </button>
+              </div>
+              {expanded === item.href && (
+                <ul className="pb-2">
+                  {item.children.map((child) => (
+                    <li key={child.href}>
+                      <Link
+                        href={child.href}
+                        onClick={close}
+                        className="flex items-center justify-between py-2 pl-3 pr-2 text-sm text-ink-soft"
+                      >
+                        {child.label}
+                        <ChevronRight size={14} className="text-ink-faint" />
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-            {expanded === cat.id && (
-              <ul className="pb-2">
-                {cat.children.map((child) => (
-                  <li key={child.id}>
-                    <Link
-                      href={`/c/${child.slug}`}
-                      onClick={close}
-                      className="flex items-center justify-between py-2 pl-3 pr-2 text-sm text-ink-soft"
-                    >
-                      {child.name}
-                      <ChevronRight size={14} className="text-ink-faint" />
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-        ))}
-
-        <Link
-          href="/c/sale"
-          onClick={close}
-          className="block border-b border-line py-3 text-[15px] font-medium text-sale"
-        >
-          Sale
-        </Link>
+          ),
+        )}
 
         <div className="mt-4 space-y-1">
           <Link

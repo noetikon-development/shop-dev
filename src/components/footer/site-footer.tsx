@@ -4,6 +4,8 @@ import { getSiteSettings } from "@/lib/site-settings";
 import { getPublishedPageSlugs, getFooterBlock } from "@/lib/content";
 import type { FooterData } from "@/lib/content-blocks";
 import { FOOTER_DEFAULTS } from "@/lib/footer-defaults";
+import { NAV_SPECIAL_SLUGS } from "@/lib/nav-defaults";
+import type { CategoryNode } from "@/lib/types";
 import { Logo } from "@/components/logo";
 import { NewsletterForm } from "@/components/footer/newsletter-form";
 
@@ -20,7 +22,18 @@ import { NewsletterForm } from "@/components/footer/newsletter-form";
  * fallback below keeps the footer rendering — it never disappears.
  */
 
-type FooterLink = { label: string; href: string; enabled: boolean };
+type FooterLink = { label: string; href: string; enabled: boolean; categorySlug?: string };
+
+/** Flatten the category tree to a set of every valid slug (roots + children). */
+function allCategorySlugs(tree: CategoryNode[]): Set<string> {
+  const set = new Set<string>();
+  const walk = (n: CategoryNode) => {
+    set.add(n.slug);
+    n.children.forEach(walk);
+  };
+  tree.forEach(walk);
+  return set;
+}
 
 export async function SiteFooter() {
   const [tree, settings, pageSlugs, block] = await Promise.all([
@@ -44,8 +57,27 @@ export async function SiteFooter() {
 
   const brandDescription = data.brandDescription || settings.description;
 
-  // Shop column: curated links from the block, or the category tree when empty.
-  const shopLinks: FooterLink[] = usable(data.shopColumn.links);
+  // Shop column (Phase 5C): an explicit, editable link list from the CMS wins.
+  // Each link may reference a category slug — the destination is then derived as
+  // `/c/<slug>` and can never be broken by editing the label. When the CMS list
+  // is empty (or every entry is unusable) the footer falls back to the category
+  // tree, so the Shop column never disappears.
+  const catSlugs = allCategorySlugs(tree);
+  const validSlug = (s: string) =>
+    catSlugs.has(s) || (NAV_SPECIAL_SLUGS as readonly string[]).includes(s);
+
+  const shopLinks: { label: string; href: string }[] = data.shopColumn.links
+    .filter((l) => l.enabled && l.label)
+    .map((l) => ({
+      label: l.label,
+      href: l.categorySlug && validSlug(l.categorySlug) ? `/c/${l.categorySlug}` : l.href,
+    }))
+    .filter((l) => {
+      if (!l.href) return false;
+      if (l.href.startsWith("/pages/")) return published.has(l.href.slice("/pages/".length));
+      return (l.href.startsWith("/") && !l.href.startsWith("//")) || /^https:\/\//i.test(l.href);
+    });
+
   const shopFromTree: { label: string; href: string }[] =
     shopLinks.length === 0
       ? [
@@ -98,12 +130,7 @@ export async function SiteFooter() {
           </div>
 
           <FooterCol title={data.shopColumn.heading || "Shop"}>
-            {shopFromTree.map((c, i) => (
-              <FooterLinkItem key={`s${i}`} href={c.href}>
-                {c.label}
-              </FooterLinkItem>
-            ))}
-            {shopLinks.map((l, i) => (
+            {(shopLinks.length > 0 ? shopLinks : shopFromTree).map((l, i) => (
               <FooterLinkItem key={`s${i}`} href={l.href}>
                 {l.label}
               </FooterLinkItem>
