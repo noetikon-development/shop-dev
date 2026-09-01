@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
+import { getStoreBrand } from "@/lib/site-settings";
 import type {
   CategoryNode,
   ProductCardView,
@@ -555,9 +556,9 @@ export const getRelatedProducts = unstable_cache(
 );
 
 /** First name only — keeps the public review identity minimal (Step 15 §32). */
-function reviewDisplayName(name: string | null): string {
+function reviewDisplayName(name: string | null, brand: string): string {
   const trimmed = (name ?? "").trim();
-  if (!trimmed) return "AXIARO customer";
+  if (!trimmed) return `${brand} customer`;
   return trimmed.split(/\s+/)[0];
 }
 
@@ -568,6 +569,7 @@ function reviewDisplayName(name: string | null): string {
  */
 export const getProductReviews = unstable_cache(
   async (productId: string): Promise<ReviewView[]> => {
+    const brand = await getStoreBrand();
     const rows = await prisma.review.findMany({
       where: { productId, status: "APPROVED" },
       orderBy: [{ verified: "desc" }, { createdAt: "desc" }],
@@ -579,7 +581,7 @@ export const getProductReviews = unstable_cache(
       rating: r.rating,
       title: r.title,
       body: r.body,
-      author: reviewDisplayName(r.user.name),
+      author: reviewDisplayName(r.user.name, brand),
       verified: r.verified,
       createdAt: r.createdAt.toISOString(),
     }));

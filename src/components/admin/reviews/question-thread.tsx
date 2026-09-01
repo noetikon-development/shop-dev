@@ -126,7 +126,7 @@ function AnswerComposer({ questionId }: { questionId: string }) {
   useEffect(() => {
     if (!state.ok || doneRef.current) return;
     doneRef.current = true;
-    notify.success("Answer posted as AXIARO Team");
+    notify.success("Answer posted as Axiaro Team");
     router.refresh();
   }, [state.ok, router]);
 
@@ -144,7 +144,7 @@ function AnswerComposer({ questionId }: { questionId: string }) {
         minLength={ANSWER_LIMITS.bodyMin}
         maxLength={ANSWER_LIMITS.bodyMax}
         className="field"
-        placeholder="Answer as AXIARO Team…"
+        placeholder="Answer as Axiaro Team…"
       />
       {state.fieldErrors?.body && <p className="text-xs text-clay">{state.fieldErrors.body}</p>}
       {state.error && !state.fieldErrors && <p className="text-xs text-clay">{state.error}</p>}
@@ -194,7 +194,7 @@ function AnswerRow({
     <li className="rounded-md border border-line p-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-ink">
-          {answer.official ? "AXIARO Team" : answer.author}
+          {answer.official ? "Axiaro Team" : answer.author}
         </span>
         <span className="flex items-center gap-2">
           <StatusBadge tone={answer.status === "APPROVED" ? "success" : "neutral"}>

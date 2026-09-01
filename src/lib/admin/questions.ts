@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getStoreBrand } from "@/lib/site-settings";
 
 /**
  * Admin read layer for Product Q&A moderation (Step 15). Uncached. Server-side
@@ -141,6 +142,7 @@ export async function getAdminQuestion(id: string) {
     },
   });
   if (!q) return null;
+  const brand = await getStoreBrand();
   return {
     id: q.id,
     body: q.body,
@@ -155,7 +157,7 @@ export async function getAdminQuestion(id: string) {
       authorType: a.authorType,
       official: a.authorType === "STORE",
       status: a.status as QAStatus,
-      author: a.author ? (a.author.name ?? a.author.email) : "AXIARO Team",
+      author: a.author ? (a.author.name ?? a.author.email) : `${brand} Team`,
       createdAt: a.createdAt.toISOString(),
       updatedAt: a.updatedAt.toISOString(),
     })),

@@ -23,7 +23,7 @@ export function AdminLoginForm() {
 
       <h1 className="mt-8 text-2xl">Administrator sign in</h1>
       <p className="mt-1.5 text-sm text-ink-soft">
-        Restricted area. Use your AXIARO account — access depends on your assigned role.
+        Restricted area. Use your Axiaro account — access depends on your assigned role.
       </p>
 
       <form action={formAction} className="mt-7 space-y-4">

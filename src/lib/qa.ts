@@ -1,20 +1,20 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { prisma } from "@/lib/prisma";
+import { getStoreBrand } from "@/lib/site-settings";
 
 /**
  * Product Q&A — read layer (Step 15).
  *
  * Public surfaces show APPROVED questions with their APPROVED answers only.
- * Official store answers are attributed to "AXIARO Team"; a customer answer is
- * shown by first name. The internal user id / email is never exposed.
+ * Official store answers are attributed to "<brand> Team" (brand from
+ * `store.brand`); a customer answer is shown by first name. The internal user
+ * id / email is never exposed.
  */
 
-export const QA_TEAM_NAME = "AXIARO Team";
-
-function firstName(name: string | null): string {
+function firstName(name: string | null, brand: string): string {
   const t = (name ?? "").trim();
-  return t ? t.split(/\s+/)[0] : "AXIARO customer";
+  return t ? t.split(/\s+/)[0] : `${brand} customer`;
 }
 
 export type PublicAnswer = {
@@ -35,6 +35,7 @@ export type PublicQuestion = {
 
 export const getPublicQA = unstable_cache(
   async (productId: string): Promise<PublicQuestion[]> => {
+    const brand = await getStoreBrand();
     const rows = await prisma.productQuestion.findMany({
       where: { productId, status: "APPROVED" },
       orderBy: { createdAt: "desc" },
@@ -60,13 +61,13 @@ export const getPublicQA = unstable_cache(
     return rows.map((q) => ({
       id: q.id,
       body: q.body,
-      author: firstName(q.user.name),
+      author: firstName(q.user.name, brand),
       createdAt: q.createdAt.toISOString(),
       answers: q.answers.map((a) => ({
         id: a.id,
         body: a.body,
         official: a.authorType === "STORE",
-        author: a.authorType === "STORE" ? QA_TEAM_NAME : firstName(a.author?.name ?? null),
+        author: a.authorType === "STORE" ? `${brand} Team` : firstName(a.author?.name ?? null, brand),
         createdAt: a.createdAt.toISOString(),
       })),
     }));

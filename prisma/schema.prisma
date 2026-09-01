@@ -249,7 +249,7 @@ model Product {
   id               String @id @default(cuid())
   name             String
   slug             String @unique
-  brand            String @default("AXIARO")
+  brand            String @default("Axiaro")
   shortDescription String
   description      String // long-form, supports line breaks
   categoryId       String
@@ -476,7 +476,7 @@ model ProductAnswer {
   id         String   @id @default(cuid())
   questionId String
   authorId   String? // the User who wrote it; null if that user is later deleted
-  authorType String   @default("STORE") // STORE (official "AXIARO Team") | CUSTOMER
+  authorType String   @default("STORE") // STORE (official "Axiaro Team") | CUSTOMER
   body       String
   status     String   @default("APPROVED") // STORE answers are official; still moderatable
   createdAt  DateTime @default(now())

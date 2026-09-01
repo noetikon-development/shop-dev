@@ -259,7 +259,7 @@ function MyQuestionRow({ question }: { question: MyQuestion }) {
           </div>
           {question.answers.filter((a) => a.status === "APPROVED").map((a) => (
             <p key={a.id} className="mt-2 border-l-2 border-line pl-3 text-sm text-ink-soft">
-              {a.official ? "AXIARO Team: " : "Answer: "}
+              {a.official ? "Axiaro Team: " : "Answer: "}
               {a.body}
             </p>
           ))}
