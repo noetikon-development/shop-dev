@@ -233,7 +233,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       {/* Summary + review */}
       <aside className="lg:sticky lg:top-28 lg:h-fit">
         <div className="card-surface p-5">
-          <h2 className="text-lg">Your order</h2>
+          <h2 className="text-subtitle">Your order</h2>
           <ul className="mt-4 max-h-64 space-y-3 overflow-y-auto pr-1">
             {summary.lines.map((l) => (
               <li key={l.variantId} className="flex gap-3">
@@ -433,7 +433,7 @@ function Section({
 }) {
   return (
     <section>
-      <h2 className="mb-4 flex items-center gap-3 text-lg">
+      <h2 className="mb-4 flex items-center gap-3 text-subtitle">
         <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-xs font-semibold text-paper">
           {step}
         </span>

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
 import { ProductArt } from "@/lib/product-art";
+import { getSiteSettings } from "@/lib/site-settings";
 
-export default function AuthLayout({ children }: { children: React.ReactNode }) {
+export default async function AuthLayout({ children }: { children: React.ReactNode }) {
+  const { tagline } = await getSiteSettings();
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <div className="flex flex-col px-6 py-8 sm:px-12">
@@ -34,9 +36,7 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
           ))}
         </div>
         <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-paper to-transparent p-12">
-          <p className="font-display text-2xl leading-tight text-ink">
-            Considered things for everyday living.
-          </p>
+          <p className="font-display text-2xl leading-tight text-ink">{tagline}</p>
         </div>
       </div>
     </div>
