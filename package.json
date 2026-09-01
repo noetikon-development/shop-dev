@@ -17,6 +17,7 @@
     "db:seed:cms": "node --env-file=.env --import tsx scripts/seed-cms.ts",
     "db:seed:footer": "node --env-file=.env --import tsx scripts/seed-footer.ts",
     "db:seed:nav": "node --env-file=.env --import tsx scripts/seed-navigation.ts",
+    "db:seed:editorial": "node --env-file=.env --import tsx scripts/seed-editorial.ts",
     "db:seed:legal": "node --env-file=.env --import tsx scripts/seed-legal-content.ts",
     "storage:setup": "node --env-file=.env scripts/setup-storage.mjs",
     "db:rls": "node --env-file=.env scripts/apply-rls.mjs",

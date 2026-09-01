@@ -138,6 +138,8 @@ export function BlockEditor({
         };
       case "rich_text":
         return { heading: g("rt-heading"), body: g("rt-body") };
+      case "editorial":
+        return { eyebrow: g("ed-eyebrow"), heading: g("ed-heading"), body: g("ed-body") };
       case "category_tiles":
         return { eyebrow: g("ct-eyebrow"), heading: g("ct-heading") };
       default:
@@ -349,6 +351,18 @@ export function BlockEditor({
         <Card className="space-y-4">
           <Text id="rt-heading" label="Heading (optional)" d={d.heading} />
           <Area id="rt-body" label="Body (Markdown)" d={d.body} rows={8} />
+        </Card>
+      )}
+
+      {type === "editorial" && (
+        <Card className="space-y-4">
+          <Text id="ed-eyebrow" label="Eyebrow (optional)" d={d.eyebrow} />
+          <Text id="ed-heading" label="Statement" d={d.heading} placeholder="One quiet line between product sections" />
+          <Area id="ed-body" label="Sub-text (optional)" d={d.body} rows={2} />
+          <p className="text-xs text-ink-faint">
+            A full-width editorial pause — keep it to a single line and let it breathe. Not a
+            promotion; don&apos;t put prices or offers here.
+          </p>
         </Card>
       )}
 

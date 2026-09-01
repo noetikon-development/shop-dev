@@ -4,20 +4,35 @@ import { useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { ProductCard } from "@/components/product-card";
 import { SectionHeading } from "@/components/ui/primitives";
+import { cn } from "@/lib/utils";
 import type { ProductCardView } from "@/lib/types";
 
+/**
+ * A homepage product section (Phase 5D Stage 5).
+ *
+ * The three homepage rails share this component but read differently:
+ *   - `scroller` (default) — a swipeable strip; the discovery rhythm.
+ *   - `grid` — a static grid on desktop (still a strip on mobile); "here's the
+ *     set, laid out to browse".
+ *   - `compact` gives it a smaller heading and a tighter footprint — used for
+ *     the sale rail at the foot of the page.
+ */
 export function ProductRail({
   eyebrow,
   title,
   action,
   products,
   showCategory,
+  variant = "scroller",
+  compact = false,
 }: {
   eyebrow?: string;
   title: string;
   action?: { label: string; href: string };
   products: ProductCardView[];
   showCategory?: boolean;
+  variant?: "scroller" | "grid";
+  compact?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -29,31 +44,47 @@ export function ProductRail({
 
   if (!products.length) return null;
 
-  return (
-    <section className="container-page">
+  const isGrid = variant === "grid";
+
+  const body = (
+    <>
       <div className="flex items-end justify-between gap-4">
-        <SectionHeading eyebrow={eyebrow} title={title} action={action} className="flex-1" />
-        <div className="hidden gap-2 sm:flex">
-          <button
-            onClick={() => scroll(-1)}
-            className="grid h-9 w-9 tap place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
-            aria-label="Scroll left"
-          >
-            <ChevronLeft size={16} />
-          </button>
-          <button
-            onClick={() => scroll(1)}
-            className="grid h-9 w-9 tap place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
-            aria-label="Scroll right"
-          >
-            <ChevronRight size={16} />
-          </button>
-        </div>
+        <SectionHeading
+          eyebrow={eyebrow}
+          title={title}
+          action={action}
+          size={compact ? "sm" : "default"}
+          className="flex-1"
+        />
+        {!isGrid && (
+          <div className="hidden gap-2 sm:flex">
+            <button
+              type="button"
+              onClick={() => scroll(-1)}
+              className="tap grid h-9 w-9 place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
+              aria-label={`Scroll ${title} left`}
+            >
+              <ChevronLeft size={16} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              onClick={() => scroll(1)}
+              className="tap grid h-9 w-9 place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
+              aria-label={`Scroll ${title} right`}
+            >
+              <ChevronRight size={16} aria-hidden="true" />
+            </button>
+          </div>
+        )}
       </div>
 
       <div
         ref={scroller}
-        className="no-scrollbar -mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0"
+        className={cn(
+          "no-scrollbar -mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0",
+          isGrid &&
+            "lg:grid lg:grid-cols-5 lg:gap-x-4 lg:gap-y-9 lg:overflow-visible lg:px-0",
+        )}
       >
         {products.map((p, i) => (
           <ProductCard
@@ -61,10 +92,18 @@ export function ProductRail({
             product={p}
             showCategory={showCategory}
             priority={i < 4}
-            className="w-[58vw] shrink-0 snap-start sm:w-[42vw] md:w-[30vw] lg:w-[calc((100%-3rem)/4)]"
+            className={cn(
+              "shrink-0 snap-start",
+              compact
+                ? "w-[52vw] sm:w-[38vw] md:w-[27vw] lg:w-[calc((100%-4.5rem)/4.5)]"
+                : "w-[58vw] sm:w-[42vw] md:w-[30vw] lg:w-[calc((100%-3rem)/4)]",
+              isGrid && "lg:w-auto",
+            )}
           />
         ))}
       </div>
-    </section>
+    </>
   );
+
+  return <section className="container-page">{body}</section>;
 }

@@ -114,6 +114,17 @@ export const categoryTilesSchema = z.object({
   heading: shortText.default(""),
 });
 
+/**
+ * A quiet full-width statement between product-led sections (Phase 5D Stage 5)
+ * — an editorial pause, not a promo. One line of display type, plenty of
+ * whitespace. No image, no card, no CTA required.
+ */
+export const editorialSchema = z.object({
+  eyebrow: shortText.default(""),
+  heading: shortText.default(""),
+  body: longText.default(""),
+});
+
 // --- footer (Phase 5A) -----------------------------------------------------
 //
 // A single `area:"global"` block (`footer.default`). Structured, editable
@@ -225,6 +236,7 @@ export type BlockTypeKey =
   | "product_rail"
   | "value_props"
   | "rich_text"
+  | "editorial"
   | "category_tiles"
   | "footer"
   | "navigation";
@@ -239,6 +251,7 @@ export const BLOCK_TYPES: Record<
   feature_grid: { label: "Feature cards", description: "Two or more editorial cards linking into the catalogue.", schema: featureGridSchema },
   value_props: { label: "Value props", description: "The row of short reassurance points (shipping, returns…).", schema: valuePropsSchema },
   rich_text: { label: "Rich text", description: "A heading and a block of formatted text.", schema: richTextSchema },
+  editorial: { label: "Editorial statement", description: "A quiet full-width line between product sections — an editorial pause.", schema: editorialSchema },
   footer: { label: "Footer", description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.", schema: footerSchema },
   navigation: { label: "Navigation", description: "The header menu, mega-menu and mobile menu — labels, order and visibility.", schema: navSchema },
 };

@@ -165,17 +165,21 @@ export function SectionHeading({
   title,
   action,
   className,
+  size = "default",
 }: {
   eyebrow?: string;
   title: string;
   action?: { label: string; href: string };
   className?: string;
+  size?: "default" | "sm";
 }) {
   return (
     <div className={cn("flex items-end justify-between gap-4", className)}>
       <div>
         {eyebrow && <p className="eyebrow mb-2">{eyebrow}</p>}
-        <h2 className="text-subtitle sm:text-title">{title}</h2>
+        <h2 className={size === "sm" ? "text-subtitle" : "text-subtitle sm:text-title"}>
+          {title}
+        </h2>
       </div>
       {action && (
         <Link

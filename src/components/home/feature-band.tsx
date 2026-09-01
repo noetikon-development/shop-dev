@@ -12,13 +12,19 @@ type Feature = {
   bg: string;
 };
 
+/**
+ * Built-in feature band — the structural fallback rendered by `page.tsx` only
+ * when NO homepage ContentBlocks are published. Copy is evergreen and links
+ * point at categories, not specific products; the real editorial cards live in
+ * the CMS `feature_grid` block. Safety net, not a content source.
+ */
 const FEATURES: Feature[] = [
   {
-    eyebrow: "The washable sofa",
-    title: "Aro, now in four new weaves",
-    copy: "Every cover unzips and goes in the machine. Spills, pets, kids — all fine.",
-    href: "/p/aro-3-seat-sofa",
-    cta: "Meet the Aro",
+    eyebrow: "Living",
+    title: "Sofas and seating built to be lived on",
+    copy: "Covers that unzip and machine-wash, frames made to last.",
+    href: "/c/living",
+    cta: "Shop living",
     art: "sofa",
     seed: "band-sofa",
     bg: "#e7ece6",
@@ -26,7 +32,7 @@ const FEATURES: Feature[] = [
   {
     eyebrow: "Wardrobe, edited",
     title: "The pieces you actually reach for",
-    copy: "A tight rotation of organic-cotton shirts, lambswool knits and hard-wearing shoes.",
+    copy: "A tight rotation of shirts, knitwear and hard-wearing shoes.",
     href: "/c/wardrobe",
     cta: "Shop the wardrobe",
     art: "outerwear",
@@ -46,9 +52,9 @@ export function FeatureBand() {
         >
           <div className="flex flex-col justify-center gap-3 p-8">
             <p className="eyebrow">{f.eyebrow}</p>
-            <h3 className="text-2xl">{f.title}</h3>
-            <p className="text-sm text-ink-soft">{f.copy}</p>
-            <span className="link-underline mt-1 w-fit text-sm font-medium">{f.cta} →</span>
+            <h3 className="text-subtitle sm:text-title">{f.title}</h3>
+            <p className="text-body text-ink-soft">{f.copy}</p>
+            <span className="link-underline mt-1 w-fit text-meta font-medium">{f.cta} →</span>
           </div>
           <div className="min-h-44" style={{ background: f.bg }}>
             <ProductArt kind={f.art} seed={f.seed} className="transition-transform duration-500 group-hover:scale-105" />

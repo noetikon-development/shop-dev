@@ -88,6 +88,8 @@ function blockSummary(type: string, data: Record<string, unknown>): string {
       return `${(data.items as unknown[] | undefined)?.length ?? 0} item(s)`;
     case "rich_text":
       return String(data.heading ?? "") || "Text block";
+    case "editorial":
+      return String(data.heading ?? "") || "Editorial statement";
     case "category_tiles":
       return "Category grid";
     case "footer": {

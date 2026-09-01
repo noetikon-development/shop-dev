@@ -88,7 +88,7 @@ const loadHomepageBlocks = unstable_cache(
     });
     return rows
       .filter((r): r is typeof r & { type: BlockTypeKey } =>
-        ["hero", "feature_grid", "product_rail", "value_props", "rich_text", "category_tiles"].includes(r.type),
+        ["hero", "feature_grid", "product_rail", "value_props", "rich_text", "editorial", "category_tiles"].includes(r.type),
       )
       .map((r) => ({
         id: r.id,

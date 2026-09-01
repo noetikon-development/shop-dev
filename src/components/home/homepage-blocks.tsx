@@ -66,6 +66,8 @@ export async function HomepageBlocks({
               return <ValuePropsBlock key={block.id} data={block.data} />;
             case "rich_text":
               return <RichTextBlock key={block.id} data={block.data} />;
+            case "editorial":
+              return <EditorialBlock key={block.id} data={block.data} />;
             default:
               return null;
           }
@@ -128,18 +130,18 @@ function HeroBlock({ data, media }: { data: Record<string, unknown>; media: Medi
   return (
     <section className="container-page pt-6 sm:pt-10">
       <div className="grid overflow-hidden rounded-lg border border-line bg-surface lg:grid-cols-2">
-        <div className="flex flex-col justify-center gap-6 p-8 sm:p-12 lg:p-16">
+        <div className="flex flex-col justify-center gap-5 p-8 sm:p-10 lg:px-14 lg:py-12">
           {str(data.eyebrow) && <p className="eyebrow">{str(data.eyebrow)}</p>}
           <h1 className="text-balance text-4xl sm:text-5xl lg:text-hero">
             {str(data.heading) || "Considered things for everyday living"}
           </h1>
           {str(data.body) && <p className="max-w-md text-pretty text-ink-soft">{str(data.body)}</p>}
-          <div className="flex flex-wrap gap-3 pt-1">
+          <div className="flex flex-wrap gap-3">
             <SafeCta label={str(data.ctaLabel)} href={str(data.ctaHref)} variant="primary" />
             <SafeCta label={str(data.secondaryCtaLabel)} href={str(data.secondaryCtaHref)} variant="outline" />
           </div>
           {notes.length > 0 && (
-            <div className="flex flex-wrap gap-x-8 gap-y-2 pt-4 text-xs text-ink-faint">
+            <div className="mt-1 flex flex-wrap gap-x-8 gap-y-2 text-meta text-ink-faint">
               {notes.map((n) => (
                 <span key={n}>{n}</span>
               ))}
@@ -147,7 +149,7 @@ function HeroBlock({ data, media }: { data: Record<string, unknown>; media: Medi
           )}
         </div>
 
-        <div className="relative min-h-[280px] bg-line">
+        <div className="relative h-[300px] bg-line max-lg:border-t max-lg:border-line lg:h-full">
           {useLegacySingle ? (
             <Image src={legacyUrl!} alt={str(data.heading) || "Featured"} fill className="object-cover" priority sizes="(max-width: 1024px) 100vw, 50vw" />
           ) : (
@@ -155,7 +157,7 @@ function HeroBlock({ data, media }: { data: Record<string, unknown>; media: Medi
               {HERO_PANEL_KINDS.map((kind, i) => {
                 const url = mediaUrlOf(media, panelIds[i]);
                 return (
-                  <div key={kind} className="relative aspect-square">
+                  <div key={kind} className="relative">
                     {url ? (
                       <Image
                         src={url}
@@ -197,6 +199,17 @@ async function ProductRailBlock({ data }: { data: Record<string, unknown> }) {
   if (!products.length) return null;
   const actionLabel = str(data.actionLabel);
   const actionHref = str(data.actionHref);
+
+  // Each homepage rail reads differently by its source: bestsellers laid out
+  // as a static grid ("here's the set"), the sale rail understated at the foot
+  // of the page, new arrivals as the open discovery scroller.
+  const style =
+    source === "bestsellers"
+      ? ({ variant: "grid" } as const)
+      : source === "on_sale"
+        ? ({ compact: true } as const)
+        : ({} as const);
+
   return (
     <ProductRail
       eyebrow={str(data.eyebrow) || undefined}
@@ -204,6 +217,7 @@ async function ProductRailBlock({ data }: { data: Record<string, unknown> }) {
       action={actionLabel && actionHref ? { label: actionLabel, href: actionHref } : undefined}
       products={products}
       showCategory
+      {...style}
     />
   );
 }
@@ -228,10 +242,10 @@ function FeatureGridBlock({
           <>
             <div className="flex flex-col justify-center gap-3 p-8">
               {str(f.eyebrow) && <p className="eyebrow">{str(f.eyebrow)}</p>}
-              <h3 className="text-2xl">{str(f.title)}</h3>
-              {str(f.body) && <p className="text-sm text-ink-soft">{str(f.body)}</p>}
+              <h3 className="text-subtitle sm:text-title">{str(f.title)}</h3>
+              {str(f.body) && <p className="text-body text-ink-soft">{str(f.body)}</p>}
               {str(f.ctaLabel) && (
-                <span className="link-underline mt-1 w-fit text-sm font-medium">{str(f.ctaLabel)} →</span>
+                <span className="link-underline mt-1 w-fit text-meta font-medium">{str(f.ctaLabel)} →</span>
               )}
             </div>
             <div className="relative min-h-44 bg-surface-sunken">
@@ -287,8 +301,8 @@ function ValuePropsBlock({ data }: { data: Record<string, unknown> }) {
             <div key={i} className="flex gap-3.5">
               <Icon size={22} strokeWidth={1.5} className="mt-0.5 shrink-0 text-clay" />
               <div>
-                <p className="text-sm font-medium">{str(p.title)}</p>
-                {str(p.body) && <p className="mt-1 text-xs text-ink-faint">{str(p.body)}</p>}
+                <p className="text-body font-medium">{str(p.title)}</p>
+                {str(p.body) && <p className="mt-1 text-meta text-ink-faint">{str(p.body)}</p>}
               </div>
             </div>
           );
@@ -306,8 +320,36 @@ function RichTextBlock({ data }: { data: Record<string, unknown> }) {
   return (
     <section className="container-page">
       {str(data.heading) && <SectionHeading title={str(data.heading)} />}
-      <div className="mt-4 max-w-2xl text-[15px]">
+      <div className="mt-4 max-w-2xl text-body">
         <Markdown source={body} />
+      </div>
+    </section>
+  );
+}
+
+// --- editorial statement --------------------------------------------------
+
+/**
+ * A quiet full-width pause between product sections (Phase 5D Stage 5). One
+ * line of display type, generous whitespace — no image, no card, no CTA.
+ */
+function EditorialBlock({ data }: { data: Record<string, unknown> }) {
+  const eyebrow = str(data.eyebrow);
+  const heading = str(data.heading);
+  const body = str(data.body);
+  if (!heading && !body) return null;
+  return (
+    <section className="border-y border-line" aria-label="Editorial">
+      <div className="container-page py-16 text-center sm:py-24">
+        {eyebrow && <p className="eyebrow mb-4">{eyebrow}</p>}
+        {heading && (
+          <h2 className="mx-auto max-w-3xl text-balance text-title text-ink sm:text-display">
+            {heading}
+          </h2>
+        )}
+        {body && (
+          <p className="mx-auto mt-4 max-w-xl text-pretty text-body text-ink-soft">{body}</p>
+        )}
       </div>
     </section>
   );
