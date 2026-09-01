@@ -33,6 +33,8 @@ export type StorefrontConfig = {
   standardShippingRate: number;
   /** Active shipping methods, current rates. */
   shippingMethods: StorefrontShippingMethod[];
+  /** `returns.windowDays` setting — used in PDP "N-day returns" copy. */
+  returnWindowDays: number;
 };
 
 export const STOREFRONT_CONFIG_FALLBACK: StorefrontConfig = {
@@ -44,6 +46,7 @@ export const STOREFRONT_CONFIG_FALLBACK: StorefrontConfig = {
     label: m.label,
     fee: m.fee,
   })),
+  returnWindowDays: 30,
 };
 
 const Ctx = createContext<StorefrontConfig>(STOREFRONT_CONFIG_FALLBACK);

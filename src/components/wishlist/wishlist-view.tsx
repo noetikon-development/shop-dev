@@ -8,6 +8,7 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { formatPrice } from "@/lib/utils";
 import { buttonClasses } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 import type { WishlistCard } from "@/lib/wishlist";
 
 export function WishlistView({ initialItems }: { initialItems: WishlistCard[] }) {
@@ -21,18 +22,16 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
 
   if (visible.length === 0) {
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <div className="grid h-14 w-14 place-items-center rounded-full bg-surface-sunken">
-          <Heart size={22} className="text-ink-faint" />
-        </div>
-        <h3 className="mt-4 text-lg">Your wishlist is empty</h3>
-        <p className="mt-1.5 max-w-sm text-sm text-ink-soft">
-          Tap the heart on any product to save it here for later.
-        </p>
-        <Link href="/c/all" className={buttonClasses({ className: "mt-5" })}>
-          Browse products
-        </Link>
-      </div>
+      <EmptyState
+        icon={<Heart size={22} />}
+        title="Your wishlist is empty"
+        message="Tap the heart on any product to save it here for later."
+        action={
+          <Link href="/c/all" className={buttonClasses()}>
+            Browse products
+          </Link>
+        }
+      />
     );
   }
 
@@ -58,7 +57,7 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
                   type="button"
                   onClick={() => toggle(p.id)}
                   aria-label="Remove from wishlist"
-                  className="absolute right-3 top-3 grid h-9 w-9 place-items-center rounded-full bg-surface/90 text-ink-soft backdrop-blur transition-colors hover:text-ink"
+                  className="absolute right-3 top-3 grid h-9 w-9 tap place-items-center rounded-full bg-surface/90 text-ink-soft backdrop-blur transition-colors hover:text-ink"
                 >
                   <X size={16} />
                 </button>

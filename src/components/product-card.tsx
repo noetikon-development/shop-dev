@@ -6,6 +6,7 @@ import { Heart, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { Stars, PriceTag, ProductBadges } from "@/components/ui/primitives";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useCart } from "@/lib/cart-store";
@@ -65,7 +66,7 @@ export function ProductCard({
             aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
             aria-pressed={wished}
             className={cn(
-              "pointer-events-auto grid h-9 w-9 place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors",
+              "pointer-events-auto grid h-9 w-9 tap place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors",
               wished ? "text-clay" : "text-ink-soft hover:text-ink",
             )}
           >
@@ -91,7 +92,7 @@ export function ProductCard({
         )}
 
         {product.inStock && product.stockStatus === "LOW_STOCK" && (
-          <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-[10px] font-medium text-[#8a5a1f] backdrop-blur">
+          <div className="pointer-events-none absolute left-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-[10px] font-medium text-warning backdrop-blur">
             Low stock
           </div>
         )}
@@ -146,11 +147,11 @@ export function ProductCard({
 export function ProductCardSkeleton() {
   return (
     <div className="flex flex-col">
-      <div className="aspect-[4/5] animate-pulse rounded-md bg-surface-sunken" />
+      <Skeleton className="aspect-[4/5] rounded-md" />
       <div className="mt-3.5 space-y-2">
-        <div className="h-4 w-3/4 animate-pulse rounded bg-surface-sunken" />
-        <div className="h-3 w-1/2 animate-pulse rounded bg-surface-sunken" />
-        <div className="h-4 w-1/3 animate-pulse rounded bg-surface-sunken" />
+        <Skeleton className="h-4 w-3/4" />
+        <Skeleton className="h-3 w-1/2" />
+        <Skeleton className="h-4 w-1/3" />
       </div>
     </div>
   );

@@ -14,7 +14,7 @@ export function CartButton() {
   return (
     <button
       onClick={openCart}
-      className="relative grid h-10 w-10 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+      className="relative grid h-10 w-10 tap place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
       aria-label={`Open bag${hydrated && count ? `, ${count} items` : ""}`}
     >
       <ShoppingBag size={19} strokeWidth={1.6} />
@@ -34,7 +34,7 @@ export function WishlistButton() {
   return (
     <Link
       href="/account/wishlist"
-      className="relative hidden h-10 w-10 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink sm:grid"
+      className="relative hidden h-10 w-10 tap place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink sm:grid"
       aria-label={`Wishlist${hydrated && count ? `, ${count} items` : ""}`}
     >
       <Heart size={19} strokeWidth={1.6} />

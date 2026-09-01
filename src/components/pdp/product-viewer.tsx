@@ -19,7 +19,7 @@ import type { GalleryImage, ProductDetailView } from "@/lib/types";
 export function ProductViewer({ product }: { product: ProductDetailView }) {
   const openCart = useUI((s) => s.openCart);
   const add = useCart((s) => s.add);
-  const { freeShippingThreshold, standardShippingRate } = useStorefrontConfig();
+  const { freeShippingThreshold, standardShippingRate, returnWindowDays } = useStorefrontConfig();
   const [adding, setAdding] = useState(false);
   const wished = useWishlist((s) => s.ids.includes(product.id));
   const toggleWish = useWishlistToggle();
@@ -178,7 +178,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
               aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
               aria-pressed={wished}
               className={cn(
-                "absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors",
+                "absolute right-4 top-4 grid h-10 w-10 tap place-items-center rounded-full bg-surface/90 backdrop-blur transition-colors",
                 wished ? "text-clay" : "text-ink-soft hover:text-ink",
               )}
             >
@@ -387,7 +387,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           <div className="flex items-start gap-3">
             <RotateCcw size={17} className="mt-0.5 shrink-0 text-ink-soft" />
             <p className="text-ink-soft">
-              <span className="font-medium text-ink">30-day returns.</span> Unused and in original
+              <span className="font-medium text-ink">{returnWindowDays}-day returns.</span> Unused and in original
               packaging.
             </p>
           </div>

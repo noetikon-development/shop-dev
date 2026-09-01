@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Star } from "lucide-react";
 import { cn, formatPrice, discountPercent } from "@/lib/utils";
 import { PRODUCT_BADGES } from "@/lib/constants";
+import { Badge } from "@/components/ui/badge";
 
 export function Stars({
   value,
@@ -84,13 +85,7 @@ export function PriceTag({
           >
             {formatPrice(compareAt!)}
           </span>
-          <span
-            className={cn(
-              "rounded-xs bg-clay-50 px-1.5 py-0.5 text-[11px] font-semibold text-clay",
-            )}
-          >
-            −{pct}%
-          </span>
+          <Badge tone="sale">−{pct}%</Badge>
         </>
       )}
     </span>

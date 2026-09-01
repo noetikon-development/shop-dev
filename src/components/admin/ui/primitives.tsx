@@ -151,9 +151,9 @@ type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 const TONE_CLASSES: Record<BadgeTone, string> = {
   neutral: "bg-surface-sunken text-ink-soft ring-line-strong",
   success: "bg-sage-50 text-sage ring-sage/30",
-  warning: "bg-[#fbf1e3] text-[#8a5a1f] ring-[#e6c9a0]",
+  warning: "bg-warning-50 text-warning ring-warning/30",
   danger: "bg-clay-50 text-clay ring-clay/30",
-  info: "bg-[#e9eef5] text-[#3a5680] ring-[#b9c8de]",
+  info: "bg-info-50 text-info ring-info/30",
 };
 
 export function StatusBadge({

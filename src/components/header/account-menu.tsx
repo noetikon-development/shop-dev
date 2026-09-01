@@ -28,7 +28,7 @@ export function AccountMenu({
     <div ref={ref} className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="grid h-10 w-10 place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
+        className="grid h-10 w-10 tap place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
         aria-label="Account"
         aria-expanded={open}
       >

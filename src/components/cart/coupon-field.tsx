@@ -29,7 +29,7 @@ export function CouponField() {
         </span>
         <button
           onClick={() => removeCoupon()}
-          className="text-ink-faint hover:text-ink"
+          className="grid tap place-items-center text-ink-faint hover:text-ink"
           aria-label="Remove coupon"
         >
           <X size={15} />

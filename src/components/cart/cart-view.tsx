@@ -10,6 +10,8 @@ import { useCart } from "@/lib/cart-store";
 import { formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { buttonClasses } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { computeTotals } from "@/lib/pricing";
 
 export function CartView() {
@@ -33,23 +35,21 @@ export function CartView() {
       : 100;
 
   if (!hydrated) {
-    return <div className="h-64 animate-pulse rounded-lg bg-surface-sunken" />;
+    return <Skeleton className="h-64 rounded-lg" />;
   }
 
   if (lines.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-line-strong py-24 text-center">
-        <div className="grid h-16 w-16 place-items-center rounded-full bg-surface-sunken">
-          <ShoppingBag size={24} className="text-ink-faint" />
-        </div>
-        <h2 className="mt-5 text-xl">Your bag is empty</h2>
-        <p className="mt-2 max-w-sm text-sm text-ink-soft">
-          Browse the catalogue and add a few pieces — they&apos;ll show up here.
-        </p>
-        <Link href="/c/all" className={buttonClasses({ className: "mt-6" })}>
-          Start shopping
-        </Link>
-      </div>
+      <EmptyState
+        icon={<ShoppingBag size={24} />}
+        title="Your bag is empty"
+        message="Browse the catalogue and add a few pieces — they'll show up here."
+        action={
+          <Link href="/c/all" className={buttonClasses()}>
+            Start shopping
+          </Link>
+        }
+      />
     );
   }
 
@@ -121,7 +121,7 @@ export function CartView() {
                       <button
                         onClick={() => setQuantity(l.variantId, l.quantity - 1)}
                         disabled={l.quantity <= 1}
-                        className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                        className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
                         aria-label="Decrease quantity"
                       >
                         <Minus size={14} />
@@ -132,7 +132,7 @@ export function CartView() {
                       <button
                         onClick={() => setQuantity(l.variantId, l.quantity + 1)}
                         disabled={l.quantity >= l.available}
-                        className="grid h-9 w-9 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                        className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
                         aria-label="Increase quantity"
                       >
                         <Plus size={14} />
@@ -148,7 +148,7 @@ export function CartView() {
                     )}
                     <button
                       onClick={() => remove(l.variantId)}
-                      className="text-ink-faint hover:text-sale"
+                      className="grid tap place-items-center text-ink-faint hover:text-sale"
                       aria-label={`Remove ${l.name}`}
                     >
                       <Trash2 size={16} />

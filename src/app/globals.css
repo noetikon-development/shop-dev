@@ -23,7 +23,7 @@
   --color-clay-dark: #8f4231;
   --color-clay-50: #f7ece8;
 
-  /* Brand — Axiaro mark navy */
+  /* Navy — admin analytics chart accent (not a storefront brand colour) */
   --color-brand: #05172d;
 
   --color-sage: #4b5d4f;
@@ -31,6 +31,12 @@
 
   --color-sale: #a8352b;
   --color-success: #3f7d54;
+
+  /* Semantic status — distinct from the clay accent */
+  --color-warning: #8a5a1f;
+  --color-warning-50: #fbf1e3;
+  --color-info: #3a5680;
+  --color-info-50: #e9eef5;
 
   /* Typography */
   --font-display: "Fraunces", ui-serif, Georgia, serif;
@@ -207,6 +213,10 @@
 @layer utilities {
   .text-balance { text-wrap: balance; }
   .text-pretty { text-wrap: pretty; }
+
+  /* Minimum 44×44 pointer target (WCAG 2.5.5) for icon-only controls.
+     The icon keeps its visual size; only the hit area grows. */
+  .tap { min-width: 2.75rem; min-height: 2.75rem; }
 
   .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }

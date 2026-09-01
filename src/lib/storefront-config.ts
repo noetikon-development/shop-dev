@@ -1,6 +1,7 @@
 import "server-only";
 import { unstable_cache } from "next/cache";
 import { getFreeShippingThreshold, getActiveShippingMethods } from "@/lib/shipping";
+import { getReturnsConfig } from "@/lib/returns";
 import {
   STOREFRONT_CONFIG_FALLBACK,
   type StorefrontConfig,
@@ -23,9 +24,10 @@ import {
 const load = unstable_cache(
   async (): Promise<StorefrontConfig> => {
     try {
-      const [threshold, methods] = await Promise.all([
+      const [threshold, methods, returns] = await Promise.all([
         getFreeShippingThreshold(),
         getActiveShippingMethods(),
+        getReturnsConfig(),
       ]);
 
       const shippingMethods = methods.length
@@ -42,6 +44,10 @@ const load = unstable_cache(
           ? standard.fee
           : STOREFRONT_CONFIG_FALLBACK.standardShippingRate,
         shippingMethods,
+        returnWindowDays:
+          returns.windowDays > 0
+            ? returns.windowDays
+            : STOREFRONT_CONFIG_FALLBACK.returnWindowDays,
       };
     } catch {
       return STOREFRONT_CONFIG_FALLBACK;

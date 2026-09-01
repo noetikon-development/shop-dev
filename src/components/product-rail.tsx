@@ -36,14 +36,14 @@ export function ProductRail({
         <div className="hidden gap-2 sm:flex">
           <button
             onClick={() => scroll(-1)}
-            className="grid h-9 w-9 place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
+            className="grid h-9 w-9 tap place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
             aria-label="Scroll left"
           >
             <ChevronLeft size={16} />
           </button>
           <button
             onClick={() => scroll(1)}
-            className="grid h-9 w-9 place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
+            className="grid h-9 w-9 tap place-items-center rounded-full border border-line-strong text-ink-soft transition-colors hover:border-ink hover:text-ink"
             aria-label="Scroll right"
           >
             <ChevronRight size={16} />

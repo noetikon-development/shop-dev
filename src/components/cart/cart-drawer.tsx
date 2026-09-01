@@ -141,7 +141,7 @@ export function CartDrawer() {
                     <button
                       onClick={() => remove(l.variantId)}
                       aria-label="Remove"
-                      className="shrink-0 text-ink-faint hover:text-sale"
+                      className="shrink-0 grid tap place-items-center text-ink-faint hover:text-sale"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -159,7 +159,7 @@ export function CartDrawer() {
                       <div className="inline-flex items-center rounded-sm border border-line-strong">
                         <button
                           onClick={() => setQuantity(l.variantId, l.quantity - 1)}
-                          className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                          className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
                           disabled={l.quantity <= 1}
                           aria-label="Decrease quantity"
                         >
@@ -170,7 +170,7 @@ export function CartDrawer() {
                         </span>
                         <button
                           onClick={() => setQuantity(l.variantId, l.quantity + 1)}
-                          className="grid h-7 w-7 place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
+                          className="grid h-9 w-9 tap place-items-center text-ink-soft hover:text-ink disabled:opacity-30"
                           disabled={l.quantity >= l.available}
                           aria-label="Increase quantity"
                         >

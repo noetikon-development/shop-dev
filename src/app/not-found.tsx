@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "@/components/logo";
+import { buttonClasses } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
@@ -12,10 +13,10 @@ export default function NotFound() {
         track.
       </p>
       <div className="mt-7 flex gap-3">
-        <Link href="/" className="btn btn-primary">
+        <Link href="/" className={buttonClasses()}>
           Back to home
         </Link>
-        <Link href="/c/all" className="btn btn-outline">
+        <Link href="/c/all" className={buttonClasses({ variant: "outline" })}>
           Browse products
         </Link>
       </div>

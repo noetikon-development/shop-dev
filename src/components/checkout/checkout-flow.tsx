@@ -492,7 +492,7 @@ function CheckoutCouponField({
         <span className="inline-flex items-center gap-2 font-medium text-sage">
           <Tag size={13} /> {coupon.code} · −{formatPrice(coupon.discount)}
         </span>
-        <button onClick={remove} disabled={busy} className="text-ink-faint hover:text-ink" aria-label="Remove coupon">
+        <button onClick={remove} disabled={busy} className="grid tap place-items-center text-ink-faint hover:text-ink" aria-label="Remove coupon">
           <X size={14} />
         </button>
       </div>

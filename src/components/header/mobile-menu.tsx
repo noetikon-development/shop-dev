@@ -43,7 +43,7 @@ export function MobileMenu({
               <button
                 onClick={() => setExpanded(expanded === cat.id ? null : cat.id)}
                 aria-label={`Toggle ${cat.name}`}
-                className="grid h-9 w-9 place-items-center text-ink-soft"
+                className="grid h-9 w-9 tap place-items-center text-ink-soft"
               >
                 <ChevronDown
                   size={17}
