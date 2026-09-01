@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowRight, Check } from "lucide-react";
+import { Button } from "@/components/ui/button";
 
 /**
  * First-order discount prompt (footer).
@@ -46,13 +47,14 @@ export function NewsletterForm({
         className="field !py-2.5"
         aria-label="Email address for your first-order discount code"
       />
-      <button
+      <Button
         type="submit"
-        className="btn btn-primary shrink-0 !px-3.5 !py-2.5"
+        size="sm"
+        className="shrink-0"
         aria-label={ctaLabel || "Get my discount code"}
       >
-        {ctaLabel ? <span className="text-sm">{ctaLabel}</span> : <ArrowRight size={16} />}
-      </button>
+        {ctaLabel ? <span>{ctaLabel}</span> : <ArrowRight size={16} />}
+      </Button>
     </form>
   );
 }

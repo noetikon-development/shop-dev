@@ -2,7 +2,6 @@
 
 import { useActionState, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { requestReturnAction, type ReturnFormState } from "@/lib/returns-actions";
 import {
@@ -11,6 +10,8 @@ import {
   RETURN_LIMITS,
 } from "@/lib/returns/status";
 import { formatPrice } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 export type ReturnFormLine = {
   orderItemId: string;
@@ -82,44 +83,41 @@ export function ReturnRequestForm({
         <p className="text-sm text-clay">{state.fieldErrors.items}</p>
       )}
 
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">Reason for return</span>
-        <select name="reason" required className="field" defaultValue="">
-          <option value="" disabled>
-            Choose a reason…
-          </option>
-          {RETURN_REASONS.map((r) => (
-            <option key={r} value={r}>
-              {RETURN_REASON_LABEL[r]}
+      <Field label="Reason for return" required error={state.fieldErrors?.reason}>
+        {(control) => (
+          <select {...control} name="reason" required className="field" defaultValue="">
+            <option value="" disabled>
+              Choose a reason…
             </option>
-          ))}
-        </select>
-        {state.fieldErrors?.reason && (
-          <span className="mt-1 block text-xs text-clay">{state.fieldErrors.reason}</span>
+            {RETURN_REASONS.map((r) => (
+              <option key={r} value={r}>
+                {RETURN_REASON_LABEL[r]}
+              </option>
+            ))}
+          </select>
         )}
-      </label>
+      </Field>
 
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">
-          Anything else we should know? <span className="text-ink-faint">(optional)</span>
-        </span>
-        <textarea
-          name="note"
-          rows={4}
-          maxLength={RETURN_LIMITS.noteMax}
-          className="field resize-y"
-          placeholder="e.g. which part is damaged, or which item you expected"
-        />
-      </label>
+      <Field label="Anything else we should know? (optional)">
+        {(control) => (
+          <textarea
+            {...control}
+            name="note"
+            rows={4}
+            maxLength={RETURN_LIMITS.noteMax}
+            className="field resize-y"
+            placeholder="e.g. which part is damaged, or which item you expected"
+          />
+        )}
+      </Field>
 
       {state.error && (
         <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
       )}
 
-      <button type="submit" disabled={pending || !anySelected} className="btn btn-primary">
-        {pending && <Loader2 size={15} className="animate-spin" />}
+      <Button type="submit" loading={pending} disabled={!anySelected}>
         Submit return request
-      </button>
+      </Button>
       {!anySelected && (
         <p className="text-xs text-ink-faint">Set a quantity for at least one item to continue.</p>
       )}

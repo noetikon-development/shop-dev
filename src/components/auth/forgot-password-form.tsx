@@ -2,8 +2,10 @@
 
 import { useActionState } from "react";
 import Link from "next/link";
-import { Loader2, MailCheck } from "lucide-react";
+import { MailCheck } from "lucide-react";
 import { requestPasswordReset, type ForgotState } from "@/lib/auth-actions";
+import { Button, buttonClasses } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 export function ForgotPasswordForm() {
   const [state, formAction, pending] = useActionState<ForgotState, FormData>(
@@ -22,7 +24,10 @@ export function ForgotPasswordForm() {
           If an account exists for that address, we&apos;ve sent a link to reset your password. It
           expires in one hour.
         </p>
-        <Link href="/login" className="btn btn-outline mt-6 w-full">
+        <Link
+          href="/login"
+          className={buttonClasses({ variant: "outline", className: "mt-6 w-full" })}
+        >
           Back to sign in
         </Link>
       </div>
@@ -37,19 +42,15 @@ export function ForgotPasswordForm() {
       </p>
 
       <form action={formAction} className="mt-7 space-y-4">
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Email</span>
-          <input type="email" name="email" required autoComplete="email" className="field" />
-        </label>
+        <Field label="Email" type="email" name="email" required autoComplete="email" />
 
         {state.error && (
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
         )}
 
-        <button type="submit" disabled={pending} className="btn btn-primary w-full">
-          {pending && <Loader2 size={15} className="animate-spin" />}
+        <Button type="submit" loading={pending} className="w-full">
           Send reset link
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-ink-soft">

@@ -1,9 +1,10 @@
 "use client";
 
 import { useActionState, useEffect } from "react";
-import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateProfile, type ProfileState } from "@/lib/auth-actions";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 export function ProfileForm({
   name,
@@ -20,36 +21,23 @@ export function ProfileForm({
 
   return (
     <form action={formAction} className="max-w-md space-y-4">
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">Full name</span>
-        <input
-          name="name"
-          required
-          defaultValue={name}
-          autoComplete="name"
-          className="field"
-        />
-      </label>
-      <label className="block">
-        <span className="mb-1.5 block text-sm font-medium">Phone number</span>
-        <input
-          name="phone"
-          type="tel"
-          defaultValue={phone}
-          autoComplete="tel"
-          placeholder="+63 9XX XXX XXXX"
-          className="field"
-        />
-      </label>
+      <Field label="Full name" name="name" required defaultValue={name} autoComplete="name" />
+      <Field
+        label="Phone number"
+        name="phone"
+        type="tel"
+        defaultValue={phone}
+        autoComplete="tel"
+        placeholder="+63 9XX XXX XXXX"
+      />
 
       {state.error && (
         <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
       )}
 
-      <button type="submit" disabled={pending} className="btn btn-primary">
-        {pending && <Loader2 size={15} className="animate-spin" />}
+      <Button type="submit" loading={pending}>
         Save changes
-      </button>
+      </Button>
     </form>
   );
 }

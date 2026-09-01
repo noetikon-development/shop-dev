@@ -9,6 +9,7 @@ import { useUI } from "@/lib/ui-store";
 import { computeTotals } from "@/lib/pricing";
 import { formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
+import { Button, buttonClasses } from "@/components/ui/button";
 
 export function CartDrawer() {
   const { cartOpen, closeCart } = useUI();
@@ -56,13 +57,17 @@ export function CartDrawer() {
               Shipping &amp; taxes calculated at checkout.
             </p>
             {purchasable.length > 0 ? (
-              <Link href="/checkout" onClick={closeCart} className="btn btn-primary w-full">
+              <Link
+                href="/checkout"
+                onClick={closeCart}
+                className={buttonClasses({ className: "w-full" })}
+              >
                 Checkout · {formatPrice(totals.grandTotal)}
               </Link>
             ) : (
-              <button disabled className="btn btn-primary w-full opacity-50">
+              <Button disabled className="w-full">
                 Checkout
-              </button>
+              </Button>
             )}
             <Link
               href="/cart"
@@ -86,9 +91,9 @@ export function CartDrawer() {
               Saved pieces and past orders live in your account.
             </p>
           </div>
-          <button onClick={closeCart} className="btn btn-outline">
+          <Button variant="outline" onClick={closeCart}>
             Continue shopping
-          </button>
+          </Button>
         </div>
       ) : (
         <div className="px-5 py-4">

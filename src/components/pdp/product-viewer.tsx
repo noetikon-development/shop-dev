@@ -12,6 +12,7 @@ import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
+import { Button } from "@/components/ui/button";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
@@ -209,7 +210,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
       {/* Purchase panel */}
       <div>
         <p className="eyebrow">{product.brand}</p>
-        <h1 className="mt-2 text-3xl sm:text-[2.25rem]">{product.name}</h1>
+        <h1 className="mt-2 text-3xl sm:text-display">{product.name}</h1>
 
         <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5">
           <Link href="#reviews" className="inline-flex items-center gap-2">
@@ -334,10 +335,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             </button>
           </div>
 
-          <button
+          <Button
+            size="lg"
             onClick={addToBag}
             disabled={outOfStock || comboUnavailable || adding}
-            className="btn btn-primary h-12 flex-1 !py-0 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex-1"
           >
             <ShoppingBag size={16} />
             {comboUnavailable
@@ -347,17 +349,18 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                 : adding
                   ? "Adding…"
                   : `Add to bag · ${formatPrice(activePrice * qty)}`}
-          </button>
+          </Button>
         </div>
 
-        <button
+        <Button
+          variant="outline"
           onClick={() => toggleWish(product.id)}
           aria-pressed={wished}
-          className="btn btn-outline mt-3 w-full"
+          className="mt-3 w-full"
         >
           <Heart size={16} fill={wished ? "currentColor" : "none"} className={wished ? "text-clay" : ""} />
           {wished ? "Saved to wishlist" : "Save to wishlist"}
-        </button>
+        </Button>
 
         {/* Reassurance */}
         <div className="mt-7 space-y-3 border-t border-line pt-6 text-sm">

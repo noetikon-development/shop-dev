@@ -5,6 +5,8 @@ import { Plus, Pencil, Trash2, Truck, CreditCard, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { COUNTRIES, countryName, getCountry } from "@/lib/countries";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 import { usePersistentAction } from "@/components/admin/ui/use-form";
 import {
   createAddressAction,
@@ -39,9 +41,9 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
           </p>
         </div>
         {editing === null && (
-          <button onClick={() => setEditing("new")} className="btn btn-outline !py-2 text-sm">
+          <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
             <Plus size={15} /> Add address
-          </button>
+          </Button>
         )}
       </div>
 
@@ -199,22 +201,23 @@ function AddressForm({
         <Field label="Company (optional)" name="company" error={fe.company} defaultValue={address?.company ?? ""} className="sm:col-span-2" />
 
         <Field label="Phone" name="phone" required error={fe.phone} defaultValue={address?.phone} placeholder="+63 9XX XXX XXXX" />
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Country</span>
-          <select
-            name="country"
-            value={country}
-            onChange={(e) => setCountry(e.target.value)}
-            className="field"
-          >
-            {COUNTRIES.map((co) => (
-              <option key={co.code} value={co.code}>
-                {co.name}
-              </option>
-            ))}
-          </select>
-          {fe.country && <span className="mt-1 block text-xs text-clay">{fe.country}</span>}
-        </label>
+        <Field label="Country" error={fe.country}>
+          {(control) => (
+            <select
+              {...control}
+              name="country"
+              value={country}
+              onChange={(e) => setCountry(e.target.value)}
+              className="field"
+            >
+              {COUNTRIES.map((co) => (
+                <option key={co.code} value={co.code}>
+                  {co.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
 
         <Field label="Address line 1" name="line1" required error={fe.line1} defaultValue={address?.line1} className="sm:col-span-2" />
         <Field label="Address line 2 (optional)" name="line2" error={fe.line2} defaultValue={address?.line2 ?? ""} className="sm:col-span-2" />
@@ -265,48 +268,13 @@ function AddressForm({
       )}
 
       <div className="flex gap-3">
-        <button type="submit" disabled={pending} className="btn btn-primary">
+        <Button type="submit" loading={pending}>
           {pending ? "Saving…" : "Save address"}
-        </button>
-        <button type="button" onClick={onCancel} className="btn btn-ghost">
+        </Button>
+        <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
-        </button>
+        </Button>
       </div>
     </form>
-  );
-}
-
-function Field({
-  label,
-  name,
-  required,
-  error,
-  defaultValue,
-  placeholder,
-  className,
-}: {
-  label: string;
-  name: string;
-  required?: boolean;
-  error?: string;
-  defaultValue?: string;
-  placeholder?: string;
-  className?: string;
-}) {
-  return (
-    <label className={cn("block", className)}>
-      <span className="mb-1.5 block text-sm font-medium">
-        {label}
-        {required && <span className="text-clay"> *</span>}
-      </span>
-      <input
-        name={name}
-        required={required}
-        defaultValue={defaultValue}
-        placeholder={placeholder}
-        className="field"
-      />
-      {error && <span className="mt-1 block text-xs text-clay">{error}</span>}
-    </label>
   );
 }

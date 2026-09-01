@@ -9,6 +9,7 @@ import { OrderSummaryLines } from "@/components/cart/order-summary";
 import { useCart } from "@/lib/cart-store";
 import { formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
+import { buttonClasses } from "@/components/ui/button";
 import { computeTotals } from "@/lib/pricing";
 
 export function CartView() {
@@ -45,7 +46,7 @@ export function CartView() {
         <p className="mt-2 max-w-sm text-sm text-ink-soft">
           Browse the catalogue and add a few pieces — they&apos;ll show up here.
         </p>
-        <Link href="/c/all" className="btn btn-primary mt-6">
+        <Link href="/c/all" className={buttonClasses({ className: "mt-6" })}>
           Start shopping
         </Link>
       </div>
@@ -178,7 +179,7 @@ export function CartView() {
           </div>
           <Link
             href="/checkout"
-            className="btn btn-primary mt-5 w-full aria-disabled:pointer-events-none aria-disabled:opacity-50"
+            className={buttonClasses({ className: "mt-5 w-full aria-disabled:pointer-events-none aria-disabled:opacity-50" })}
             aria-disabled={purchasable.length === 0}
           >
             Checkout <ArrowRight size={16} />

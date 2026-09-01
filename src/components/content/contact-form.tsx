@@ -1,10 +1,12 @@
 "use client";
 
 import { useActionState, useEffect, useRef } from "react";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { submitContactMessage } from "@/lib/contact-actions";
 import { CONTACT_LIMITS, type ContactFormState } from "@/lib/contact-shared";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 /**
  * Public contact form for /pages/contact (Step 21 P5). Identity is never trusted
@@ -64,78 +66,57 @@ export function ContactForm() {
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Name</span>
-            <input
-              type="text"
-              name="name"
-              required
-              maxLength={CONTACT_LIMITS.nameMax}
-              autoComplete="name"
-              className="field"
-              aria-invalid={fieldError("name") ? true : undefined}
-            />
-            {fieldError("name") && (
-              <span className="mt-1 block text-xs text-clay">{fieldError("name")}</span>
-            )}
-          </label>
-          <label className="block">
-            <span className="mb-1.5 block text-sm font-medium">Email</span>
-            <input
-              type="email"
-              name="email"
-              required
-              maxLength={CONTACT_LIMITS.emailMax}
-              autoComplete="email"
-              className="field"
-              aria-invalid={fieldError("email") ? true : undefined}
-            />
-            {fieldError("email") && (
-              <span className="mt-1 block text-xs text-clay">{fieldError("email")}</span>
-            )}
-          </label>
+          <Field
+            label="Name"
+            type="text"
+            name="name"
+            required
+            maxLength={CONTACT_LIMITS.nameMax}
+            autoComplete="name"
+            error={fieldError("name")}
+          />
+          <Field
+            label="Email"
+            type="email"
+            name="email"
+            required
+            maxLength={CONTACT_LIMITS.emailMax}
+            autoComplete="email"
+            error={fieldError("email")}
+          />
         </div>
 
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Subject</span>
-          <input
-            type="text"
-            name="subject"
-            required
-            minLength={CONTACT_LIMITS.subjectMin}
-            maxLength={CONTACT_LIMITS.subjectMax}
-            className="field"
-            aria-invalid={fieldError("subject") ? true : undefined}
-          />
-          {fieldError("subject") && (
-            <span className="mt-1 block text-xs text-clay">{fieldError("subject")}</span>
-          )}
-        </label>
+        <Field
+          label="Subject"
+          type="text"
+          name="subject"
+          required
+          minLength={CONTACT_LIMITS.subjectMin}
+          maxLength={CONTACT_LIMITS.subjectMax}
+          error={fieldError("subject")}
+        />
 
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Message</span>
-          <textarea
-            name="message"
-            required
-            rows={6}
-            minLength={CONTACT_LIMITS.messageMin}
-            maxLength={CONTACT_LIMITS.messageMax}
-            className="field resize-y"
-            aria-invalid={fieldError("message") ? true : undefined}
-          />
-          {fieldError("message") && (
-            <span className="mt-1 block text-xs text-clay">{fieldError("message")}</span>
+        <Field label="Message" error={fieldError("message")}>
+          {(control) => (
+            <textarea
+              {...control}
+              name="message"
+              required
+              rows={6}
+              minLength={CONTACT_LIMITS.messageMin}
+              maxLength={CONTACT_LIMITS.messageMax}
+              className="field resize-y"
+            />
           )}
-        </label>
+        </Field>
 
         {state.error && (
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
         )}
 
-        <button type="submit" disabled={pending} className="btn btn-primary">
-          {pending && <Loader2 size={15} className="animate-spin" />}
+        <Button type="submit" loading={pending}>
           Send message
-        </button>
+        </Button>
       </form>
     </section>
   );

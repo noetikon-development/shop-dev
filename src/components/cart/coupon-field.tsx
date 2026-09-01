@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Tag, X, Loader2, AlertCircle } from "lucide-react";
+import { Tag, X, AlertCircle } from "lucide-react";
 import { useCart } from "@/lib/cart-store";
 import { formatPrice } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
 
 export function CouponField() {
   const coupon = useCart((s) => s.coupon);
@@ -53,14 +54,16 @@ export function CouponField() {
           className="field !py-2.5 text-sm uppercase"
           aria-label="Promo code"
         />
-        <button
+        <Button
           type="button"
+          variant="outline"
+          size="sm"
           onClick={apply}
-          disabled={busy}
-          className="btn btn-outline shrink-0 !py-2.5"
+          loading={busy}
+          className="shrink-0"
         >
-          {busy ? <Loader2 size={14} className="animate-spin" /> : "Apply"}
-        </button>
+          Apply
+        </Button>
       </div>
       {coupon && !coupon.valid && coupon.error && (
         <p className="flex items-start gap-1.5 text-xs text-clay">

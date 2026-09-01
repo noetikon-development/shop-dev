@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { Loader2, Lock, ShoppingBag, MapPin, Truck, CreditCard, Check, Tag, X } from "lucide-react";
+import { Lock, ShoppingBag, MapPin, Truck, CreditCard, Check, Tag, X } from "lucide-react";
 import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
+import { Button, buttonClasses } from "@/components/ui/button";
 import { useCart } from "@/lib/cart-store";
 import { placeOrder } from "@/lib/checkout-actions";
 import { applyCoupon, removeCoupon } from "@/lib/cart-actions";
@@ -58,7 +59,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
         <ShoppingBag size={22} className="text-ink-faint" />
         <p className="mt-4 font-medium">{copy}</p>
-        <Link href="/cart" className="btn btn-primary mt-5">
+        <Link href="/cart" className={buttonClasses({ className: "mt-5" })}>
           Return to bag
         </Link>
       </div>
@@ -73,7 +74,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
         <p className="mt-1 max-w-sm text-sm text-ink-soft">
           Your saved addresses are used for shipping and billing.
         </p>
-        <Link href="/account/addresses" className="btn btn-primary mt-5">
+        <Link href="/account/addresses" className={buttonClasses({ className: "mt-5" })}>
           Add an address
         </Link>
       </div>
@@ -298,35 +299,31 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
                 <span className="font-medium text-ink">{formatPrice(total)}</span>
               </p>
               <div className="flex gap-2 pt-1">
-                <button
-                  onClick={submit}
-                  disabled={submitting}
-                  className="btn btn-primary flex-1"
-                >
-                  {submitting ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />}
+                <Button onClick={submit} loading={submitting} className="flex-1">
+                  {!submitting && <Check size={15} />}
                   Place order
-                </button>
-                <button
+                </Button>
+                <Button
+                  variant="ghost"
                   onClick={() => setConfirming(false)}
                   disabled={submitting}
-                  className="btn btn-ghost"
                 >
                   Back
-                </button>
+                </Button>
               </div>
             </div>
           ) : (
-            <button
+            <Button
               onClick={() => {
                 setError(null);
                 if (!shippingId) return setError("Choose a shipping address.");
                 if (!sameForBilling && !billingId) return setError("Choose a billing address.");
                 setConfirming(true);
               }}
-              className="btn btn-primary mt-5 w-full"
+              className="mt-5 w-full"
             >
               <Lock size={15} /> Review order
-            </button>
+            </Button>
           )}
 
           <p className="mt-3 text-center text-xs text-ink-faint">
@@ -518,9 +515,9 @@ function CheckoutCouponField({
           className="field !py-2 text-sm uppercase"
           aria-label="Promo code"
         />
-        <button type="button" onClick={apply} disabled={busy} className="btn btn-outline shrink-0 !py-2 text-sm">
-          {busy ? <Loader2 size={13} className="animate-spin" /> : "Apply"}
-        </button>
+        <Button type="button" variant="outline" size="sm" onClick={apply} loading={busy} className="shrink-0">
+          Apply
+        </Button>
       </div>
       {coupon && !coupon.valid && coupon.error && (
         <p className="text-xs text-clay">

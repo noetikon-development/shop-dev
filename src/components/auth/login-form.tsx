@@ -3,8 +3,10 @@
 import { useActionState, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Loader2, Check } from "lucide-react";
+import { Check } from "lucide-react";
 import { login, resendVerification, type LoginState } from "@/lib/auth-actions";
+import { Button } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 export function LoginForm() {
   const params = useSearchParams();
@@ -22,36 +24,32 @@ export function LoginForm() {
 
       <form action={formAction} className="mt-7 space-y-4">
         <input type="hidden" name="redirectTo" value={redirectTo} />
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Email</span>
-          <input
-            type="email"
-            name="email"
-            required
-            autoComplete="email"
-            className="field"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 flex items-center justify-between text-sm font-medium">
-            Password
-            <Link
-              href="/forgot-password"
-              className="text-xs font-normal text-ink-soft underline underline-offset-2 hover:text-ink"
-            >
-              Forgot password?
-            </Link>
-          </span>
-          <input
-            type="password"
-            name="password"
-            required
-            autoComplete="current-password"
-            className="field"
-          />
-        </label>
+        <Field
+          label="Email"
+          type="email"
+          name="email"
+          required
+          autoComplete="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <Field
+          label={
+            <span className="flex items-center justify-between">
+              Password
+              <Link
+                href="/forgot-password"
+                className="text-xs font-normal text-ink-soft underline underline-offset-2 hover:text-ink"
+              >
+                Forgot password?
+              </Link>
+            </span>
+          }
+          type="password"
+          name="password"
+          required
+          autoComplete="current-password"
+        />
 
         {shownError && (
           <div className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">
@@ -76,10 +74,9 @@ export function LoginForm() {
           </div>
         )}
 
-        <button type="submit" disabled={pending} className="btn btn-primary w-full">
-          {pending && <Loader2 size={15} className="animate-spin" />}
+        <Button type="submit" loading={pending} className="w-full">
           Sign in
-        </button>
+        </Button>
       </form>
 
       <p className="mt-6 text-center text-sm text-ink-soft">

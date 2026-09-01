@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { User, Package, Heart, MapPin, LogOut, KeyRound } from "lucide-react";
 import { signOut } from "@/lib/auth-actions";
+import { buttonClasses } from "@/components/ui/button";
 
 export function AccountMenu({
   signedIn,
@@ -95,7 +96,7 @@ export function AccountMenu({
                 <Link
                   href="/login"
                   onClick={() => setOpen(false)}
-                  className="btn btn-primary w-full !py-2.5 text-sm"
+                  className={buttonClasses({ size: "sm", className: "w-full" })}
                 >
                   Sign in
                 </Link>

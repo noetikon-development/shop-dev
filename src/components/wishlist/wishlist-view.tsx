@@ -7,6 +7,7 @@ import { ProductImage } from "@/components/product-image";
 import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { formatPrice } from "@/lib/utils";
+import { buttonClasses } from "@/components/ui/button";
 import type { WishlistCard } from "@/lib/wishlist";
 
 export function WishlistView({ initialItems }: { initialItems: WishlistCard[] }) {
@@ -28,7 +29,7 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
         <p className="mt-1.5 max-w-sm text-sm text-ink-soft">
           Tap the heart on any product to save it here for later.
         </p>
-        <Link href="/c/all" className="btn btn-primary mt-5">
+        <Link href="/c/all" className={buttonClasses({ className: "mt-5" })}>
           Browse products
         </Link>
       </div>

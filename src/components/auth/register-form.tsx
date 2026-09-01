@@ -3,8 +3,10 @@
 import { useActionState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Loader2, MailCheck } from "lucide-react";
+import { MailCheck } from "lucide-react";
 import { registerUser, type RegisterState } from "@/lib/auth-actions";
+import { Button, buttonClasses } from "@/components/ui/button";
+import { Field } from "@/components/ui/field";
 
 export function RegisterForm() {
   const params = useSearchParams();
@@ -25,7 +27,7 @@ export function RegisterForm() {
         <p className="mt-2 text-xs text-ink-faint">
           Didn&apos;t get it? Check your spam folder, or sign in to resend it.
         </p>
-        <Link href="/login" className="btn btn-primary mt-6 w-full">
+        <Link href="/login" className={buttonClasses({ className: "mt-6 w-full" })}>
           Go to sign in
         </Link>
       </div>
@@ -40,45 +42,40 @@ export function RegisterForm() {
       </p>
 
       <form id="register-form" action={formAction} className="mt-7 space-y-4">
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Full name</span>
-          <input type="text" name="name" required autoComplete="name" className="field" />
-          {state.fieldErrors?.name && (
-            <span className="mt-1 block text-xs text-clay">{state.fieldErrors.name}</span>
-          )}
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Email</span>
-          <input type="email" name="email" required autoComplete="email" className="field" />
-          {state.fieldErrors?.email && (
-            <span className="mt-1 block text-xs text-clay">{state.fieldErrors.email}</span>
-          )}
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Password</span>
-          <input
-            type="password"
-            name="password"
-            required
-            minLength={8}
-            autoComplete="new-password"
-            className="field"
-          />
-          {state.fieldErrors?.password ? (
-            <span className="mt-1 block text-xs text-clay">{state.fieldErrors.password}</span>
-          ) : (
-            <span className="mt-1 block text-xs text-ink-faint">At least 8 characters.</span>
-          )}
-        </label>
+        <Field
+          label="Full name"
+          type="text"
+          name="name"
+          required
+          autoComplete="name"
+          error={state.fieldErrors?.name}
+        />
+        <Field
+          label="Email"
+          type="email"
+          name="email"
+          required
+          autoComplete="email"
+          error={state.fieldErrors?.email}
+        />
+        <Field
+          label="Password"
+          hint="At least 8 characters."
+          error={state.fieldErrors?.password}
+          type="password"
+          name="password"
+          required
+          minLength={8}
+          autoComplete="new-password"
+        />
 
         {state.error && (
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>
         )}
 
-        <button type="submit" disabled={pending} className="btn btn-primary w-full">
-          {pending && <Loader2 size={15} className="animate-spin" />}
+        <Button type="submit" loading={pending} className="w-full">
           Create account
-        </button>
+        </Button>
         <p className="text-center text-xs text-ink-faint">
           By continuing you agree to our{" "}
           <Link href="/pages/terms" className="underline">
