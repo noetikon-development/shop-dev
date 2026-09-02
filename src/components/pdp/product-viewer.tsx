@@ -361,7 +361,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                 ? "Out of stock"
                 : adding
                   ? "Adding…"
-                  : `Add to bag · ${formatPrice(activePrice * qty)}`}
+                  : `Add to cart · ${formatPrice(activePrice * qty)}`}
           </Button>
         </div>
 
