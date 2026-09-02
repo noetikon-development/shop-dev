@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { returnEligibility } from "@/lib/returns";
 import { OrderDetail } from "@/components/order/order-detail";
+import { buttonClasses } from "@/components/ui/button";
 
 export async function generateMetadata({
   params,
@@ -33,7 +34,7 @@ export default async function AccountOrderPage({
       >
         <ChevronLeft size={15} /> All orders
       </Link>
-      <h2 className="text-xl">Order {order.orderNumber}</h2>
+      <h2 className="text-subtitle">Order {order.orderNumber}</h2>
       <OrderDetail order={order} />
       <ReturnCallout orderNumber={orderNumber} elig={elig} orderStatus={order.status} />
     </div>
@@ -61,7 +62,10 @@ function ReturnCallout({
             </p>
           </div>
         </div>
-        <Link href={`/account/orders/${orderNumber}/return`} className="btn btn-outline">
+        <Link
+          href={`/account/orders/${orderNumber}/return`}
+          className={buttonClasses({ variant: "outline", size: "sm" })}
+        >
           Return items
         </Link>
       </div>
@@ -75,7 +79,10 @@ function ReturnCallout({
           <RotateCcw size={18} className="mt-0.5 shrink-0 text-ink-soft" />
           <p className="text-sm text-ink-soft">There&apos;s an open return for this order.</p>
         </div>
-        <Link href={`/account/returns/${elig.existingReturnNumber}`} className="btn btn-outline">
+        <Link
+          href={`/account/returns/${elig.existingReturnNumber}`}
+          className={buttonClasses({ variant: "outline", size: "sm" })}
+        >
           View your return
         </Link>
       </div>
@@ -85,7 +92,7 @@ function ReturnCallout({
   // Only nudge about returns once the order is delivered; stay quiet otherwise.
   if (orderStatus === "DELIVERED" && (elig.code === "window_expired" || elig.code === "nothing_returnable")) {
     return (
-      <p className="text-xs text-ink-faint">
+      <p className="text-meta text-ink-faint">
         {elig.code === "window_expired"
           ? "The return window for this order has passed. Contact us if you still need help."
           : "All items on this order have already been requested for return."}

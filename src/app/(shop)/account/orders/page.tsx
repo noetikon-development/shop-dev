@@ -5,7 +5,11 @@ import { requireUser } from "@/lib/auth";
 import { getUserOrders } from "@/lib/data";
 import { ProductImage } from "@/components/product-image";
 import { ORDER_STATUS_META } from "@/lib/constants";
-import { formatPrice, formatDate, cn } from "@/lib/utils";
+import { orderStatusTone } from "@/lib/orders/status";
+import { formatPrice, formatDate } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export const metadata: Metadata = { title: "Orders" };
 
@@ -15,20 +19,22 @@ export default async function OrdersPage() {
 
   if (orders.length === 0) {
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <Package size={24} className="text-ink-faint" />
-        <h2 className="mt-4 text-lg">No orders yet</h2>
-        <p className="mt-1.5 text-sm text-ink-soft">Your orders will appear here once you check out.</p>
-        <Link href="/c/all" className="btn btn-primary mt-5">
-          Start shopping
-        </Link>
-      </div>
+      <EmptyState
+        icon={<Package size={24} />}
+        title="No orders yet"
+        message="Your orders will appear here once you check out."
+        action={
+          <Link href="/c/all" className={buttonClasses()}>
+            Start shopping
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="space-y-5">
-      <h2 className="text-lg">Orders</h2>
+      <h2 className="text-subtitle">Orders</h2>
       <ul className="space-y-4">
         {orders.map((o) => {
           const meta = ORDER_STATUS_META[o.status] ?? ORDER_STATUS_META.PENDING;
@@ -40,17 +46,7 @@ export default async function OrdersPage() {
                   <span className="text-ink-faint">{formatDate(o.placedAt)}</span>
                   <span className="text-ink-faint">{formatPrice(o.grandTotal)}</span>
                 </div>
-                <span
-                  className={cn(
-                    "rounded-full px-2.5 py-1 text-xs font-semibold",
-                    meta.tone === "positive" && "bg-sage-50 text-sage",
-                    meta.tone === "progress" && "bg-clay-50 text-clay",
-                    meta.tone === "neutral" && "bg-surface-sunken text-ink-soft",
-                    meta.tone === "negative" && "bg-clay-50 text-sale",
-                  )}
-                >
-                  {meta.label}
-                </span>
+                <Badge tone={orderStatusTone(o.status)}>{meta.label}</Badge>
               </div>
               <div className="flex items-center gap-4 px-5 py-4">
                 <div className="flex -space-x-3">
@@ -63,7 +59,7 @@ export default async function OrdersPage() {
                     </div>
                   ))}
                 </div>
-                <p className="min-w-0 flex-1 truncate text-sm text-ink-soft">
+                <p className="min-w-0 flex-1 truncate text-meta text-ink-soft">
                   {o.items.map((it) => it.name).join(", ")}
                 </p>
                 <Link

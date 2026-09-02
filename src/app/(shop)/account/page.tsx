@@ -4,7 +4,11 @@ import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getUserOrders } from "@/lib/data";
 import { ORDER_STATUS_META } from "@/lib/constants";
+import { orderStatusTone } from "@/lib/orders/status";
 import { formatPrice, formatDate } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export default async function AccountOverview() {
   const { id: userId } = await requireUser("/account");
@@ -25,18 +29,20 @@ export default async function AccountOverview() {
           <p className="eyebrow">In progress</p>
           <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-medium">
-                Order {activeOrder.orderNumber} ·{" "}
-                <span className="text-clay">{ORDER_STATUS_META[activeOrder.status]?.label}</span>
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-medium">
+                Order {activeOrder.orderNumber}
+                <Badge tone={orderStatusTone(activeOrder.status)}>
+                  {ORDER_STATUS_META[activeOrder.status]?.label}
+                </Badge>
               </p>
-              <p className="mt-0.5 text-sm text-ink-soft">
+              <p className="mt-1 text-meta text-ink-soft">
                 {activeOrder.items.length} item{activeOrder.items.length > 1 ? "s" : ""} ·{" "}
                 {formatPrice(activeOrder.grandTotal)}
               </p>
             </div>
             <Link
               href={`/account/orders/${activeOrder.orderNumber}`}
-              className="btn btn-outline !py-2 text-sm"
+              className={buttonClasses({ variant: "outline", size: "sm" })}
             >
               Track order
             </Link>
@@ -55,20 +61,24 @@ export default async function AccountOverview() {
 
       <section>
         <div className="flex items-center justify-between">
-          <h2 className="text-lg">Recent orders</h2>
-          <Link href="/account/orders" className="text-sm text-ink-soft hover:text-ink">
+          <h2 className="text-subtitle">Recent orders</h2>
+          <Link href="/account/orders" className="text-meta font-medium text-ink-soft hover:text-ink">
             View all
           </Link>
         </div>
 
         {recent.length === 0 ? (
-          <div className="mt-4 flex flex-col items-center rounded-lg border border-dashed border-line-strong py-14 text-center">
-            <Package size={22} className="text-ink-faint" />
-            <p className="mt-3 text-sm text-ink-soft">You haven&apos;t placed any orders yet.</p>
-            <Link href="/c/all" className="btn btn-primary mt-4">
-              Browse products
-            </Link>
-          </div>
+          <EmptyState
+            className="mt-4"
+            icon={<Package size={22} />}
+            title="No orders yet"
+            message="You haven't placed any orders yet."
+            action={
+              <Link href="/c/all" className={buttonClasses()}>
+                Browse products
+              </Link>
+            }
+          />
         ) : (
           <ul className="mt-4 divide-y divide-line border-y border-line">
             {recent.map((o) => (
@@ -79,7 +89,7 @@ export default async function AccountOverview() {
                 >
                   <div>
                     <p className="text-sm font-medium">{o.orderNumber}</p>
-                    <p className="mt-0.5 text-xs text-ink-faint">
+                    <p className="mt-0.5 text-meta text-ink-faint">
                       {formatDate(o.placedAt)} · {ORDER_STATUS_META[o.status]?.label}
                     </p>
                   </div>
@@ -100,8 +110,8 @@ export default async function AccountOverview() {
 function Stat({ label, value, href }: { label: string; value: string; href?: string }) {
   const body = (
     <div className="card-surface p-4">
-      <p className="text-xs text-ink-faint">{label}</p>
-      <p className="mt-1 font-display text-2xl">{value}</p>
+      <p className="text-meta text-ink-faint">{label}</p>
+      <p className="mt-1 font-display text-title">{value}</p>
     </div>
   );
   return href ? (

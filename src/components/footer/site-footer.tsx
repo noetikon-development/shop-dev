@@ -97,13 +97,13 @@ export async function SiteFooter() {
   const nl = data.newsletter;
 
   return (
-    <footer className="mt-24 border-t border-line bg-surface">
-      <div className="container-page py-14">
+    <footer className="mt-20 border-t border-line bg-surface">
+      <div className="container-page py-12 sm:py-14">
         <div className="grid gap-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
           <div>
             <Logo className="h-11" src={settings.logoUrl} alt={settings.brand} />
             {brandDescription && (
-              <p className="mt-4 max-w-xs text-sm text-ink-soft">{brandDescription}</p>
+              <p className="mt-4 max-w-xs text-meta text-ink-soft">{brandDescription}</p>
             )}
             {settings.social.length > 0 && (
               <div className="mt-5 flex flex-wrap gap-x-4 gap-y-2">
@@ -113,7 +113,7 @@ export async function SiteFooter() {
                     href={s.url}
                     target="_blank"
                     rel="noopener noreferrer nofollow"
-                    className="text-sm text-ink-soft underline underline-offset-4 transition-colors hover:text-ink"
+                    className="text-meta text-ink-soft underline underline-offset-4 transition-colors hover:text-ink"
                   >
                     {s.label}
                   </a>
@@ -123,50 +123,55 @@ export async function SiteFooter() {
             {(nl.heading || nl.body || nl.successText) && (
               <div className="mt-6">
                 {nl.heading && <p className="eyebrow mb-2">{nl.heading}</p>}
-                {nl.body && <p className="mb-2 text-sm text-ink-soft">{nl.body}</p>}
+                {nl.body && <p className="mb-2 text-meta text-ink-soft">{nl.body}</p>}
                 <NewsletterForm ctaLabel={nl.ctaLabel} successText={nl.successText} />
               </div>
             )}
           </div>
 
-          <FooterCol title={data.shopColumn.heading || "Shop"}>
-            {(shopLinks.length > 0 ? shopLinks : shopFromTree).map((l, i) => (
-              <FooterLinkItem key={`s${i}`} href={l.href}>
-                {l.label}
-              </FooterLinkItem>
-            ))}
-          </FooterCol>
-
-          <FooterCol title={data.helpColumn.heading || "Help"}>
-            {helpLinks.map((l, i) => (
-              <FooterLinkItem key={`h${i}`} href={l.href}>
-                {l.label}
-              </FooterLinkItem>
-            ))}
-          </FooterCol>
-
-          <FooterCol title={data.companyColumn.heading || "Company"}>
-            {companyLinks.length > 0 ? (
-              companyLinks.map((l, i) => (
-                <FooterLinkItem key={`c${i}`} href={l.href}>
+          {/* The three CMS link columns: a 2-up grid on mobile, 3-up from `sm`,
+              and dissolved into the 4-column footer row at `lg` (lg:contents).
+              This keeps the mobile footer compact without dropping any link. */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-9 sm:grid-cols-3 lg:contents">
+            <FooterCol title={data.shopColumn.heading || "Shop"}>
+              {(shopLinks.length > 0 ? shopLinks : shopFromTree).map((l, i) => (
+                <FooterLinkItem key={`s${i}`} href={l.href}>
                   {l.label}
                 </FooterLinkItem>
-              ))
-            ) : (
-              <li className="text-sm text-ink-faint">Coming soon</li>
-            )}
-            {settings.contact.email && (
-              <FooterLinkItem href={`mailto:${settings.contact.email}`}>
-                {settings.contact.email}
-              </FooterLinkItem>
-            )}
-          </FooterCol>
+              ))}
+            </FooterCol>
+
+            <FooterCol title={data.helpColumn.heading || "Help"}>
+              {helpLinks.map((l, i) => (
+                <FooterLinkItem key={`h${i}`} href={l.href}>
+                  {l.label}
+                </FooterLinkItem>
+              ))}
+            </FooterCol>
+
+            <FooterCol title={data.companyColumn.heading || "Company"}>
+              {companyLinks.length > 0 ? (
+                companyLinks.map((l, i) => (
+                  <FooterLinkItem key={`c${i}`} href={l.href}>
+                    {l.label}
+                  </FooterLinkItem>
+                ))
+              ) : (
+                <li className="text-meta text-ink-faint">Coming soon</li>
+              )}
+              {settings.contact.email && (
+                <FooterLinkItem href={`mailto:${settings.contact.email}`}>
+                  {settings.contact.email}
+                </FooterLinkItem>
+              )}
+            </FooterCol>
+          </div>
         </div>
 
-        <div className="mt-12 flex flex-col gap-4 border-t border-line pt-6 text-xs text-ink-faint sm:flex-row sm:items-center sm:justify-between">
+        <div className="mt-12 flex flex-col gap-4 border-t border-line pt-6 text-meta text-ink-faint sm:flex-row sm:items-center sm:justify-between">
           <p>{copyright}</p>
           {legalLinks.length > 0 && (
-            <div className="flex flex-wrap gap-4">
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5">
               {legalLinks.map((l, i) => (
                 <Link key={`l${i}`} href={l.href} className="hover:text-ink">
                   {l.label}
@@ -183,14 +188,14 @@ export async function SiteFooter() {
 function FooterCol({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div>
-      <p className="eyebrow mb-3.5">{title}</p>
-      <ul className="space-y-2.5">{children}</ul>
+      <p className="eyebrow mb-3">{title}</p>
+      <ul className="space-y-2">{children}</ul>
     </div>
   );
 }
 
 function FooterLinkItem({ href, children }: { href: string; children: React.ReactNode }) {
-  const cls = "text-sm text-ink-soft transition-colors hover:text-ink";
+  const cls = "text-meta text-ink-soft transition-colors hover:text-ink";
   return (
     <li>
       {href.startsWith("/") ? (

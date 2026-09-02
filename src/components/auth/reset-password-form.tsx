@@ -16,7 +16,7 @@ export function ResetPasswordForm() {
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sage-50">
           <Check size={24} className="text-sage" />
         </div>
-        <h1 className="mt-5 text-2xl">Password updated</h1>
+        <h1 className="mt-5 text-title">Password updated</h1>
         <p className="mt-2 text-sm text-ink-soft">
           You can now sign in with your new password.
         </p>
@@ -29,7 +29,7 @@ export function ResetPasswordForm() {
 
   return (
     <div>
-      <h1 className="text-2xl">Choose a new password</h1>
+      <h1 className="text-title">Choose a new password</h1>
       <p className="mt-1.5 text-sm text-ink-soft">Enter it twice to confirm.</p>
 
       <form action={formAction} className="mt-7 space-y-4">

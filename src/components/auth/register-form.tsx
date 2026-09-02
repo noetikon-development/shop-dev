@@ -19,12 +19,12 @@ export function RegisterForm() {
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sage-50">
           <MailCheck size={24} className="text-sage" />
         </div>
-        <h1 className="mt-5 text-2xl">Confirm your email</h1>
+        <h1 className="mt-5 text-title">Confirm your email</h1>
         <p className="mt-2 text-sm text-ink-soft">
           We&apos;ve sent a confirmation link to your inbox. Open it to activate your account, then
           sign in. The link expires in 24 hours.
         </p>
-        <p className="mt-2 text-xs text-ink-faint">
+        <p className="mt-2 text-meta text-ink-faint">
           Didn&apos;t get it? Check your spam folder, or sign in to resend it.
         </p>
         <Link href="/login" className={buttonClasses({ className: "mt-6 w-full" })}>
@@ -36,7 +36,7 @@ export function RegisterForm() {
 
   return (
     <div>
-      <h1 className="text-2xl">Create your Axiaro account</h1>
+      <h1 className="text-title">Create your Axiaro account</h1>
       <p className="mt-1.5 text-sm text-ink-soft">
         Track orders, save addresses and keep a wishlist.
       </p>
@@ -76,7 +76,7 @@ export function RegisterForm() {
         <Button type="submit" loading={pending} className="w-full">
           Create account
         </Button>
-        <p className="text-center text-xs text-ink-faint">
+        <p className="text-center text-meta text-ink-faint">
           By continuing you agree to our{" "}
           <Link href="/pages/terms" className="underline">
             Terms

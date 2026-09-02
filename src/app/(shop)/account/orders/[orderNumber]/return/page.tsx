@@ -5,6 +5,7 @@ import { ChevronLeft } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { returnEligibility, describeIneligibility } from "@/lib/returns";
 import { ReturnRequestForm } from "@/components/returns/return-request-form";
+import { buttonClasses } from "@/components/ui/button";
 
 export async function generateMetadata({
   params,
@@ -31,7 +32,7 @@ export default async function StartReturnPage({
         <ChevronLeft size={15} /> Back to order
       </Link>
       <div>
-        <h2 className="text-xl">Return items from order {orderNumber}</h2>
+        <h2 className="text-subtitle">Return items from order {orderNumber}</h2>
         <p className="mt-1.5 text-sm text-ink-soft">
           Choose what you&apos;d like to return and tell us why. We&apos;ll review your request and
           email you the next steps.
@@ -56,13 +57,16 @@ export default async function StartReturnPage({
           {elig.code === "already_open" && elig.existingReturnNumber && (
             <Link
               href={`/account/returns/${elig.existingReturnNumber}`}
-              className="btn btn-outline mt-4"
+              className={buttonClasses({ variant: "outline", size: "sm", className: "mt-4" })}
             >
               View your return
             </Link>
           )}
           {elig.code !== "already_open" && (
-            <Link href={`/account/orders/${orderNumber}`} className="btn btn-outline mt-4">
+            <Link
+              href={`/account/orders/${orderNumber}`}
+              className={buttonClasses({ variant: "outline", size: "sm", className: "mt-4" })}
+            >
               Back to order
             </Link>
           )}

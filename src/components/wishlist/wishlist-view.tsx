@@ -37,10 +37,10 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
 
   return (
     <div>
-      <p className="mb-6 text-sm text-ink-soft">
+      <p className="mb-6 text-meta text-ink-soft">
         {visible.length} saved {visible.length === 1 ? "item" : "items"}
       </p>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-9 sm:grid-cols-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-x-4 gap-y-9 md:grid-cols-3">
         {visible.map((p) =>
           p.available ? (
             <ProductCard key={p.id} product={p} showCategory />
@@ -50,7 +50,7 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
                 <div className="block aspect-[4/5] opacity-60 grayscale">
                   <ProductImage src={p.image.url} alt={p.image.alt} />
                 </div>
-                <div className="absolute inset-x-3 bottom-3 rounded-sm bg-surface/95 py-2 text-center text-xs font-medium text-ink-soft">
+                <div className="absolute inset-x-3 bottom-3 rounded-sm bg-surface/95 py-2 text-center text-meta font-medium text-ink-soft">
                   No longer available
                 </div>
                 <button
@@ -63,10 +63,10 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
                 </button>
               </div>
               <div className="mt-3.5 flex flex-1 flex-col">
-                <p className="eyebrow mb-1 !text-[10px]">{p.categoryName}</p>
-                <h3 className="text-[0.95rem] font-medium leading-snug text-ink-soft">{p.name}</h3>
-                <p className="mt-2 text-sm tabular-nums text-ink-faint">{formatPrice(p.price)}</p>
-                <p className="mt-1 text-xs text-ink-faint">
+                <p className="eyebrow mb-1">{p.categoryName}</p>
+                <h3 className="text-body font-medium leading-snug text-ink-soft">{p.name}</h3>
+                <p className="mt-2 text-meta tabular-nums text-ink-faint">{formatPrice(p.price)}</p>
+                <p className="mt-1 text-micro text-ink-faint">
                   This piece has been retired from the catalogue.
                 </p>
               </div>

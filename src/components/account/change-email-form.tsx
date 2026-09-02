@@ -14,15 +14,16 @@ export function ChangeEmailForm({ currentEmail }: { currentEmail: string }) {
 
   return (
     <div className="max-w-md space-y-3">
-      <div className="space-y-1.5">
-        <span className="block text-sm font-medium text-ink">Email</span>
-        <input
-          value={currentEmail}
-          disabled
-          className="field bg-surface-sunken text-ink-faint"
-          aria-label="Current account email"
-        />
-      </div>
+      <Field label="Email">
+        {(control) => (
+          <input
+            {...control}
+            value={currentEmail}
+            disabled
+            className="field bg-surface-sunken text-ink-faint"
+          />
+        )}
+      </Field>
 
       {attempt === null ? (
         <Button variant="outline" size="sm" onClick={() => setAttempt(Date.now())}>

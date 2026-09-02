@@ -5,6 +5,7 @@ import { CheckCircle2 } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { OrderDetail } from "@/components/order/order-detail";
+import { buttonClasses } from "@/components/ui/button";
 import { formatPrice } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Order confirmed", robots: { index: false } };
@@ -32,20 +33,20 @@ export default async function OrderConfirmationPage({
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sage-50">
           <CheckCircle2 size={26} className="text-sage" />
         </div>
-        <h1 className="mt-5 text-3xl">Thank you — your order is in</h1>
+        <h1 className="mt-5 text-title sm:text-display">Thank you — your order is in</h1>
         <p className="mt-2 text-ink-soft">
           Your order number is{" "}
           <span className="font-medium text-ink">{order.orderNumber}</span>.
         </p>
-        <p className="mt-1 text-sm text-ink-faint">
+        <p className="mt-1 text-meta text-ink-faint">
           Order total: {formatPrice(order.grandTotal)}
           {payOnDelivery && " · pay on delivery"}
         </p>
-        <div className="mt-5 flex justify-center gap-3">
-          <Link href="/account/orders" className="btn btn-outline">
+        <div className="mt-6 flex flex-wrap justify-center gap-3">
+          <Link href="/account/orders" className={buttonClasses({ variant: "outline" })}>
             View your orders
           </Link>
-          <Link href="/c/all" className="btn btn-ghost">
+          <Link href="/c/all" className={buttonClasses({ variant: "ghost" })}>
             Continue shopping
           </Link>
         </div>

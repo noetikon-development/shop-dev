@@ -19,7 +19,7 @@ export function ForgotPasswordForm() {
         <div className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-sage-50">
           <MailCheck size={24} className="text-sage" />
         </div>
-        <h1 className="mt-5 text-2xl">Check your email</h1>
+        <h1 className="mt-5 text-title">Check your email</h1>
         <p className="mt-2 text-sm text-ink-soft">
           If an account exists for that address, we&apos;ve sent a link to reset your password. It
           expires in one hour.
@@ -36,7 +36,7 @@ export function ForgotPasswordForm() {
 
   return (
     <div>
-      <h1 className="text-2xl">Reset your password</h1>
+      <h1 className="text-title">Reset your password</h1>
       <p className="mt-1.5 text-sm text-ink-soft">
         Enter your email and we&apos;ll send you a secure reset link.
       </p>

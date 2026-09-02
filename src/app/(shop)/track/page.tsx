@@ -25,7 +25,7 @@ export default async function TrackPage({ searchParams }: PageProps<"/track">) {
         <div className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-surface-sunken">
           <Package size={22} className="text-ink-soft" />
         </div>
-        <h1 className="mt-4 text-3xl">Track your order</h1>
+        <h1 className="mt-4 text-title sm:text-display">Track your order</h1>
         <p className="mt-2 text-sm text-ink-soft">
           Enter your order number and the email you used at checkout.
         </p>

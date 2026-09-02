@@ -19,7 +19,7 @@ export function LoginForm() {
 
   return (
     <div>
-      <h1 className="text-2xl">Welcome back</h1>
+      <h1 className="text-title">Welcome back</h1>
       <p className="mt-1.5 text-sm text-ink-soft">Sign in to your Axiaro account.</p>
 
       <form action={formAction} className="mt-7 space-y-4">
@@ -33,23 +33,23 @@ export function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
-        <Field
-          label={
-            <span className="flex items-center justify-between">
-              Password
-              <Link
-                href="/forgot-password"
-                className="text-xs font-normal text-ink-soft underline underline-offset-2 hover:text-ink"
-              >
-                Forgot password?
-              </Link>
-            </span>
-          }
-          type="password"
-          name="password"
-          required
-          autoComplete="current-password"
-        />
+        {/* "Forgot password?" is pinned to the label row, so the required "*"
+            after "Password" never wraps to its own line (5D-1 P0). */}
+        <div className="relative">
+          <Link
+            href="/forgot-password"
+            className="absolute right-0 top-0 text-meta font-normal text-ink-soft underline underline-offset-2 hover:text-ink"
+          >
+            Forgot password?
+          </Link>
+          <Field
+            label="Password"
+            type="password"
+            name="password"
+            required
+            autoComplete="current-password"
+          />
+        </div>
 
         {shownError && (
           <div className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">

@@ -4,17 +4,12 @@ import { ArrowRight, RotateCcw } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { listCustomerReturns } from "@/lib/returns";
 import { returnStatusLabel, returnStatusTone, returnReasonLabel } from "@/lib/returns/status";
-import { formatPrice, formatDate, cn } from "@/lib/utils";
+import { formatPrice, formatDate } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export const metadata: Metadata = { title: "Returns" };
-
-const TONE_CLASS: Record<string, string> = {
-  success: "bg-sage-50 text-sage",
-  info: "bg-clay-50 text-clay",
-  warning: "bg-surface-sunken text-ink-soft",
-  danger: "bg-clay-50 text-sale",
-  neutral: "bg-surface-sunken text-ink-soft",
-};
 
 export default async function ReturnsPage() {
   const user = await requireUser("/account/returns");
@@ -22,22 +17,22 @@ export default async function ReturnsPage() {
 
   if (returns.length === 0) {
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <RotateCcw size={24} className="text-ink-faint" />
-        <h2 className="mt-4 text-lg">No returns yet</h2>
-        <p className="mt-1.5 text-sm text-ink-soft">
-          You can start a return from a delivered order.
-        </p>
-        <Link href="/account/orders" className="btn btn-primary mt-5">
-          View orders
-        </Link>
-      </div>
+      <EmptyState
+        icon={<RotateCcw size={24} />}
+        title="No returns yet"
+        message="You can start a return from a delivered order."
+        action={
+          <Link href="/account/orders" className={buttonClasses()}>
+            View orders
+          </Link>
+        }
+      />
     );
   }
 
   return (
     <div className="space-y-5">
-      <h2 className="text-lg">Returns</h2>
+      <h2 className="text-subtitle">Returns</h2>
       <ul className="space-y-4">
         {returns.map((r) => (
           <li key={r.id} className="card-surface overflow-hidden">
@@ -47,14 +42,7 @@ export default async function ReturnsPage() {
                 <span className="text-ink-faint">Order {r.order.orderNumber}</span>
                 <span className="text-ink-faint">{formatDate(r.createdAt)}</span>
               </div>
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-1 text-xs font-semibold",
-                  TONE_CLASS[returnStatusTone(r.status)],
-                )}
-              >
-                {returnStatusLabel(r.status)}
-              </span>
+              <Badge tone={returnStatusTone(r.status)}>{returnStatusLabel(r.status)}</Badge>
             </div>
             <div className="flex items-center gap-4 px-5 py-4 text-sm">
               <p className="min-w-0 flex-1 text-ink-soft">

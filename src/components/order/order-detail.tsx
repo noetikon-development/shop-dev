@@ -2,9 +2,12 @@ import Link from "next/link";
 import { ExternalLink, Truck } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { OrderTimeline } from "@/components/order/order-timeline";
+import { Badge } from "@/components/ui/badge";
+import { buttonClasses } from "@/components/ui/button";
 import { ORDER_STATUS_META, PAYMENT_METHODS } from "@/lib/constants";
+import { orderStatusTone } from "@/lib/orders/status";
 import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
-import { formatPrice, formatDate, cn } from "@/lib/utils";
+import { formatPrice, formatDate } from "@/lib/utils";
 import type { OrderView } from "@/lib/data";
 
 export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
@@ -33,22 +36,12 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
         <div className="card-surface p-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="text-xs text-ink-faint">Order {order.orderNumber}</p>
+              <p className="text-meta text-ink-faint">Order {order.orderNumber}</p>
               <p className="mt-0.5 text-sm text-ink-soft">
                 Placed {formatDate(order.placedAt)}
               </p>
             </div>
-            <span
-              className={cn(
-                "rounded-full px-3 py-1 text-xs font-semibold",
-                meta.tone === "positive" && "bg-sage-50 text-sage",
-                meta.tone === "progress" && "bg-clay-50 text-clay",
-                meta.tone === "neutral" && "bg-surface-sunken text-ink-soft",
-                meta.tone === "negative" && "bg-clay-50 text-sale",
-              )}
-            >
-              {meta.label}
-            </span>
+            <Badge tone={orderStatusTone(order.status)}>{meta.label}</Badge>
           </div>
 
           <div className="mt-6">
@@ -57,7 +50,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
         </div>
 
         <div className="card-surface p-5">
-          <h2 className="text-lg">Items</h2>
+          <h2 className="text-subtitle">Items</h2>
           <ul className="mt-4 divide-y divide-line">
             {order.items.map((it) => (
               <li key={it.id} className="flex gap-4 py-4">
@@ -67,9 +60,9 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{it.name}</p>
                   {it.variantLabel && (
-                    <p className="mt-0.5 text-xs text-ink-faint">{it.variantLabel}</p>
+                    <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>
                   )}
-                  <p className="mt-1 text-xs text-ink-faint">Qty {it.quantity}</p>
+                  <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
                 </div>
                 <span className="text-sm font-medium tabular-nums">{formatPrice(it.lineTotal)}</span>
               </li>
@@ -80,7 +73,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
 
       <aside className="space-y-6">
         <div className="card-surface p-5">
-          <h2 className="text-lg">Summary</h2>
+          <h2 className="text-subtitle">Summary</h2>
           <dl className="mt-4 space-y-2 text-sm">
             <div className="flex justify-between">
               <dt className="text-ink-soft">Subtotal</dt>
@@ -103,7 +96,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
             </div>
             <div className="flex justify-between border-t border-line pt-2.5 font-medium">
               <dt>Total</dt>
-              <dd className="font-display text-lg">{formatPrice(order.grandTotal)}</dd>
+              <dd className="font-display text-subtitle">{formatPrice(order.grandTotal)}</dd>
             </div>
           </dl>
         </div>
@@ -144,7 +137,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
                 href={trackingLink}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="btn btn-outline mt-4 w-full py-2 text-sm"
+                className={buttonClasses({ variant: "outline", size: "sm", className: "mt-4 w-full" })}
               >
                 Track parcel <ExternalLink size={13} />
               </a>
@@ -174,7 +167,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
           </p>
         </div>
 
-        <Link href="/c/all" className="btn btn-outline w-full">
+        <Link href="/c/all" className={buttonClasses({ variant: "outline", className: "w-full" })}>
           Continue shopping
         </Link>
       </aside>

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { COUNTRIES, countryName, getCountry } from "@/lib/countries";
 import { Button } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { usePersistentAction } from "@/components/admin/ui/use-form";
 import {
   createAddressAction,
@@ -35,8 +37,8 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
     <div className="space-y-5">
       <div className="flex items-center justify-between">
         <div>
-          <h2 className="text-lg">Addresses</h2>
-          <p className="text-sm text-ink-faint">
+          <h2 className="text-subtitle">Addresses</h2>
+          <p className="mt-1 text-meta text-ink-faint">
             Saved for a faster checkout. Set a default for shipping and billing.
           </p>
         </div>
@@ -58,10 +60,7 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
 
       {editing === null &&
         (addresses.length === 0 ? (
-          <div className="card-surface flex flex-col items-center gap-3 p-10 text-center">
-            <MapPin size={20} className="text-ink-faint" />
-            <p className="text-sm text-ink-soft">No saved addresses yet.</p>
-          </div>
+          <EmptyState icon={<MapPin size={20} />} title="No saved addresses yet" />
         ) : (
           <ul className="grid gap-4 sm:grid-cols-2">
             {addresses.map((a) => (
@@ -73,18 +72,18 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                  <span className="text-micro font-semibold uppercase tracking-wider text-ink-faint">
                     {a.label}
                   </span>
                   <div className="flex flex-wrap justify-end gap-1.5">
                     {a.defaultShipping && (
-                      <Badge>
-                        <Truck size={10} /> Shipping
+                      <Badge tone="neutral" className="gap-1">
+                        <Truck size={10} aria-hidden="true" /> Shipping
                       </Badge>
                     )}
                     {a.defaultBilling && (
-                      <Badge>
-                        <CreditCard size={10} /> Billing
+                      <Badge tone="neutral" className="gap-1">
+                        <CreditCard size={10} aria-hidden="true" /> Billing
                       </Badge>
                     )}
                   </div>
@@ -105,7 +104,7 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
                   {a.phone}
                 </p>
 
-                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 border-t border-line pt-3 text-xs">
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-2 border-t border-line pt-3 text-meta">
                   <button
                     onClick={() => setEditing(a)}
                     className="inline-flex items-center gap-1 text-ink-soft hover:text-ink"
@@ -147,14 +146,6 @@ export function AddressManager({ addresses }: { addresses: AddressDTO[] }) {
           </ul>
         ))}
     </div>
-  );
-}
-
-function Badge({ children }: { children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-full bg-ink px-2 py-0.5 text-[10px] font-medium text-paper">
-      {children}
-    </span>
   );
 }
 

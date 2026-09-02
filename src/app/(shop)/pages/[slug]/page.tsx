@@ -59,7 +59,7 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
           <Markdown source={page.body} />
         </div>
         {LEGAL_SLUGS.has(slug) && (
-          <p className="mt-10 rounded-md border border-line bg-surface-sunken/50 p-3 text-xs text-ink-faint">
+          <p className="mt-10 rounded-md border border-line bg-surface-sunken/50 p-4 text-meta text-ink-faint">
             This policy is provided for general information and is not legal advice. If you have a
             question about how it applies to you, please{" "}
             <Link href="/pages/contact" className="underline underline-offset-2 hover:text-ink">

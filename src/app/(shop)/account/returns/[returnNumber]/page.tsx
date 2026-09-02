@@ -11,7 +11,8 @@ import {
 } from "@/lib/returns/status";
 import { ReturnTimeline } from "@/components/returns/return-timeline";
 import { WithdrawReturnButton } from "@/components/returns/withdraw-return-button";
-import { formatPrice, formatDate, cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { formatPrice, formatDate } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -19,14 +20,6 @@ export async function generateMetadata({
   const { returnNumber } = await params;
   return { title: `Return ${returnNumber}` };
 }
-
-const TONE_CLASS: Record<string, string> = {
-  success: "bg-sage-50 text-sage",
-  info: "bg-clay-50 text-clay",
-  warning: "bg-surface-sunken text-ink-soft",
-  danger: "bg-clay-50 text-sale",
-  neutral: "bg-surface-sunken text-ink-soft",
-};
 
 export default async function CustomerReturnDetailPage({
   params,
@@ -50,7 +43,7 @@ export default async function CustomerReturnDetailPage({
 
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-xl">Return {ret.returnNumber}</h2>
+          <h2 className="text-subtitle">Return {ret.returnNumber}</h2>
           <p className="mt-1 text-sm text-ink-soft">
             For order{" "}
             <Link href={`/account/orders/${ret.order.orderNumber}`} className="underline hover:text-ink">
@@ -59,14 +52,7 @@ export default async function CustomerReturnDetailPage({
             · requested {formatDate(ret.createdAt)}
           </p>
         </div>
-        <span
-          className={cn(
-            "rounded-full px-3 py-1 text-xs font-semibold",
-            TONE_CLASS[returnStatusTone(ret.status)],
-          )}
-        >
-          {returnStatusLabel(ret.status)}
-        </span>
+        <Badge tone={returnStatusTone(ret.status)}>{returnStatusLabel(ret.status)}</Badge>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
@@ -79,9 +65,9 @@ export default async function CustomerReturnDetailPage({
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{it.name}</p>
                     {it.variantLabel && (
-                      <p className="text-xs text-ink-faint">{it.variantLabel}</p>
+                      <p className="text-meta text-ink-faint">{it.variantLabel}</p>
                     )}
-                    <p className="mt-0.5 text-xs text-ink-faint">Qty {it.quantity}</p>
+                    <p className="mt-0.5 text-meta text-ink-faint">Qty {it.quantity}</p>
                   </div>
                   <span className="text-sm tabular-nums text-ink-soft">
                     {formatPrice(it.refundAmount)}
@@ -89,7 +75,7 @@ export default async function CustomerReturnDetailPage({
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs text-ink-faint">
+            <p className="mt-3 text-meta text-ink-faint">
               Reason: {returnReasonLabel(ret.reason)}
             </p>
             {ret.customerNote && (
@@ -132,7 +118,7 @@ export default async function CustomerReturnDetailPage({
                   </div>
                 ) : null}
               </dl>
-              <p className="mt-3 text-xs text-ink-faint">
+              <p className="mt-3 text-meta text-ink-faint">
                 Depending on the original payment method, a completed refund can take a few business
                 days to reach you.
               </p>

@@ -10,7 +10,7 @@ export default async function AccountPasswordPage() {
   return (
     <div className="space-y-5">
       <div>
-        <h2 className="text-lg">Change password</h2>
+        <h2 className="text-subtitle">Change password</h2>
         <p className="mt-1 text-sm text-ink-soft">
           Enter your current password, then choose a new one.
         </p>

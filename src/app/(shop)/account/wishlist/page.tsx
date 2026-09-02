@@ -12,7 +12,7 @@ export default async function AccountWishlistPage() {
 
   return (
     <section>
-      <h2 className="text-2xl">Wishlist</h2>
+      <h2 className="text-subtitle">Wishlist</h2>
       <p className="mt-1.5 text-sm text-ink-soft">
         Pieces you&apos;ve saved for later. Saved to your account and synced across devices.
       </p>
