@@ -10,6 +10,7 @@ import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
 import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendOrderConfirmation } from "@/lib/email/notifications";
+import { getPaymentsConfig } from "@/lib/payments/config";
 import {
   getActiveShippingMethods,
   getFreeShippingThreshold,
@@ -87,6 +88,10 @@ export type CheckoutData = {
   addresses: AddressDTO[];
   defaultShippingId: string | null;
   defaultBillingId: string | null;
+  /** Phase 6B. When `enabled`, "Place order" starts a PayMongo hosted checkout
+   *  (`methods` = the lowercased non-COD methods). When false, checkout is
+   *  pay-on-delivery exactly as before. */
+  onlinePayment: { enabled: boolean; methods: string[] };
 };
 
 function withEffectiveRates(
@@ -110,15 +115,22 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       addresses: [],
       defaultShippingId: null,
       defaultBillingId: null,
+      onlinePayment: { enabled: false, methods: [] },
     };
   }
 
-  const [cart, addresses, methods, freeThreshold] = await Promise.all([
+  const [cart, addresses, methods, freeThreshold, paymentsConfig] = await Promise.all([
     loadCart(),
     getCustomerAddresses(),
     getActiveShippingMethods(),
     getFreeShippingThreshold(),
+    getPaymentsConfig(),
   ]);
+
+  const onlineMethods = paymentsConfig.sessionsEnabled
+    ? paymentsConfig.enabledMethods.filter((m) => m.toUpperCase() !== "COD").map((m) => m.toLowerCase())
+    : [];
+  const onlinePayment = { enabled: paymentsConfig.sessionsEnabled && onlineMethods.length > 0, methods: onlineMethods };
 
   const lines: CheckoutLine[] = cart.lines.map((l) => ({
     variantId: l.variantId,
@@ -173,6 +185,7 @@ export async function getCheckoutData(): Promise<CheckoutData> {
     addresses,
     defaultShippingId: addresses.find((a) => a.defaultShipping)?.id ?? addresses[0]?.id ?? null,
     defaultBillingId: addresses.find((a) => a.defaultBilling)?.id ?? addresses[0]?.id ?? null,
+    onlinePayment,
   };
 }
 

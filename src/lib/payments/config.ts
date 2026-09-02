@@ -24,17 +24,27 @@ import { decodeSettingValue, SETTING_FIELD_BY_KEY } from "@/lib/admin/settings-r
 
 export type PaymentsMode = "test" | "live";
 
-/** The default PayMongo Hosted Checkout API base. Centralised here so the
- *  version is set in exactly one place (Phase 6A target: v2 Checkout Sessions).
- *  Overridable via PAYMONGO_API_BASE for a pinned version or a mock during
- *  Phase 6B bring-up. Always HTTPS. */
-export const DEFAULT_PAYMONGO_API_BASE = "https://api.paymongo.com/v2";
+/** The PayMongo Checkout Sessions API base — set in exactly one place.
+ *
+ *  Phase 6B: confirmed against PayMongo's own OpenAPI spec + reference docs that
+ *  Checkout Sessions live at **`POST https://api.paymongo.com/v1/checkout_sessions`**.
+ *  There is no `/v2/checkout_sessions` endpoint (the Phase 6A default of `/v2`
+ *  was based on the stage brief, not the live API, and is corrected here). If
+ *  PayMongo ever ships a v2 Checkout Sessions API, set `PAYMONGO_API_BASE`
+ *  rather than editing code.
+ *
+ *  Overridable via `PAYMONGO_API_BASE` (a pinned version, or a localhost mock
+ *  during bring-up). HTTPS is required except for an explicit `http://localhost`
+ *  / `http://127.0.0.1` mock in local development. */
+export const DEFAULT_PAYMONGO_API_BASE = "https://api.paymongo.com/v1";
 
 export function paymongoApiBase(): string {
   const override = (process.env.PAYMONGO_API_BASE ?? "").trim();
   const base = override || DEFAULT_PAYMONGO_API_BASE;
-  // Refuse a non-HTTPS base outright — payments never travel over plain HTTP.
-  return /^https:\/\//i.test(base) ? base.replace(/\/+$/, "") : DEFAULT_PAYMONGO_API_BASE;
+  const httpsOk = /^https:\/\//i.test(base);
+  const localhostHttpOk =
+    process.env.NODE_ENV !== "production" && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?\//i.test(base);
+  return httpsOk || localhostHttpOk ? base.replace(/\/+$/, "") : DEFAULT_PAYMONGO_API_BASE;
 }
 
 /** Derive test/live from the secret-key prefix. Never returns or logs the key. */
@@ -46,9 +56,14 @@ export function detectKeyMode(rawKey: string | undefined): PaymentsMode | "unkno
 }
 
 export type PaymentsConfig = {
-  /** Master switch. True only when the setting is on AND both secrets exist AND
-   *  the configured mode agrees with the key prefix AND a live key is not being
-   *  used outside production. Phase 6A: always false. */
+  /** Phase 6B gate — enough to CREATE a Checkout Session and redirect the
+   *  customer: the `payments.onlinePaymentEnabled` setting is on AND
+   *  `PAYMONGO_SECRET_KEY` is present AND `!modeMismatch`. Does NOT require the
+   *  webhook secret. */
+  sessionsEnabled: boolean;
+  /** Master switch (Phase 6C) — `sessionsEnabled` AND `PAYMONGO_WEBHOOK_SECRET`
+   *  is present, so a verified webhook can actually confirm a payment. The
+   *  webhook handler and refund routing gate on THIS. Phase 6A/6B: false. */
   onlinePaymentEnabled: boolean;
   /** Pause a paid order at PAID instead of auto-advancing to PROCESSING. */
   holdForReview: boolean;
@@ -122,9 +137,11 @@ export async function getPaymentsConfig(): Promise<PaymentsConfig> {
   const liveKeyOutsideProd = detectedMode === "live" && process.env.NODE_ENV !== "production";
   const modeMismatch = keyDisagrees || liveKeyOutsideProd;
 
+  const sessionsEnabled = onlineSetting && hasSecretKey && !modeMismatch;
+
   return {
-    onlinePaymentEnabled:
-      onlineSetting && hasSecretKey && hasWebhookSecret && !modeMismatch,
+    sessionsEnabled,
+    onlinePaymentEnabled: sessionsEnabled && hasWebhookSecret,
     holdForReview,
     mode,
     detectedMode,

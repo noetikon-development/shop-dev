@@ -12,7 +12,7 @@ import { Field } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { useCart } from "@/lib/cart-store";
-import { placeOrder } from "@/lib/checkout-actions";
+import { placeOrder, startCheckoutPayment } from "@/lib/checkout-actions";
 import { applyCoupon, removeCoupon } from "@/lib/cart-actions";
 import { countryName } from "@/lib/countries";
 import { formatPrice } from "@/lib/utils";
@@ -23,7 +23,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
   const router = useRouter();
   const hydrate = useCart((s) => s.hydrate);
 
-  const { summary, addresses, defaultShippingId, defaultBillingId } = data;
+  const { summary, addresses, defaultShippingId, defaultBillingId, onlinePayment } = data;
 
   const [shippingId, setShippingId] = useState<string | null>(defaultShippingId);
   const [sameForBilling, setSameForBilling] = useState(true);
@@ -119,15 +119,35 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       shippingMethodId: methodId,
       note,
     });
-    setSubmitting(false);
 
     if (res.ok) {
       await hydrate();
+
+      if (onlinePayment.enabled) {
+        // The order exists (PENDING_PAYMENT). Start the PayMongo hosted checkout
+        // and hand the browser to their page. The order is NOT marked paid here
+        // — a verified webhook does that (Phase 6C).
+        const pay = await startCheckoutPayment(res.orderNumber);
+        if (pay.ok) {
+          // Keep the button in its loading state until navigation happens.
+          window.location.assign(pay.checkoutUrl);
+          return;
+        }
+        setSubmitting(false);
+        setConfirming(false);
+        setError(
+          `${pay.error} Your order ${res.orderNumber} is saved — you can complete payment from your orders.`,
+        );
+        return;
+      }
+
+      setSubmitting(false);
       toast.success(res.duplicate ? "Your order was already placed" : "Order placed");
       router.push(`/order/${res.orderNumber}`);
       return;
     }
 
+    setSubmitting(false);
     setConfirming(false);
     setError(res.error);
     if (res.code === "STOCK" || res.code === "EMPTY" || res.code === "CART_GONE") {
@@ -210,10 +230,20 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
         </Section>
 
         <Section step={4} icon={<Lock size={15} />} title="Payment">
-          <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
-            <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
-            now — our team confirms it and arranges payment before dispatch.
-          </p>
+          {onlinePayment.enabled ? (
+            <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
+              <span className="font-medium text-ink">
+                You’ll be taken to our secure payment page
+              </span>{" "}
+              to pay by {formatMethods(onlinePayment.methods)}. Your order is held until payment is
+              confirmed.
+            </p>
+          ) : (
+            <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
+              <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
+              now — our team confirms it and arranges payment before dispatch.
+            </p>
+          )}
           <Field label="Order note" className="mt-4">
             {(control) => (
               <textarea
@@ -301,7 +331,11 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <div className="flex gap-2 pt-1">
                 <Button onClick={submit} loading={submitting} className="flex-1">
                   {!submitting && <Check size={15} />}
-                  Place order
+                  {onlinePayment.enabled
+                    ? submitting
+                      ? "Redirecting to payment…"
+                      : "Place order & pay"
+                    : "Place order"}
                 </Button>
                 <Button
                   variant="ghost"
@@ -337,6 +371,15 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       </aside>
     </div>
   );
+}
+
+/** "card" / "gcash" → "card or GCash", "card, GCash or Atome". Display only. */
+function formatMethods(methods: string[]): string {
+  const label = (m: string) =>
+    m === "gcash" ? "GCash" : m === "grab_pay" ? "GrabPay" : m === "card" ? "card" : m;
+  const names = methods.map(label);
+  if (names.length <= 1) return names[0] ?? "card";
+  return `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
 }
 
 function AddressRadioList({

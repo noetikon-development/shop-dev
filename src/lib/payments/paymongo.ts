@@ -94,9 +94,23 @@ export function verifyWebhookSignature(
   return timingSafeEqual(a, b) ? { ok: true } : { ok: false, reason: "mismatch" };
 }
 
+export class PaymongoTimeoutError extends Error {
+  constructor() {
+    super("PayMongo API request timed out.");
+    this.name = "PaymongoTimeoutError";
+  }
+}
+
 // ---------------------------------------------------------------------------
-// API client  (DORMANT in Phase 4-A — not imported or called anywhere)
+// API client
+//
+// Phase 6B: `createCheckoutSession` is now LIVE-callable, but only ever reached
+// via `src/lib/payments/checkout-session.ts`, which itself requires
+// `getPaymentsConfig().sessionsEnabled`. `getCheckoutSession` / `createRefund`
+// stay dormant (admin-gated reconciliation / Phase 6D).
 // ---------------------------------------------------------------------------
+
+const API_TIMEOUT_MS = 20_000;
 
 function authHeader(): string {
   const key = (process.env.PAYMONGO_SECRET_KEY ?? "").trim();
@@ -117,13 +131,25 @@ async function request<T>(
   };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
-  const res = await fetch(`${paymongoApiBase()}${path}`, {
-    method,
-    headers,
-    body: body ? JSON.stringify({ data: { attributes: body } }) : undefined,
-    // Payments must never be served from a cache.
-    cache: "no-store",
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(`${paymongoApiBase()}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify({ data: { attributes: body } }) : undefined,
+      // Payments must never be served from a cache.
+      cache: "no-store",
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if (err instanceof Error && err.name === "AbortError") throw new PaymongoTimeoutError();
+    // Network error — do not surface the raw message (may echo the URL).
+    throw new PaymongoApiError(0, "network error reaching PayMongo");
+  } finally {
+    clearTimeout(timer);
+  }
 
   const text = await res.text();
   let json: unknown;
@@ -142,28 +168,34 @@ async function request<T>(
 }
 
 export type CheckoutSessionInput = {
-  amount: number; // centavos
+  amount: number; // centavos — for our own post-check, never sent (PayMongo sums line_items)
   currency?: string;
   description: string;
   referenceNumber: string; // the order number
-  lineItems: { name: string; quantity: number; amount: number; currency: string }[];
+  lineItems: { name: string; quantity: number; amount: number; currency: string; description?: string }[];
   paymentMethodTypes: string[]; // e.g. ["card","gcash"]
   successUrl: string;
   cancelUrl: string;
   metadata?: Record<string, string>;
+  /** PayMongo's own receipt email. Off by default — Axiaro sends its own. */
+  sendEmailReceipt?: boolean;
+  /** Billing email shown on the hosted page (pre-fills, not a correlation key). */
+  billingEmail?: string;
 };
 
-/** DORMANT. Creates a hosted PayMongo Checkout Session. Phase 4-B. */
+/** Creates a hosted PayMongo Checkout Session (POST /checkout_sessions). Reached
+ *  only through the `sessionsEnabled`-gated `beginOnlinePayment` (Phase 6B). */
 export async function createCheckoutSession(
   input: CheckoutSessionInput,
   idempotencyKey: string,
 ): Promise<{ id: string; checkoutUrl: string }> {
-  const attrs = {
+  const attrs: Record<string, unknown> = {
     line_items: input.lineItems.map((li) => ({
       name: li.name,
       quantity: li.quantity,
       amount: li.amount,
       currency: li.currency,
+      ...(li.description ? { description: li.description } : {}),
     })),
     payment_method_types: input.paymentMethodTypes,
     description: input.description,
@@ -171,14 +203,22 @@ export async function createCheckoutSession(
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
     metadata: input.metadata ?? {},
+    send_email_receipt: input.sendEmailReceipt ?? false,
   };
-  const out = await request<{ data: { id: string; attributes: { checkout_url: string } } }>(
+  if (input.billingEmail) attrs.billing = { email: input.billingEmail };
+
+  const out = await request<{ data?: { id?: string; attributes?: { checkout_url?: string } } }>(
     "POST",
     "/checkout_sessions",
     attrs,
     idempotencyKey,
   );
-  return { id: out.data.id, checkoutUrl: out.data.attributes.checkout_url };
+  const id = out.data?.id;
+  const checkoutUrl = out.data?.attributes?.checkout_url;
+  if (!id || !checkoutUrl) {
+    throw new PaymongoApiError(502, "PayMongo response missing checkout_url");
+  }
+  return { id, checkoutUrl };
 }
 
 /** DORMANT. Reads a Checkout Session for reconciliation. Phase 4-B. */
