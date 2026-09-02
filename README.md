@@ -708,6 +708,169 @@ and product pages are unchanged in appearance.
   `*italic*` so a link or code span inside emphasis renders (previously shown
   raw). Still React-element output only — no HTML passthrough.
 
+## Online payments — PayMongo Hosted Checkout (Phase 6A: architecture only)
+
+The store takes **cash / pay-on-delivery only** today. Online card / e-wallet
+payment is being built in phases against **PayMongo Hosted Checkout** in
+**TEST mode**. **Phase 6A wired the configuration + client foundation and this
+documentation. No payment flow, no payment UI, and no customer redirect exist
+yet** — those are Phase 6B onward.
+
+### Target architecture
+
+```
+Axiaro checkout (server action)
+  └─ createOrderFromCart  → Order (PENDING_PAYMENT) + Payment (PENDING), server-authoritative totals
+       └─ createCheckoutSession(order)  → PayMongo POST /checkout_sessions (TEST)
+            └─ redirect customer to session.checkout_url
+                 └─ customer pays on PayMongo's hosted page
+                      └─ return to /order/<n>  (display only — NEVER marks paid)
+                      └─ POST /api/webhooks/paymongo  ← the authoritative confirmation
+                           └─ verify HMAC signature → claim event id → re-read our
+                              Payment/Order → validate amount+currency → Order PAID
+```
+
+### Server-only modules (`src/lib/payments/`)
+
+| File | Role | Phase 6A state |
+| --- | --- | --- |
+| `config.ts` | `getPaymentsConfig()` — merges `payments.*` store settings + env presence; centralises the **API base + version** (`paymongoApiBase()`, default `https://api.paymongo.com/v2`, HTTPS-enforced, `PAYMONGO_API_BASE` override); derives test/live from the `sk_test_` / `sk_live_` key prefix; `modeMismatch` guard | active (returns feature = **off**) |
+| `diagnostics.ts` | `getPaymongoDiagnostics()` — booleans/enums only, **no network, no secret**; for a future admin diagnostics view. Real connectivity is first proven in Phase 6B session creation | new in 6A |
+| `paymongo.ts` | `verifyWebhookSignature()` (used); `createCheckoutSession` / `getCheckoutSession` / `createRefund` — **dormant**, throw `PaymongoNotConfiguredError` with no key | dormant |
+| `status.ts` | `Payment.status` state machine + label/tone maps + `HANDLED_WEBHOOK_TYPES` (incl. `checkout_session.payment.paid`) | design present |
+| `webhook.ts` | `processPaymongoWebhook()` — signature-first, event-id claim (idempotency), amount/currency re-validation, order transition, audit + email. Currently: fails 401 (no webhook secret) or records + `IGNORED` (feature off) | dormant |
+| `refund.ts` | `refundRouteForOrder()` — always `"bookkeeping"` while online payment is off (P3 returns unchanged) | dormant |
+
+Webhook route: `src/app/api/webhooks/paymongo/route.ts` — `POST` only, Node runtime,
+`force-dynamic`, excluded from the auth middleware (`src/proxy.ts` — it is
+authenticated by HMAC, not a session), reads the **raw** body verbatim, caps at
+512 KB, never logs the body / signature / any secret.
+
+### Environment variables (server-only — never `NEXT_PUBLIC_`)
+
+| Name | Purpose | Phase 6A |
+| --- | --- | --- |
+| `PAYMONGO_SECRET_KEY` | API auth (`Basic base64(key:)`). `sk_test_…` only for now | **not set** in any environment |
+| `PAYMONGO_WEBHOOK_SECRET` | HMAC key for `Paymongo-Signature` verification (created in Phase 6C) | **not set** |
+| `PAYMONGO_API_BASE` | optional override / version pin (default already v2) | not set |
+
+Set them per Vercel environment (**Development / Preview / Production** are
+independent). **Production must not receive a live key until a later, explicitly
+approved stage.** A `sk_live_` key while `NODE_ENV !== "production"`, or a key
+whose prefix disagrees with the `payments.mode` setting, **hard-disables** online
+payment (`modeMismatch`).
+
+### Test / live separation
+
+`sk_test_…` → TEST · `sk_live_…` → LIVE. `detectKeyMode()` reads the prefix;
+`getPaymentsConfig().detectedMode` / `.modeMismatch` surface it. The master
+switch `onlinePaymentEnabled` is true only when **all** hold: the
+`payments.onlinePaymentEnabled` setting is on **and** both secrets are present
+**and** `!modeMismatch`. In Phase 6A it is always false.
+
+### Order ↔ Checkout Session correlation
+
+- **Primary key:** Axiaro `Order.orderNumber` (`AX-YYMMDD-NNNNN`, from the
+  `order_number_seq` Postgres sequence — deterministic, unique) → PayMongo
+  `reference_number`.
+- **Back-reference:** `Payment.providerId` (`ps_…`) stores the session id; the
+  webhook looks up the `Payment` by `providerId` (plus any nested payment id),
+  then re-reads `Payment.order`. Email is **never** a correlation key.
+- **Metadata** (PayMongo `metadata`, ≤ the provider's key limit): `order_number`,
+  `order_id`, `payment_id` — identifiers only. No name, address, phone, or line
+  detail duplicated into the provider.
+
+### Checkout Session payload (Phase 6B — design)
+
+| Field | Source |
+| --- | --- |
+| `line_items[].amount` / total | **server** — recomputed by `createOrderFromCart` from the ACTIVE cart; a client total is never trusted |
+| `currency` | `PHP` (single store currency) |
+| `line_items` | `OrderItem` snapshots (name, quantity, unit `amount`) + one line for shipping |
+| billing email | `Order.email` (= authenticated `user.email`) |
+| `reference_number` | `Order.orderNumber` |
+| `metadata` | `{ order_number, order_id, payment_id }` |
+| `success_url` | `${SITE_URL}/order/${orderNumber}` (display only) |
+| `cancel_url` | `${SITE_URL}/checkout?cancelled=1` |
+| `payment_method_types` | from `payments.enabledMethods` minus `COD` (e.g. `card`, `gcash`) |
+| `Idempotency-Key` | deterministic per order+attempt so a retried create is a no-op |
+
+### Webhook flow (Phase 6C — design; handler already written)
+
+Authoritative event: **`checkout_session.payment.paid`** (also `payment.paid`
+as a fallback). Never mark an order paid because the customer reached
+`success_url`. Steps, all in `webhook.ts`:
+
+1. **HTTPS required**, else 400.
+2. **Verify `Paymongo-Signature` HMAC** against the raw body *before* any parse
+   or DB write — fails closed with no webhook secret.
+3. **Claim the event id** — `WebhookEvent.providerId` is `@unique`;
+   `createMany({ skipDuplicates: true })`. A duplicate delivery returns `200`
+   without repeating the mutation. A known id with a different `payloadHash` is
+   logged (tamper signal) and still `200`.
+4. **Unknown / unhandled type** → record + `IGNORED`, `200` (provider stops
+   retrying).
+5. **Feature disabled** → record + `IGNORED`, no state change.
+6. **Dispatch** → re-read our `Payment` + `Order`, verify `amount` **and**
+   `currency` **and** `order.grandTotal` match our snapshot, then transition
+   `Order` `PENDING_PAYMENT → PAID` (→ `PROCESSING` unless
+   `payments.holdForReview`), write an `OrderEvent`, an audit row, and schedule
+   the confirmation email. Handler errors are recorded (`FAILED`) and answered
+   `200` so the provider does not retry-storm — a `FAILED` `WebhookEvent` is
+   visible in `/admin/payments` for manual reconciliation.
+
+### Payment-state mapping
+
+`Payment.status` (`src/lib/payments/status.ts`, model already in the schema):
+
+| State | Meaning | Set by |
+| --- | --- | --- |
+| `PENDING` | row created, no session yet | session-create step (6B) |
+| `AWAITING_PAYMENT` | hosted session created, customer paying | session-create step (6B) |
+| `PAID` | verified webhook: money captured | webhook only |
+| `FAILED` | verified webhook: declined (order stays `PENDING_PAYMENT`, customer may retry) | webhook only |
+| `EXPIRED` | session TTL elapsed unpaid | webhook only |
+| `CANCELLED` | order cancelled before payment | admin cancel path |
+| `REFUND_PENDING` / `PARTIALLY_REFUNDED` / `REFUNDED` | P3 return refund lifecycle | webhook / refund path (6D) |
+
+`Order.status` gains no new values — `PENDING_PAYMENT` (exists) is "awaiting
+payment"; `PAID` (exists) is set only from a verified webhook. `Order.paymentStatus`
+(`PENDING | UNPAID | PAID | PARTIALLY_REFUNDED | REFUNDED`) is display-only and
+webhook-written.
+
+### Idempotency
+
+- **Webhook:** `WebhookEvent.providerId` unique + `payloadHash` — see step 3 above.
+- **Session create:** deterministic `Idempotency-Key` per order (+ attempt).
+- **Order transition:** `updateMany({ where: { status: "PENDING_PAYMENT" } })` —
+  a second delivery that beats the dedup finds `count === 0` and no-ops.
+- **Email:** `EmailLog.idempotencyKey` unique (`PAYMENT_PAID:<orderId>` etc.).
+- **`Payment` "one active per order":** partial unique index
+  `payment_one_active_per_order` (in `supabase/migrations/…_rls_and_grants.sql`).
+
+### Security boundaries
+
+- Secret key + webhook secret are **server-only env vars** — never in source,
+  Git, seed files, the schema, the CMS, a `NEXT_PUBLIC_` var, a client bundle, a
+  log line, or an error message. `authHeader()` throws `PaymongoNotConfiguredError`
+  (no value) if the key is missing.
+- The webhook is the **only** thing that can mark an order paid. A browser
+  redirect to `success_url` is display-only.
+- The PayMongo `amount` is always the **server-recomputed** order total.
+- Webhook signature is verified before any parse; the raw body is read verbatim
+  and never re-serialised.
+- Payload logging: only coarse reasons / ids in production — never full payment
+  payloads or personal data.
+
+### Not implemented in Phase 6A (deliberately)
+
+Session creation call · any change to `createOrderFromCart` · a `Payment` row
+being created · the checkout UI showing a PayMongo button or redirecting · a
+webhook secret in any environment · a live key anywhere · a health-check route ·
+any schema, order, pricing, inventory, coupon, shipping, StoreSetting, CMS or
+auth change · any customer-visible behaviour difference. **The build produces no
+PayMongo network call during normal browsing and creates no payment records.**
+
 ## Data model
 
 `src/lib/data.ts` is the read layer (server-only). Mutations: coupons in
@@ -732,7 +895,7 @@ Prices are integer centavos throughout; `formatPrice` renders PHP.
    | `NEXT_PUBLIC_SUPABASE_URL` | `https://PROJECT_REF.supabase.co` |
    | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Settings → API → `anon` `public` |
    | `SUPABASE_SERVICE_ROLE_KEY` | Settings → API → `service_role` `secret` — **do not** prefix `NEXT_PUBLIC_` |
-   | `NEXT_PUBLIC_SITE_URL` | your production URL, e.g. `https://shop.demo.noetikon.tech` (needed for correct auth email links) |
+   | `NEXT_PUBLIC_SITE_URL` | your production URL, e.g. `https://axiaro.shop` (needed for correct auth email links) |
 4. **Configure Supabase Auth** (see "Supabase Auth dashboard settings" above) — Site URL + Redirect URLs.
 5. **Create the schema + seed data** once, from your machine (uses `DIRECT_URL`):
    ```bash

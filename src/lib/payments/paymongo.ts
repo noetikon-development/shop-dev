@@ -1,23 +1,31 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import type { PaymentsMode } from "@/lib/payments/config";
+import { paymongoApiBase, type PaymentsMode } from "@/lib/payments/config";
 
 /**
- * PayMongo API + webhook-signature primitives (Step 21 P4).
+ * PayMongo API + webhook-signature primitives (Step 21 P4; API base centralised
+ * in Phase 6A).
  *
- * Phase 4-A status:
+ * Status (Phase 6A):
  *  - `verifyWebhookSignature` is USED by the webhook route (it's a pure crypto
  *    check; if no secret is configured it fails closed).
  *  - `createCheckoutSession` / `createRefund` / `getCheckoutSession` are the
- *    Phase 4-B/4-D API calls. They are DORMANT — nothing in Phase 4-A imports or
- *    calls them, and each throws `PaymongoNotConfiguredError` unless
- *    PAYMONGO_SECRET_KEY is set.
+ *    Phase 6B/6D API calls. They are DORMANT — nothing in the customer checkout
+ *    flow imports or calls them; the only references are admin-gated
+ *    reconciliation paths that themselves check `getPaymentsConfig()` first.
+ *    Each throws `PaymongoNotConfiguredError` unless PAYMONGO_SECRET_KEY is set.
  *
- * The secret key and webhook secret are read from server-only env vars and are
- * never logged, never returned, never placed in a NEXT_PUBLIC_ variable.
+ * The API base + version live in ONE place — `paymongoApiBase()` in config.ts
+ * (default `https://api.paymongo.com/v2`, HTTPS-enforced, overridable via
+ * PAYMONGO_API_BASE). The secret key and webhook secret are read from
+ * server-only env vars and are never logged, never returned, never placed in a
+ * NEXT_PUBLIC_ variable.
+ *
+ * NOTE for Phase 6B: confirm the exact Checkout Sessions path + payload shape
+ * against the current PayMongo docs on the first real call, and pin
+ * PAYMONGO_API_BASE if the account is on a different version.
  */
 
-const API_BASE = "https://api.paymongo.com/v1";
 const MAX_SIGNATURE_SKEW_SECONDS = 300;
 
 export class PaymongoNotConfiguredError extends Error {
@@ -109,7 +117,7 @@ async function request<T>(
   };
   if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
 
-  const res = await fetch(`${API_BASE}${path}`, {
+  const res = await fetch(`${paymongoApiBase()}${path}`, {
     method,
     headers,
     body: body ? JSON.stringify({ data: { attributes: body } }) : undefined,
