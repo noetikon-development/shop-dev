@@ -12,6 +12,7 @@ import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { FreeShippingMeter } from "@/components/ui/free-shipping-meter";
+import { EmptyState } from "@/components/ui/empty-state";
 
 export function CartDrawer() {
   const { cartOpen, closeCart } = useUI();
@@ -50,7 +51,7 @@ export function CartDrawer() {
                 <span className="tabular-nums">−{formatPrice(totals.discountTotal)}</span>
               </div>
             )}
-            <p className="text-xs text-ink-faint">
+            <p className="text-meta text-ink-faint">
               Shipping &amp; taxes calculated at checkout.
             </p>
             {purchasable.length > 0 ? (
@@ -69,7 +70,7 @@ export function CartDrawer() {
             <Link
               href="/cart"
               onClick={closeCart}
-              className="block text-center text-xs font-medium text-ink-soft underline underline-offset-4"
+              className="block text-center text-meta font-medium text-ink-soft underline underline-offset-4 hover:text-ink"
             >
               View full bag
             </Link>
@@ -78,20 +79,17 @@ export function CartDrawer() {
       }
     >
       {lines.length === 0 ? (
-        <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center">
-          <div className="grid h-16 w-16 place-items-center rounded-full bg-surface-sunken">
-            <ShoppingBag size={24} className="text-ink-faint" />
-          </div>
-          <div>
-            <p className="font-medium">Your bag is empty</p>
-            <p className="mt-1 text-sm text-ink-faint">
-              Saved pieces and past orders live in your account.
-            </p>
-          </div>
-          <Button variant="outline" onClick={closeCart}>
-            Continue shopping
-          </Button>
-        </div>
+        <EmptyState
+          className="h-full justify-center border-0 px-6 py-10"
+          icon={<ShoppingBag size={24} />}
+          title="Your bag is empty"
+          message="Saved pieces and past orders live in your account."
+          action={
+            <Button variant="outline" onClick={closeCart}>
+              Continue shopping
+            </Button>
+          }
+        />
       ) : (
         <div className="px-5 py-4">
           <FreeShippingMeter
@@ -131,11 +129,11 @@ export function CartDrawer() {
                     </button>
                   </div>
                   {l.optionSummary && (
-                    <p className="mt-0.5 text-xs text-ink-faint">{l.optionSummary}</p>
+                    <p className="mt-0.5 text-meta text-ink-soft">{l.optionSummary}</p>
                   )}
 
                   {l.unavailable ? (
-                    <p className="mt-1.5 inline-flex items-center gap-1 text-xs font-medium text-sale">
+                    <p className="mt-1.5 inline-flex items-center gap-1 text-meta font-medium text-sale">
                       <AlertTriangle size={12} /> No longer available
                     </p>
                   ) : (
@@ -153,7 +151,7 @@ export function CartDrawer() {
                     </div>
                   )}
                   {!l.unavailable && l.overStock && (
-                    <p className="mt-1.5 text-xs font-medium text-clay">
+                    <p className="mt-1.5 text-meta font-medium text-clay">
                       Only {l.available} left in stock
                     </p>
                   )}

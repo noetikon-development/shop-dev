@@ -8,6 +8,9 @@ import { toast } from "sonner";
 import { ProductImage } from "@/components/product-image";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { RadioCard } from "@/components/ui/radio-card";
+import { Field } from "@/components/ui/field";
+import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { useCart } from "@/lib/cart-store";
 import { placeOrder } from "@/lib/checkout-actions";
 import { applyCoupon, removeCoupon } from "@/lib/cart-actions";
@@ -57,40 +60,40 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
           ? "Some items in your bag are no longer available."
           : "Some quantities in your bag are more than we have in stock.";
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <ShoppingBag size={22} className="text-ink-faint" />
-        <p className="mt-4 font-medium">{copy}</p>
-        <Link href="/cart" className={buttonClasses({ className: "mt-5" })}>
-          Return to bag
-        </Link>
-      </div>
+      <EmptyState
+        icon={<ShoppingBag size={24} />}
+        title={copy}
+        action={
+          <Link href="/cart" className={buttonClasses()}>
+            Return to bag
+          </Link>
+        }
+      />
     );
   }
 
   if (addresses.length === 0) {
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <MapPin size={22} className="text-ink-faint" />
-        <p className="mt-4 font-medium">Add a delivery address to check out</p>
-        <p className="mt-1 max-w-sm text-sm text-ink-soft">
-          Your saved addresses are used for shipping and billing.
-        </p>
-        <Link href="/account/addresses" className={buttonClasses({ className: "mt-5" })}>
-          Add an address
-        </Link>
-      </div>
+      <EmptyState
+        icon={<MapPin size={24} />}
+        title="Add a delivery address to check out"
+        message="Your saved addresses are used for shipping and billing."
+        action={
+          <Link href="/account/addresses" className={buttonClasses()}>
+            Add an address
+          </Link>
+        }
+      />
     );
   }
 
   if (summary.shippingMethods.length === 0) {
     return (
-      <div className="flex flex-col items-center rounded-lg border border-dashed border-line-strong py-20 text-center">
-        <Truck size={22} className="text-ink-faint" />
-        <p className="mt-4 font-medium">No delivery methods are available right now</p>
-        <p className="mt-1 max-w-sm text-sm text-ink-soft">
-          Please try again shortly.
-        </p>
-      </div>
+      <EmptyState
+        icon={<Truck size={24} />}
+        title="No delivery methods are available right now"
+        message="Please try again shortly."
+      />
     );
   }
 
@@ -189,13 +192,13 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
                   <span>
                     <span className="block text-sm font-medium">{m.name}</span>
                     {m.description && (
-                      <span className="block text-xs text-ink-faint">{m.description}</span>
+                      <span className="block text-meta text-ink-faint">{m.description}</span>
                     )}
                   </span>
                   <span className="shrink-0 text-sm font-medium tabular-nums">
                     {m.effectiveRate === 0 ? "Free" : formatPrice(m.effectiveRate)}
                     {m.freeApplied && (
-                      <span className="ml-1 text-xs font-normal text-ink-faint line-through">
+                      <span className="ml-1 text-meta font-normal text-ink-faint line-through">
                         {formatPrice(m.rate)}
                       </span>
                     )}
@@ -211,17 +214,19 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
             now — our team confirms it and arranges payment before dispatch.
           </p>
-          <label className="mt-4 block">
-            <span className="mb-1.5 block text-sm font-medium">Order note</span>
-            <textarea
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              rows={2}
-              maxLength={500}
-              placeholder="Delivery instructions (optional)"
-              className="field resize-none"
-            />
-          </label>
+          <Field label="Order note" className="mt-4">
+            {(control) => (
+              <textarea
+                {...control}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                rows={2}
+                maxLength={500}
+                placeholder="Delivery instructions (optional)"
+                className="field resize-none"
+              />
+            )}
+          </Field>
         </Section>
       </div>
 
@@ -234,16 +239,16 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <li key={l.variantId} className="flex gap-3">
                 <div className="relative h-14 w-12 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
                   <ProductImage src={l.imageUrl} alt={l.name} compact sizes="48px" />
-                  <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-[10px] font-semibold text-paper">
+                  <span className="absolute -right-1.5 -top-1.5 grid h-5 min-w-5 place-items-center rounded-full bg-ink px-1 text-micro font-semibold text-paper">
                     {l.quantity}
                   </span>
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="line-clamp-1 text-sm font-medium">{l.name}</p>
                   {l.optionSummary && (
-                    <p className="text-xs text-ink-faint">{l.optionSummary}</p>
+                    <p className="text-meta text-ink-faint">{l.optionSummary}</p>
                   )}
-                  <p className="text-xs text-ink-faint">SKU {l.sku}</p>
+                  <p className="text-micro text-ink-faint">SKU {l.sku}</p>
                 </div>
                 <span className="text-sm tabular-nums">{formatPrice(l.lineTotal)}</span>
               </li>
@@ -254,7 +259,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             <CheckoutCouponField coupon={summary.coupon} />
           </div>
 
-          <dl className="mt-4 space-y-2 border-t border-line pt-4 text-sm">
+          <dl className="mt-5 space-y-2 text-sm">
             <Row label={`Subtotal (${summary.itemCount} item${summary.itemCount === 1 ? "" : "s"})`} value={formatPrice(summary.subtotal)} />
             {discount > 0 && (
               <div className="flex items-baseline justify-between text-sage">
@@ -268,7 +273,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             />
             <div className="!mt-3 flex items-baseline justify-between border-t border-line pt-3">
               <dt className="font-medium">Total</dt>
-              <dd className="font-display text-xl">{formatPrice(total)}</dd>
+              <dd className="font-display text-subtitle">{formatPrice(total)}</dd>
             </div>
           </dl>
 
@@ -321,7 +326,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
             </Button>
           )}
 
-          <p className="mt-3 text-center text-xs text-ink-faint">
+          <p className="mt-3 text-center text-meta text-ink-faint">
             By placing your order you agree to our{" "}
             <Link href="/pages/terms" className="underline">
               Terms
@@ -361,19 +366,15 @@ function AddressRadioList({
             >
               <span className="min-w-0 flex-1">
                 <span className="flex items-center gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-ink-faint">
+                  <span className="text-micro font-semibold uppercase tracking-wider text-ink-faint">
                     {a.label}
                   </span>
-                  {isDefault && (
-                    <span className="rounded-full bg-ink px-1.5 py-0.5 text-[9px] font-medium text-paper">
-                      Default
-                    </span>
-                  )}
+                  {isDefault && <Badge tone="neutral">Default</Badge>}
                 </span>
                 <span className="mt-1 block font-medium">
                   {a.firstName} {a.lastName}
                 </span>
-                <span className="block text-ink-soft">
+                <span className="mt-0.5 block text-meta text-ink-soft">
                   {a.line1}
                   {a.line2 ? `, ${a.line2}` : ""}
                   <br />
@@ -388,7 +389,7 @@ function AddressRadioList({
       </div>
       <Link
         href="/account/addresses"
-        className="inline-block text-xs font-medium text-ink-soft underline underline-offset-2 hover:text-ink"
+        className="inline-block text-meta font-medium text-ink-soft underline underline-offset-2 hover:text-ink"
       >
         Add or manage addresses
       </Link>
@@ -423,7 +424,7 @@ function Section({
   return (
     <section>
       <h2 className="mb-4 flex items-center gap-3 text-subtitle">
-        <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-xs font-semibold text-paper">
+        <span className="grid h-6 w-6 place-items-center rounded-full bg-ink text-micro font-semibold text-paper">
           {step}
         </span>
         <span className="flex items-center gap-2">
@@ -477,12 +478,12 @@ function CheckoutCouponField({
 
   if (coupon?.valid) {
     return (
-      <div className="flex items-center justify-between rounded-sm border border-sage/40 bg-sage-50 px-3 py-2 text-sm">
+      <div className="flex items-center justify-between rounded-sm border border-sage/40 bg-sage-50 px-3 py-2.5 text-sm">
         <span className="inline-flex items-center gap-2 font-medium text-sage">
-          <Tag size={13} /> {coupon.code} · −{formatPrice(coupon.discount)}
+          <Tag size={14} /> {coupon.code} · −{formatPrice(coupon.discount)}
         </span>
         <button onClick={remove} disabled={busy} className="grid tap place-items-center text-ink-faint hover:text-ink" aria-label="Remove coupon">
-          <X size={14} />
+          <X size={15} />
         </button>
       </div>
     );
@@ -501,7 +502,7 @@ function CheckoutCouponField({
             }
           }}
           placeholder="Promo code"
-          className="field !py-2 text-sm uppercase"
+          className="field !py-2.5 text-sm uppercase"
           aria-label="Promo code"
         />
         <Button type="button" variant="outline" size="sm" onClick={apply} loading={busy} className="shrink-0">
@@ -509,7 +510,7 @@ function CheckoutCouponField({
         </Button>
       </div>
       {coupon && !coupon.valid && coupon.error && (
-        <p className="text-xs text-clay">
+        <p className="text-meta text-clay">
           {coupon.code}: {coupon.error}{" "}
           <button onClick={remove} className="underline">
             Remove

@@ -2,7 +2,7 @@
 
 import { useCart } from "@/lib/cart-store";
 import { computeTotals } from "@/lib/pricing";
-import { formatPrice } from "@/lib/utils";
+import { formatPrice, pluralize } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 
 export function useOrderTotals(shippingMethodId?: string) {
@@ -31,7 +31,10 @@ export function OrderSummaryLines({
 
   return (
     <dl className="space-y-2.5 text-sm">
-      <Row label={`Subtotal (${totals.itemCount} items)`} value={formatPrice(totals.subtotal)} />
+      <Row
+        label={`Subtotal (${totals.itemCount} ${pluralize(totals.itemCount, "item")})`}
+        value={formatPrice(totals.subtotal)}
+      />
       {totals.discountTotal > 0 && (
         <Row
           label={`Discount · ${totals.couponApplied}`}
@@ -53,7 +56,7 @@ export function OrderSummaryLines({
       )}
       <div className="!mt-4 flex items-baseline justify-between border-t border-line pt-4">
         <dt className="font-medium">Total</dt>
-        <dd className="font-display text-xl">{formatPrice(totals.grandTotal)}</dd>
+        <dd className="font-display text-subtitle">{formatPrice(totals.grandTotal)}</dd>
       </div>
     </dl>
   );

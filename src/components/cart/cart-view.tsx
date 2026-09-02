@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { Trash2, ShoppingBag, ArrowRight, AlertTriangle } from "lucide-react";
+import { Trash2, ShoppingBag, ArrowRight, ArrowLeft, AlertTriangle } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { PriceTag } from "@/components/ui/primitives";
 import { CouponField } from "@/components/cart/coupon-field";
@@ -73,24 +73,24 @@ export function CartView() {
               <div className="flex min-w-0 flex-1 flex-col">
                 <div className="flex justify-between gap-3">
                   <div>
-                    <Link href={`/p/${l.slug}`} className="text-[15px] font-medium">
+                    <Link href={`/p/${l.slug}`} className="text-body font-medium">
                       {l.name}
                     </Link>
                     {l.optionSummary && (
-                      <p className="mt-0.5 text-sm text-ink-faint">{l.optionSummary}</p>
+                      <p className="mt-0.5 text-meta text-ink-soft">{l.optionSummary}</p>
                     )}
-                    <p className="mt-0.5 text-xs text-ink-faint">SKU {l.sku}</p>
+                    <p className="mt-0.5 text-micro text-ink-faint">SKU {l.sku}</p>
                   </div>
                   <PriceTag price={l.unitPrice} compareAt={l.compareAtPrice} size="sm" />
                 </div>
 
                 {l.unavailable ? (
-                  <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-sale">
+                  <p className="mt-2 inline-flex items-center gap-1.5 text-meta font-medium text-sale">
                     <AlertTriangle size={14} /> No longer available
                   </p>
                 ) : (
                   l.overStock && (
-                    <p className="mt-2 inline-flex items-center gap-1.5 text-sm font-medium text-clay">
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-meta font-medium text-clay">
                       <AlertTriangle size={14} /> Only {l.available} left — quantity will be adjusted
                     </p>
                   )
@@ -98,7 +98,7 @@ export function CartView() {
 
                 <div className="mt-auto flex items-center justify-between pt-3">
                   {l.unavailable ? (
-                    <span className="text-sm text-ink-faint">—</span>
+                    <span className="text-meta text-ink-faint">—</span>
                   ) : (
                     <QuantityStepper
                       value={l.quantity}
@@ -111,7 +111,7 @@ export function CartView() {
 
                   <div className="flex items-center gap-4">
                     {!l.unavailable && (
-                      <span className="text-[15px] font-medium tabular-nums">
+                      <span className="text-body font-medium tabular-nums">
                         {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
                       </span>
                     )}
@@ -131,14 +131,14 @@ export function CartView() {
 
         <Link
           href="/c/all"
-          className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-ink-soft hover:text-ink"
+          className="mt-6 inline-flex items-center gap-1.5 text-meta font-medium text-ink-soft hover:text-ink"
         >
-          ← Continue shopping
+          <ArrowLeft size={15} aria-hidden="true" /> Continue shopping
         </Link>
       </div>
 
       <aside className="lg:sticky lg:top-28 lg:h-fit">
-        <div className="card-surface p-5">
+        <div className="card-surface p-5 sm:p-6">
           <h2 className="text-subtitle">Order summary</h2>
           <div className="mt-4">
             <CouponField />
@@ -148,12 +148,16 @@ export function CartView() {
           </div>
           <Link
             href="/checkout"
-            className={buttonClasses({ className: "mt-5 w-full aria-disabled:pointer-events-none aria-disabled:opacity-50" })}
+            className={buttonClasses({
+              size: "lg",
+              className:
+                "mt-6 w-full aria-disabled:pointer-events-none aria-disabled:opacity-50",
+            })}
             aria-disabled={purchasable.length === 0}
           >
             Checkout <ArrowRight size={16} />
           </Link>
-          <p className="mt-3 text-center text-xs text-ink-faint">
+          <p className="mt-3 text-center text-meta text-ink-faint">
             Taxes included where applicable. Secure checkout.
           </p>
         </div>
