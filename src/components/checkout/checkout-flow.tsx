@@ -23,14 +23,20 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
   const router = useRouter();
   const hydrate = useCart((s) => s.hydrate);
 
-  const { summary, addresses, defaultShippingId, defaultBillingId, onlinePayment } = data;
+  const { summary, addresses, defaultShippingId, defaultBillingId, payment } = data;
 
+  const showPayChoice = payment.cod && payment.online;
   const [shippingId, setShippingId] = useState<string | null>(defaultShippingId);
   const [sameForBilling, setSameForBilling] = useState(true);
   const [billingId, setBillingId] = useState<string | null>(defaultBillingId);
   const [methodId, setMethodId] = useState<string | null>(
     summary.shippingMethods[0]?.id ?? null,
   );
+  // "cod" is the default when both channels are offered (preserves prior flow).
+  const [payChoice, setPayChoice] = useState<"cod" | "online">(
+    payment.online && !payment.cod ? "online" : "cod",
+  );
+  const goOnline = payment.online && (!payment.cod || payChoice === "online");
   const [note, setNote] = useState("");
   const [confirming, setConfirming] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -123,7 +129,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
     if (res.ok) {
       await hydrate();
 
-      if (onlinePayment.enabled) {
+      if (goOnline) {
         // The order exists (PENDING_PAYMENT). Start the PayMongo hosted checkout
         // and hand the browser to their page. The order is NOT marked paid here
         // — a verified webhook does that (Phase 6C).
@@ -230,16 +236,51 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
         </Section>
 
         <Section step={4} icon={<Lock size={15} />} title="Payment">
-          {onlinePayment.enabled ? (
+          {showPayChoice && (
+            <div className="mb-3 space-y-2.5">
+              <RadioCard
+                name="pay-method"
+                value="cod"
+                checked={payChoice === "cod"}
+                onSelect={() => setPayChoice("cod")}
+                align="start"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">Pay on delivery</span>
+                  <span className="block text-meta text-ink-faint">
+                    Place your order now — pay when it arrives.
+                  </span>
+                </span>
+              </RadioCard>
+              <RadioCard
+                name="pay-method"
+                value="online"
+                checked={payChoice === "online"}
+                onSelect={() => setPayChoice("online")}
+                align="start"
+              >
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">
+                    Pay online ({formatMethods(payment.methods)})
+                  </span>
+                  <span className="block text-meta text-ink-faint">
+                    You’ll be taken to our secure payment page.
+                  </span>
+                </span>
+              </RadioCard>
+            </div>
+          )}
+
+          {goOnline ? (
             <div className="space-y-2">
               <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
                 <span className="font-medium text-ink">
                   You’ll be taken to our secure payment page
                 </span>{" "}
-                to pay by {formatMethods(onlinePayment.methods)}. Your order is held until payment is
+                to pay by {formatMethods(payment.methods)}. Your order is held until payment is
                 confirmed.
               </p>
-              {onlinePayment.testMode && (
+              {payment.testMode && (
                 <p className="rounded-sm border border-warning/30 bg-warning-50 px-3 py-2 text-meta font-medium text-warning">
                   Test mode — no real charge is made.
                 </p>
@@ -338,7 +379,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <div className="flex gap-2 pt-1">
                 <Button onClick={submit} loading={submitting} className="flex-1">
                   {!submitting && <Check size={15} />}
-                  {onlinePayment.enabled
+                  {goOnline
                     ? submitting
                       ? "Redirecting to payment…"
                       : "Place order & pay"

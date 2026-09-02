@@ -14,24 +14,25 @@ import {
 } from "@/lib/payments/status";
 
 /**
- * PayMongo webhook processing (Step 21 P4).
+ * PayMongo webhook processing (Step 21 P4; `checkout_session.payment.paid`
+ * handler completed in Phase 6C).
  *
  * The route (`/api/webhooks/paymongo`) is a thin wrapper: read the raw body,
  * hand it here, translate the result to a status code. All security + state
  * logic lives in this server-only module.
  *
- * PHASE 4-A (dormant): online payment is gated off and no webhook secret is
- * configured in production, so `verifyWebhookSignature` fails closed → this
- * function returns 401 for every real request. When a signature *does* verify
- * (local testing with a throwaway secret), the event is recorded and — because
- * `payments.onlinePaymentEnabled` is false — marked IGNORED with no state
- * change. Once Phase 4-B enables the feature, the handlers below drive the
- * order state machine.
+ * Gating: this handler drives the order state machine only when
+ * `getPaymentsConfig().onlinePaymentEnabled` is true — which needs the setting
+ * AND `PAYMONGO_SECRET_KEY` AND `PAYMONGO_WEBHOOK_SECRET` AND a consistent
+ * test/live mode. If `PAYMONGO_WEBHOOK_SECRET` is absent `verifyWebhookSignature`
+ * fails closed → 401 for every request. If a signature verifies but the feature
+ * is off, the event is recorded + marked IGNORED with no state change.
  *
  * Trust model: the event tells us WHICH provider object changed. We then
- * re-read our own Payment / Order rows and verify amount + currency + order
- * match our snapshot before any state change. We never trust an amount, status
- * or order reference straight from the payload.
+ * re-read our own Payment / Order rows and verify the CAPTURED amount +
+ * currency (taken from the payload's `payments[]` / `payment_intent`, never
+ * assumed) match our snapshot AND the live order total before any state change.
+ * We never trust an amount, status or order reference straight from the payload.
  */
 
 export type WebhookResult = {
@@ -171,7 +172,7 @@ async function handleEvent(eventId: string, type: string, event: PaymongoEvent):
   switch (type) {
     case "checkout_session.payment.paid":
     case "payment.paid":
-      return applyPaid(eventId, objId, attrs);
+      return applyPaid(eventId, type, objId, attrs);
     case "payment.failed":
       return applyFailed(eventId, objId, attrs);
     case "checkout_session.expired":
@@ -181,23 +182,117 @@ async function handleEvent(eventId: string, type: string, event: PaymongoEvent):
   }
 }
 
-/** Find the Payment for a provider object id (session id, payment id, or a
- *  payment nested in a session's attributes). */
+type ProviderFields = {
+  id?: unknown;
+  amount?: unknown;
+  currency?: unknown;
+  status?: unknown;
+  source?: { type?: unknown } | null;
+  payment_method_used?: unknown;
+  method?: unknown;
+};
+/** A nested PayMongo resource may be flat (`{ amount }`) or wrapped
+ *  (`{ id, type, attributes: { amount } }`). Read either shape. */
+type ProviderPayObj = ProviderFields & { attributes?: ProviderFields };
+
+const num = (v: unknown): number | null =>
+  typeof v === "number" && Number.isFinite(v) ? v : null;
+const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+
+/** Merge a possibly-wrapped resource down to a flat field bag (own > attributes). */
+function flat(o: ProviderPayObj | undefined): ProviderFields & { id?: unknown } {
+  if (!o) return {};
+  const a = o.attributes ?? {};
+  return {
+    id: o.id ?? undefined,
+    amount: o.amount ?? a.amount,
+    currency: o.currency ?? a.currency,
+    status: o.status ?? a.status,
+    source: o.source ?? a.source ?? null,
+    payment_method_used: o.payment_method_used ?? a.payment_method_used,
+    method: o.method ?? a.method,
+  };
+}
+
+/**
+ * The captured amount / currency / method for a `*.paid` event.
+ *
+ * `payment.paid` — `attrs` IS the payment object.
+ * `checkout_session.payment.paid` — `attrs` is the session; the captured payment
+ *   is nested in `attrs.payments[]` (or `attrs.payment_intent.payments[]`).
+ * We ALWAYS take the amount from what PayMongo says it captured and then check
+ * it against our own snapshot + the live order total — never the reverse.
+ */
+function extractPaidFacts(type: string, attrs: Record<string, unknown>): {
+  amount: number | null;
+  currency: string | null;
+  method: string | null;
+  providerPaymentId: string | null;
+} {
+  if (type === "payment.paid") {
+    const f = flat(attrs as ProviderPayObj);
+    const source = f.source as { type?: unknown } | undefined;
+    return {
+      amount: num(f.amount),
+      currency: str(f.currency),
+      method: str(source?.type) ?? str(f.payment_method_used) ?? str(f.method),
+      providerPaymentId: str(f.id) ?? str(attrs.id),
+    };
+  }
+  const piRaw = attrs.payment_intent as ProviderPayObj | undefined;
+  const pi = flat(piRaw);
+  const piPayments = (piRaw?.attributes as { payments?: ProviderPayObj[] } | undefined)?.payments ?? [];
+  const pool: ProviderPayObj[] = [
+    ...((attrs.payments as ProviderPayObj[] | undefined) ?? []),
+    ...piPayments,
+  ].map((p) => ({ ...flat(p) }));
+  const paid = pool.find((p) => String(p.status).toLowerCase() === "paid") ?? pool[0];
+  return {
+    amount: num(paid?.amount) ?? num(pi.amount),
+    currency: str(paid?.currency) ?? str(pi.currency),
+    method: str((paid?.source as { type?: unknown } | undefined)?.type),
+    providerPaymentId: str(paid?.id),
+  };
+}
+
+/** Find the Payment for a provider event: by any provider id present in the
+ *  payload (session id, payment intent id, nested payment ids), falling back to
+ *  our own `payment_id` carried in the session metadata. */
 async function findPayment(objId: string, attrs: Record<string, unknown>) {
+  const include = {
+    order: { select: { id: true, orderNumber: true, status: true, grandTotal: true } },
+  } as const;
+
   const candidates = new Set<string>([objId]);
   const nested = attrs.payment_intent_id ?? attrs.checkout_session_id;
   if (typeof nested === "string") candidates.add(nested);
-  const payments = (attrs.payments as { id?: string }[] | undefined) ?? [];
-  for (const p of payments) if (p.id) candidates.add(p.id);
+  const pi = attrs.payment_intent as ProviderPayObj | undefined;
+  if (typeof pi?.id === "string") candidates.add(pi.id);
+  const payments: ProviderPayObj[] = [
+    ...((attrs.payments as ProviderPayObj[] | undefined) ?? []),
+    ...((pi?.attributes as { payments?: ProviderPayObj[] } | undefined)?.payments ?? []),
+  ];
+  for (const p of payments) {
+    const id = p.id ?? p.attributes?.id;
+    if (typeof id === "string") candidates.add(id);
+  }
 
-  return prisma.payment.findFirst({
+  const byProvider = await prisma.payment.findFirst({
     where: { providerId: { in: [...candidates] } },
-    include: { order: { select: { id: true, orderNumber: true, status: true, grandTotal: true } } },
+    include,
   });
+  if (byProvider) return byProvider;
+
+  const ourId = (attrs.metadata as { payment_id?: unknown } | undefined)?.payment_id;
+  if (typeof ourId === "string" && ourId) {
+    return prisma.payment.findFirst({ where: { id: ourId }, include });
+  }
+  return null;
 }
 
 async function applyPaid(
   eventId: string,
+  type: string,
   objId: string,
   attrs: Record<string, unknown>,
 ): Promise<void> {
@@ -207,13 +302,15 @@ async function applyPaid(
     throw new Error(`order ${payment.order.orderNumber} is cancelled — manual review`);
   }
 
-  const paidAmount = Number(attrs.amount ?? payment.amount);
-  const currency = String(attrs.currency ?? payment.currency).toUpperCase();
-  if (paidAmount !== payment.amount || paidAmount !== payment.order.grandTotal) {
+  const facts = extractPaidFacts(type, attrs);
+  if (facts.amount == null) throw new Error("paid event carried no captured amount");
+  // The amount PayMongo captured must match BOTH our snapshot AND the live order.
+  if (facts.amount !== payment.amount || facts.amount !== payment.order.grandTotal) {
     throw new Error(
-      `amount mismatch: paid ${paidAmount}, payment ${payment.amount}, order ${payment.order.grandTotal}`,
+      `amount mismatch: captured ${facts.amount}, payment ${payment.amount}, order ${payment.order.grandTotal}`,
     );
   }
+  const currency = (facts.currency ?? payment.currency).toUpperCase();
   if (currency !== payment.currency.toUpperCase()) {
     throw new Error(`currency mismatch: ${currency} vs ${payment.currency}`);
   }
@@ -222,9 +319,8 @@ async function applyPaid(
     return;
   }
 
-  const method = typeof attrs.source === "object" && attrs.source
-    ? String((attrs.source as { type?: string }).type ?? "")
-    : String(attrs.payment_method_used ?? attrs.method ?? "");
+  const paidAmount = facts.amount;
+  const method = facts.method ?? "";
   const config = await getPaymentsConfig();
 
   await prisma.$transaction(async (tx) => {
@@ -271,7 +367,14 @@ async function applyPaid(
     targetType: "order",
     targetId: payment.order.id,
     summary: `PayMongo webhook: order ${payment.order.orderNumber} paid (${paidAmount} centavos, ${method || "unknown method"})`,
-    meta: { eventId, providerId: payment.providerId, amount: paidAmount, method, holdForReview: config.holdForReview },
+    meta: {
+      eventId,
+      providerId: payment.providerId,
+      providerPaymentId: facts.providerPaymentId,
+      amount: paidAmount,
+      method,
+      holdForReview: config.holdForReview,
+    },
   });
 
   scheduleEmail(() => sendPaymentConfirmation(payment.order.id));

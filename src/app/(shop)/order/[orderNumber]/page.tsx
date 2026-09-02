@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { CheckCircle2, Clock, Info } from "lucide-react";
 import { getCurrentUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
+import { prisma } from "@/lib/prisma";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { OrderDetail } from "@/components/order/order-detail";
 import { CompletePaymentButton } from "@/components/order/complete-payment-button";
@@ -32,8 +33,24 @@ export default async function OrderConfirmationPage({
 
   const config = await getPaymentsConfig();
   const awaitingPayment = order.status === "PENDING_PAYMENT";
-  const onlinePayable = awaitingPayment && config.sessionsEnabled;
   const isPaid = order.paymentStatus === "PAID" || order.status === "PAID";
+
+  // Offer "Complete payment" only when the customer has actually started an
+  // online payment (an active Payment row) or bounced back from a cancel — not
+  // for a plain pay-on-delivery order.
+  const hasActivePayment =
+    awaitingPayment && config.sessionsEnabled
+      ? (await prisma.payment.count({
+          where: { orderId: order.id, status: { in: ["PENDING", "AWAITING_PAYMENT"] } },
+        })) > 0
+      : false;
+  // Don't offer a retry on the `?pay=return` path — that customer just paid and
+  // we're waiting on the webhook; a second attempt would be confusing.
+  const onlinePayable =
+    awaitingPayment &&
+    config.sessionsEnabled &&
+    pay !== "return" &&
+    (hasActivePayment || pay === "cancelled");
 
   // The return/cancel routes are DISPLAY ONLY — this page never trusts `pay`
   // or any query parameter as proof of payment, and never mutates the order.

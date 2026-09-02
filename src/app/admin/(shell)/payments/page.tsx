@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requirePermission } from "@/lib/admin/rbac";
 import { listAdminPayments, getPaymentsAdminConfig, listStuckPayments } from "@/lib/admin/payments";
+import { getPaymongoDiagnostics } from "@/lib/payments/diagnostics";
 import { PageHeader, FilterBar, SearchInput, FilterSelect, Pagination, Card } from "@/components/admin/ui";
 import { PaymentsTable } from "@/components/admin/payments/payments-table";
 import { PAYMENT_STATUSES, paymentStatusLabel } from "@/lib/payments/status";
@@ -18,7 +19,7 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
   const sp = await searchParams;
   const str = (v: string | string[] | undefined) => (typeof v === "string" ? v : undefined);
 
-  const [{ rows, total, pageCount, page: current }, config, stuck] = await Promise.all([
+  const [{ rows, total, pageCount, page: current }, config, stuck, diag] = await Promise.all([
     listAdminPayments({
       q: str(sp.q),
       status: str(sp.status),
@@ -27,6 +28,7 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
     }),
     getPaymentsAdminConfig(),
     listStuckPayments(),
+    getPaymongoDiagnostics(),
   ]);
 
   const searching = Boolean(str(sp.q) || str(sp.status) || str(sp.range));
@@ -38,14 +40,43 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
         description="PayMongo payment records and their refund status. Order payment state is only ever advanced by a signature-verified provider webhook — never from this screen."
       />
 
+      {/* PayMongo config diagnostics — booleans / enums only, no secret values. */}
+      <Card className="mb-5 text-sm">
+        <p className="font-medium text-ink">PayMongo configuration</p>
+        <dl className="mt-2 grid gap-x-6 gap-y-1 sm:grid-cols-2">
+          {(
+            [
+              ["Sessions can be created", diag.secretKeyPresent && !diag.modeMismatch && config.sessionsEnabled ? "yes" : "no"],
+              ["Webhook confirmation live", diag.onlinePaymentEnabled ? "yes" : "no"],
+              ["Secret key", diag.secretKeyPresent ? "configured" : "not set"],
+              ["Webhook secret", diag.webhookSecretPresent ? "configured" : "not set"],
+              ["Key mode (from prefix)", diag.detectedMode],
+              ["Configured mode", diag.configuredMode],
+              ["Mode mismatch", diag.modeMismatch ? "YES — feature disabled" : "no"],
+              ["API base", diag.apiBase],
+              ["Runtime", diag.nodeEnv],
+            ] as const
+          ).map(([k, v]) => (
+            <div key={k} className="flex justify-between gap-4 border-b border-line/60 py-1">
+              <dt className="text-ink-faint">{k}</dt>
+              <dd className="text-right font-medium text-ink">{String(v)}</dd>
+            </div>
+          ))}
+        </dl>
+        <p className="mt-2 text-xs text-ink-faint">{diag.summary}</p>
+      </Card>
+
       {!config.onlinePaymentEnabled && (
         <Card className="mb-5 border-l-4 border-l-clay bg-clay-50/40 text-sm">
-          <p className="font-medium text-ink">Online payment is currently disabled.</p>
+          <p className="font-medium text-ink">
+            {config.sessionsEnabled
+              ? "Payment sessions are live, but the webhook is not yet confirming payments."
+              : "Online payment is currently disabled."}
+          </p>
           <p className="mt-1 text-ink-soft">
-            Checkout places orders as <span className="font-medium">awaiting payment</span> with no
-            payment step, exactly as before. The PayMongo infrastructure is deployed but dormant:
-            <code className="mx-1 text-xs">payments.onlinePaymentEnabled = false</code>
-            {config.hasSecretKey ? "" : ", and no PayMongo key is configured"}.
+            {config.sessionsEnabled
+              ? "Customers can be redirected to PayMongo, but an order will not move to PAID until PAYMONGO_WEBHOOK_SECRET is configured and the PayMongo webhook is created."
+              : "Checkout places orders as awaiting payment with no payment step, exactly as before."}
           </p>
         </Card>
       )}

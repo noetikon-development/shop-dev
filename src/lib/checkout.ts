@@ -88,11 +88,14 @@ export type CheckoutData = {
   addresses: AddressDTO[];
   defaultShippingId: string | null;
   defaultBillingId: string | null;
-  /** Phase 6B. When `enabled`, "Place order" starts a PayMongo hosted checkout
-   *  (`methods` = the lowercased non-COD methods). When false, checkout is
-   *  pay-on-delivery exactly as before. `testMode` = the configured PayMongo
-   *  mode is "test" (surface a "no real charge" note). */
-  onlinePayment: { enabled: boolean; methods: string[]; testMode: boolean };
+  /** Payment options at checkout (Phase 6B–6C).
+   *  - `cod`     — "Pay on delivery" is offered (`payments.enabledMethods` has COD).
+   *  - `online`  — a PayMongo hosted checkout can be started (`methods` = the
+   *                lowercased non-COD methods, e.g. ["card","gcash"]).
+   *  - `testMode`— the configured PayMongo mode is "test".
+   *  When both `cod` and `online` are true the customer chooses one; when only
+   *  one is true that path is used with no extra UI. */
+  payment: { cod: boolean; online: boolean; methods: string[]; testMode: boolean };
 };
 
 function withEffectiveRates(
@@ -116,7 +119,7 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       addresses: [],
       defaultShippingId: null,
       defaultBillingId: null,
-      onlinePayment: { enabled: false, methods: [], testMode: false },
+      payment: { cod: true, online: false, methods: [], testMode: false },
     };
   }
 
@@ -128,11 +131,15 @@ export async function getCheckoutData(): Promise<CheckoutData> {
     getPaymentsConfig(),
   ]);
 
+  const enabledMethods = paymentsConfig.enabledMethods.map((m) => m.toUpperCase());
   const onlineMethods = paymentsConfig.sessionsEnabled
-    ? paymentsConfig.enabledMethods.filter((m) => m.toUpperCase() !== "COD").map((m) => m.toLowerCase())
+    ? enabledMethods.filter((m) => m !== "COD").map((m) => m.toLowerCase())
     : [];
-  const onlinePayment = {
-    enabled: paymentsConfig.sessionsEnabled && onlineMethods.length > 0,
+  const payment = {
+    // COD is the default channel; it stays available unless explicitly removed
+    // from `payments.enabledMethods`.
+    cod: enabledMethods.length === 0 || enabledMethods.includes("COD"),
+    online: paymentsConfig.sessionsEnabled && onlineMethods.length > 0,
     methods: onlineMethods,
     testMode: paymentsConfig.mode === "test",
   };
@@ -190,7 +197,7 @@ export async function getCheckoutData(): Promise<CheckoutData> {
     addresses,
     defaultShippingId: addresses.find((a) => a.defaultShipping)?.id ?? addresses[0]?.id ?? null,
     defaultBillingId: addresses.find((a) => a.defaultBilling)?.id ?? addresses[0]?.id ?? null,
-    onlinePayment,
+    payment,
   };
 }
 
