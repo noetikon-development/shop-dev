@@ -47,7 +47,7 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
   const settings = slug === "contact" ? await getSiteSettings() : null;
 
   return (
-    <article className="container-page py-10 sm:py-16">
+    <article className="container-page py-8 sm:py-12">
       <div className="mx-auto max-w-2xl">
         <PageHeader
           title={page.title}
@@ -55,7 +55,7 @@ export default async function ContentPageView({ params }: PageProps<"/pages/[slu
           meta={`Last updated ${formatDate(page.updatedAt)}`}
           className="mb-0"
         />
-        <div className="mt-8 border-t border-line pt-8 text-body">
+        <div className="mt-6 border-t border-line pt-6 text-body">
           <Markdown source={page.body} />
         </div>
         {LEGAL_SLUGS.has(slug) && (
