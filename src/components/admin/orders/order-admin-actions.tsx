@@ -2,10 +2,14 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, XCircle } from "lucide-react";
+import { CheckCircle2, Loader2, XCircle } from "lucide-react";
 import { Card, Modal, Select, notify } from "@/components/admin/ui";
 import { orderStatusLabel } from "@/lib/orders/status";
-import { updateOrderStatusAction, cancelOrderAction } from "@/lib/admin/order-actions";
+import {
+  updateOrderStatusAction,
+  cancelOrderAction,
+  confirmOrderAction,
+} from "@/lib/admin/order-actions";
 
 export function OrderAdminActions({
   orderId,
@@ -13,6 +17,7 @@ export function OrderAdminActions({
   forwardStatuses,
   cancellable,
   canManage,
+  canConfirm = false,
 }: {
   orderId: string;
   status: string;
@@ -20,6 +25,8 @@ export function OrderAdminActions({
   forwardStatuses: string[];
   cancellable: boolean;
   canManage: boolean;
+  /** Pay-on-delivery "Confirm order" (PENDING_PAYMENT → PROCESSING, no online payment). */
+  canConfirm?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -27,6 +34,8 @@ export function OrderAdminActions({
   const [note, setNote] = useState("");
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [reason, setReason] = useState("");
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmNote, setConfirmNote] = useState("");
 
   if (!canManage) {
     return (
@@ -61,6 +70,20 @@ export function OrderAdminActions({
         router.refresh();
       } else {
         notify.error(res.error ?? "Could not cancel the order.");
+      }
+    });
+  }
+
+  function submitConfirm() {
+    startTransition(async () => {
+      const res = await confirmOrderAction({ orderId, note: confirmNote.trim() || undefined });
+      if (res.ok) {
+        notify.success(res.message ?? "Order confirmed.");
+        setConfirmOpen(false);
+        setConfirmNote("");
+        router.refresh();
+      } else {
+        notify.error(res.error ?? "Could not confirm the order.");
       }
     });
   }
@@ -112,10 +135,25 @@ export function OrderAdminActions({
             Update status
           </button>
         </div>
+      ) : status === "PENDING_PAYMENT" && canConfirm ? (
+        <div className="mt-3 space-y-2">
+          <p className="text-sm text-ink-soft">
+            This is a pay-on-delivery order. Confirm it to start preparing and send the customer the
+            &ldquo;preparing your order&rdquo; email. This does <strong>not</strong> mark it paid.
+          </p>
+          <button
+            type="button"
+            onClick={() => setConfirmOpen(true)}
+            disabled={pending}
+            className="btn btn-primary w-full py-2 text-sm"
+          >
+            <CheckCircle2 size={14} /> Confirm order
+          </button>
+        </div>
       ) : (
         <p className="mt-2 text-sm text-ink-soft">
           {status === "PENDING_PAYMENT"
-            ? "The next step is payment, which isn’t enabled yet."
+            ? "This order is awaiting an online payment — it moves forward automatically when the payment clears."
             : status === "PROCESSING" || status === "SHIPPED" || status === "OUT_FOR_DELIVERY"
               ? "Use the Fulfilment panel below to ship, update tracking and mark the order delivered."
               : `No status change is available from ${orderStatusLabel(status)}.`}
@@ -175,6 +213,50 @@ export function OrderAdminActions({
             rows={3}
             className="field text-sm"
             placeholder="e.g. Customer requested cancellation"
+            disabled={pending}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        open={confirmOpen}
+        onClose={() => !pending && setConfirmOpen(false)}
+        size="sm"
+        title="Confirm this order?"
+        description="The order moves to Preparing and the customer is emailed. Payment stays as pay-on-delivery — this does not record a payment."
+        footer={
+          <>
+            <button
+              type="button"
+              onClick={() => setConfirmOpen(false)}
+              disabled={pending}
+              className="btn btn-outline py-2 text-sm"
+            >
+              Not yet
+            </button>
+            <button
+              type="button"
+              onClick={submitConfirm}
+              disabled={pending}
+              className="btn btn-primary py-2 text-sm"
+            >
+              {pending && <Loader2 size={14} className="animate-spin" />}
+              Confirm order
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-1.5">
+          <label htmlFor="order-confirm-note" className="block text-xs font-medium text-ink-soft">
+            Note <span className="text-ink-faint">(optional, shown on the order timeline)</span>
+          </label>
+          <input
+            id="order-confirm-note"
+            value={confirmNote}
+            onChange={(e) => setConfirmNote(e.target.value)}
+            maxLength={300}
+            className="field text-sm"
+            placeholder="e.g. Called customer to confirm the address"
             disabled={pending}
           />
         </div>

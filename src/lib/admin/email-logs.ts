@@ -32,7 +32,6 @@ export const EMAIL_TYPES = [
   "payment_confirmation",
   "refund_issued",
   "refund_completed",
-  "refund_notification",
   "email_verification",
   "password_reset",
 ] as const;

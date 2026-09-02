@@ -11,6 +11,12 @@
  *
  * Payment stays deferred (Step 10): an admin can NOT move an order to PAID —
  * there is no manual payment mechanism, and we never fake one.
+ *
+ * Phase 7B adds ONE scoped relaxation: a "Confirm order" admin action may move
+ * an order from PENDING_PAYMENT to PROCESSING when it carries no online payment
+ * (cash / pay-on-delivery). It does NOT touch payment status and never implies
+ * money changed hands — see `confirmOrderAction`. An order with an online
+ * Payment row is still only ever confirmed by the verified PayMongo webhook.
  */
 
 import { ORDER_STATUS_META } from "@/lib/constants";
@@ -104,20 +110,37 @@ export function allowedNextStatuses(
 }
 
 /**
- * Server-side guard for a status change request. `storePickup` allows the single
- * extra transition PROCESSING → DELIVERED (a collected pickup order); it never
- * relaxes anything else.
+ * Server-side guard for a status change request.
+ *
+ * - `storePickup` allows the single extra transition PROCESSING → DELIVERED (a
+ *   collected pickup order).
+ * - `codConfirm` allows the single extra transition PENDING_PAYMENT → PROCESSING
+ *   for the "Confirm order" action on an order with no online payment. The
+ *   caller (`confirmOrderAction`) is responsible for verifying there is no
+ *   active Payment row before passing this.
+ *
+ * Neither flag relaxes anything else, and `to === "PAID"` is always rejected.
  */
 export function canTransition(
   from: string,
   to: string,
-  opts?: { storePickup?: boolean },
+  opts?: { storePickup?: boolean; codConfirm?: boolean },
 ): boolean {
   if (!isOrderStatus(from) || !isOrderStatus(to)) return false;
   if (to === "PAID") return false; // payment confirmation is deferred — never by hand
   if (to === "CANCELLED") return CANCELLABLE_STATUSES.includes(from);
   if (opts?.storePickup && from === "PROCESSING" && to === "DELIVERED") return true;
+  if (opts?.codConfirm && from === "PENDING_PAYMENT" && to === "PROCESSING") return true;
   return ORDER_STATUS_TRANSITIONS[from].includes(to);
+}
+
+/**
+ * True when the "Confirm order" (pay-on-delivery) action applies: the order is
+ * still PENDING_PAYMENT. The caller must ALSO confirm there is no active online
+ * Payment before offering / performing the action.
+ */
+export function isConfirmablePendingPayment(from: string): boolean {
+  return from === "PENDING_PAYMENT";
 }
 
 export function isCancellable(from: string): boolean {

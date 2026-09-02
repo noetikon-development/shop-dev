@@ -127,6 +127,102 @@ export async function updateOrderStatusAction(input: unknown): Promise<OrderActi
 }
 
 // ---------------------------------------------------------------------------
+// Confirm order — pay-on-delivery (Phase 7B)
+//
+// Moves an order from PENDING_PAYMENT → PROCESSING when it carries NO online
+// payment. This is the missing step for cash / pay-on-delivery orders: without
+// it a genuine COD order dead-ends at PENDING_PAYMENT and never reaches the
+// fulfilment emails. It does NOT change paymentStatus / paymentMethod and never
+// implies a payment occurred — an order with an online Payment row is confirmed
+// only by the verified PayMongo webhook.
+// ---------------------------------------------------------------------------
+
+const confirmSchema = z.object({
+  orderId: z.string().min(1).max(64),
+  note: z.string().trim().max(300).optional(),
+});
+
+export async function confirmOrderAction(input: unknown): Promise<OrderActionState> {
+  const admin = await requirePermission("manage_orders");
+
+  const parsed = confirmSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+  const { orderId, note } = parsed.data;
+
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: {
+      id: true,
+      orderNumber: true,
+      status: true,
+      paymentMethod: true,
+      payments: {
+        where: { status: { in: ["PENDING", "AWAITING_PAYMENT", "PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
+        select: { id: true },
+        take: 1,
+      },
+    },
+  });
+  if (!order) return { ok: false, error: "Order not found." };
+
+  if (order.status !== "PENDING_PAYMENT") {
+    return {
+      ok: false,
+      error: `Only an unconfirmed order can be confirmed — this one is ${orderStatusLabel(order.status)}.`,
+    };
+  }
+  if (order.payments.length > 0) {
+    return {
+      ok: false,
+      error: "This order has an online payment — it is confirmed automatically when the payment clears, not here.",
+    };
+  }
+  if (!canTransition(order.status, "PROCESSING", { codConfirm: true })) {
+    return { ok: false, error: "This order can’t be confirmed." };
+  }
+
+  // Atomic, guarded on the status we validated against.
+  const updated = await prisma.$executeRaw`
+    UPDATE "Order" SET "status" = 'PROCESSING', "updatedAt" = now()
+    WHERE "id" = ${orderId} AND "status" = 'PENDING_PAYMENT'`;
+  if (updated === 0) {
+    return { ok: false, error: "The order status changed — refresh and try again." };
+  }
+
+  await prisma.orderEvent.create({
+    data: {
+      orderId,
+      status: "PROCESSING",
+      title: EVENT_TITLE.PROCESSING,
+      detail: note || ORDER_STATUS_META.PROCESSING?.description || null,
+    },
+  });
+
+  await writeAudit({
+    actorUserId: admin.user.id,
+    action: "order.confirmed",
+    targetType: "order",
+    targetId: orderId,
+    summary: `${admin.user.email} confirmed order ${order.orderNumber} (pay on delivery): PENDING_PAYMENT → PROCESSING`,
+    meta: {
+      orderNumber: order.orderNumber,
+      from: "PENDING_PAYMENT",
+      to: "PROCESSING",
+      paymentMethod: order.paymentMethod,
+      note: note || null,
+    },
+  });
+
+  revalidateOrderPaths(order.orderNumber, orderId);
+
+  // Existing "preparing your order" notification — after the response;
+  // ORDER_PROCESSING:<orderId> dedupes if this is somehow re-run.
+  scheduleEmail(() => sendOrderProcessing(orderId));
+
+  return { ok: true, message: "Order confirmed — now preparing." };
+}
+
+// ---------------------------------------------------------------------------
 // Cancellation (+ inventory reversal)
 // ---------------------------------------------------------------------------
 

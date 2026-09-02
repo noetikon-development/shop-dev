@@ -40,7 +40,6 @@ export type EmailType =
   | "payment_confirmation"
   | "refund_issued"
   | "refund_completed"
-  | "refund_notification"
   | "email_verification"
   | "password_reset";
 
@@ -78,6 +77,56 @@ export type DispatchResult = {
 };
 
 const MAX_ERROR_LEN = 500;
+
+/**
+ * Record a FAILED EmailLog row for a message that could not even be BUILT — a
+ * template-render exception, so `dispatchEmail` was never reached. Keeps the
+ * failure visible in `/admin/email` instead of only in the server log. Never
+ * sends, never throws.
+ *
+ * Reuses the deterministic idempotency key: if a row for that key already
+ * exists and is still recoverable (SENT / SENDING / PENDING), it is left alone
+ * so a later real send can still go out; a prior FAILED / SKIPPED row is
+ * refreshed with the new render error.
+ */
+export async function recordEmailFailure(input: {
+  type: EmailType;
+  to: string;
+  idempotencyKey: string;
+  error: string;
+  userId?: string | null;
+  orderId?: string | null;
+}): Promise<DispatchResult> {
+  const error = input.error.slice(0, MAX_ERROR_LEN);
+  try {
+    const res = await prisma.emailLog.createMany({
+      data: [
+        {
+          type: input.type,
+          recipient: input.to,
+          subject: "(message not generated — template render failed)",
+          idempotencyKey: input.idempotencyKey,
+          status: "FAILED",
+          error,
+          userId: input.userId ?? null,
+          orderId: input.orderId ?? null,
+        },
+      ],
+      skipDuplicates: true,
+    });
+    if (res.count === 0) {
+      await prisma.emailLog
+        .updateMany({
+          where: { idempotencyKey: input.idempotencyKey, status: { in: ["FAILED", "SKIPPED"] } },
+          data: { status: "FAILED", error },
+        })
+        .catch(() => {});
+    }
+  } catch (err) {
+    console.error("[email] could not record render failure", input.type, err);
+  }
+  return { ok: false, status: "FAILED", error };
+}
 
 export async function dispatchEmail(input: DispatchInput): Promise<DispatchResult> {
   // 1. Claim the idempotency key. `createMany({ skipDuplicates: true })` is

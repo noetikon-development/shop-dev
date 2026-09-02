@@ -32,7 +32,6 @@ const TYPE_LABEL: Record<string, string> = {
   payment_confirmation: "Payment confirmation",
   refund_issued: "Refund issued",
   refund_completed: "Refund settled",
-  refund_notification: "Refund",
   email_verification: "Email verification",
   password_reset: "Password reset",
 };

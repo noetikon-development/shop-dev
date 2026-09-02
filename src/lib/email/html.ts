@@ -53,7 +53,28 @@ export function peso(centavos: number): string {
   return frac === "00" ? `₱${grouped}` : `₱${grouped}.${frac}`;
 }
 
+/** Compile-time fallback for the footer support address (matches `contact.email`). */
 const SUPPORT_EMAIL = "support@axiaro.shop";
+
+/**
+ * Ambient footer context for the CURRENT synchronous render (Phase 7B). Set by
+ * the server-only dispatcher immediately before it calls a template and cleared
+ * immediately after — there is never an `await` between, so a concurrent render
+ * can never observe another render's value. Lets the footer use the
+ * authoritative `contact.email` and (when set) the legal entity line without
+ * threading two more fields through every template.
+ */
+type FooterContext = {
+  supportEmail?: string;
+  legal?: { name?: string | null; address?: string | null } | null;
+};
+let footerContext: FooterContext = {};
+export function setEmailFooterContext(ctx: FooterContext | null | undefined): void {
+  footerContext = ctx ?? {};
+}
+function footerSupportEmail(): string {
+  return footerContext.supportEmail?.trim() || SUPPORT_EMAIL;
+}
 
 /**
  * "Why you received this" lines, by category. `{brand}` is substituted by
@@ -112,8 +133,11 @@ function footerHtml(opts: LayoutOptions): string {
     return `${esc(opts.brand)} · internal notification · ${link(opts.siteUrl, domain)}`;
   }
 
-  const legalName = opts.legal?.name?.trim();
-  const legalAddress = opts.legal?.address?.trim();
+  const support = footerSupportEmail();
+  // Explicit `opts.legal` wins; otherwise the ambient store-settings value.
+  const legal = opts.legal ?? footerContext.legal ?? null;
+  const legalName = legal?.name?.trim();
+  const legalAddress = legal?.address?.trim();
   const legalLine =
     legalName || legalAddress
       ? `<br>${esc([legalName, legalAddress].filter(Boolean).join(" · "))}`
@@ -123,14 +147,14 @@ function footerHtml(opts: LayoutOptions): string {
 
   const securityLine = opts.security
     ? `<br><br>This is an automated security message — you can't reply to it. If you need help, email ${link(
-        `mailto:${SUPPORT_EMAIL}`,
-        SUPPORT_EMAIL,
+        `mailto:${support}`,
+        support,
       )}.`
     : "";
 
   return (
     `<strong style="color:${PALETTE.inkSoft};">${esc(opts.brand)}</strong><br>` +
-    `${link(`mailto:${SUPPORT_EMAIL}`, SUPPORT_EMAIL)} &nbsp;·&nbsp; ${link(opts.siteUrl, domain)}` +
+    `${link(`mailto:${support}`, support)} &nbsp;·&nbsp; ${link(opts.siteUrl, domain)}` +
     legalLine +
     reasonLine +
     securityLine +
@@ -274,10 +298,13 @@ export function textBody(lines: string[]): string {
 /** Standard plain-text footer block for the customer emails. */
 export function textFooter(brand: string, siteUrl: string, reason?: string): string[] {
   const domain = siteUrl.replace(/^https?:\/\//, "");
+  const legal = footerContext.legal ?? null;
+  const legalLine = [legal?.name?.trim(), legal?.address?.trim()].filter(Boolean).join(" · ");
   return [
     ``,
     `--`,
-    `${brand} · ${SUPPORT_EMAIL} · ${domain}`,
+    `${brand} · ${footerSupportEmail()} · ${domain}`,
+    ...(legalLine ? [legalLine] : []),
     ...(reason ? [reason] : []),
     `Privacy: ${siteUrl}/pages/privacy   Terms: ${siteUrl}/pages/terms`,
   ];

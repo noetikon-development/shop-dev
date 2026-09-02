@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/site-url";
 import { getStoreBrand } from "@/lib/site-settings";
 import { courierLabel, isStorePickupCode } from "@/lib/orders/couriers";
-import { dispatchEmail, type DispatchResult } from "@/lib/email/send";
+import { dispatchEmail, recordEmailFailure, type DispatchResult, type EmailType } from "@/lib/email/send";
 import { renderOrderConfirmation } from "@/lib/email/templates/order-confirmation";
 import { renderOrderProcessing } from "@/lib/email/templates/order-processing";
 import { renderOrderShipped } from "@/lib/email/templates/order-shipped";
@@ -26,12 +26,11 @@ import { renderReturnRefundCompleted } from "@/lib/email/templates/return-refund
 import { renderPaymentConfirmation } from "@/lib/email/templates/payment-confirmation";
 import { renderRefundIssued } from "@/lib/email/templates/refund-issued";
 import { renderRefundCompleted } from "@/lib/email/templates/refund-completed";
-import { renderRefundNotification } from "@/lib/email/templates/refund-notification";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
-import { maskEmail } from "@/lib/email/html";
+import { maskEmail, setEmailFooterContext } from "@/lib/email/html";
 
 /** Account-security notices go from a no-reply address, not the orders inbox. */
 const SECURITY_FROM = "no-reply@axiaro.shop";
@@ -121,6 +120,98 @@ function orderLink(siteUrl: string, order: { orderNumber: string; userId: string
     : `${siteUrl}/track`;
 }
 
+type DispatchMeta = {
+  type: EmailType;
+  to: string;
+  idempotencyKey: string;
+  userId?: string | null;
+  orderId?: string | null;
+  from?: string;
+  replyTo?: string;
+  retry?: boolean;
+};
+
+/**
+ * Footer values for a customer email — the authoritative public support address
+ * (`contact.email`) and, when configured, the legal entity line
+ * (`business.legalName` + the store address). Read UNCACHED because this whole
+ * module runs from `after()`, outside a Next request scope. Falls back to the
+ * built-in `support@axiaro.shop` when the setting is absent / not an email.
+ */
+async function getEmailFooter(): Promise<{
+  supportEmail?: string;
+  legal?: { name: string; address: string } | null;
+}> {
+  try {
+    const rows = await prisma.storeSetting.findMany({
+      where: {
+        key: {
+          in: [
+            "contact.email",
+            "business.legalName",
+            "contact.addressLine1",
+            "contact.addressLine2",
+            "contact.city",
+            "contact.country",
+          ],
+        },
+      },
+      select: { key: true, value: true },
+    });
+    const m = new Map(rows.map((r) => [r.key, (r.value ?? "").trim()]));
+    const email = m.get("contact.email") ?? "";
+    const legalName = m.get("business.legalName") ?? "";
+    const address = [
+      m.get("contact.addressLine1"),
+      m.get("contact.addressLine2"),
+      [m.get("contact.city"), m.get("contact.country")].filter(Boolean).join(", "),
+    ]
+      .filter(Boolean)
+      .join(", ");
+    return {
+      supportEmail: EMAIL_RE.test(email) ? email : undefined,
+      legal: legalName ? { name: legalName, address } : null,
+    };
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Build the message, then dispatch it.
+ *
+ * - Sets the ambient footer context (support address / legal line) for the
+ *   synchronous template render, then clears it — there is no `await` between,
+ *   so concurrent renders can't cross-contaminate.
+ * - If the template render THROWS, record a FAILED EmailLog row (via
+ *   `recordEmailFailure`) instead of letting the failure vanish into the server
+ *   log. The business transaction that triggered this has already committed and
+ *   is unaffected either way.
+ */
+async function renderAndDispatch(
+  meta: DispatchMeta,
+  build: () => { subject: string; html: string; text: string },
+): Promise<DispatchResult> {
+  const footer = await getEmailFooter();
+  let msg: { subject: string; html: string; text: string };
+  try {
+    setEmailFooterContext(footer);
+    msg = build();
+  } catch (err) {
+    setEmailFooterContext({});
+    return recordEmailFailure({
+      type: meta.type,
+      to: meta.to,
+      idempotencyKey: meta.idempotencyKey,
+      userId: meta.userId,
+      orderId: meta.orderId,
+      error: `render_failed: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+  setEmailFooterContext({});
+  return dispatchEmail({ ...meta, ...msg });
+}
+
 const ORDER_INCLUDE = {
   items: { orderBy: { id: "asc" } as const },
   user: { select: { name: true } },
@@ -145,41 +236,40 @@ export async function sendOrderConfirmation(
       (typeof shippingAddress.firstName === "string" ? shippingAddress.firstName : null) ??
       "there";
 
-    const { subject, html, text } = renderOrderConfirmation({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      placedAt: order.placedAt,
-      customerName,
-      items: order.items.map((i) => ({
-        name: i.name,
-        variantLabel: i.variantLabel,
-        quantity: i.quantity,
-        unitPrice: i.unitPrice,
-        lineTotal: i.lineTotal,
-      })),
-      subtotal: order.subtotal,
-      discountTotal: order.discountTotal,
-      couponCode: order.couponCode,
-      shippingMethodName: order.shippingMethodName,
-      shippingFee: order.shippingFee,
-      grandTotal: order.grandTotal,
-      shippingAddress,
-      payOnDelivery: order.status === "PENDING_PAYMENT",
-    });
-
-    return dispatchEmail({
-      type: "order_confirmation",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_CREATED:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "order_confirmation",
+        to: order.email,
+        idempotencyKey: `ORDER_CREATED:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOrderConfirmation({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          placedAt: order.placedAt,
+          customerName,
+          items: order.items.map((i) => ({
+            name: i.name,
+            variantLabel: i.variantLabel,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            lineTotal: i.lineTotal,
+          })),
+          subtotal: order.subtotal,
+          discountTotal: order.discountTotal,
+          couponCode: order.couponCode,
+          shippingMethodName: order.shippingMethodName,
+          shippingFee: order.shippingFee,
+          grandTotal: order.grandTotal,
+          shippingAddress,
+          payOnDelivery: order.status === "PENDING_PAYMENT",
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOrderConfirmation", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -200,30 +290,29 @@ export async function sendOrderProcessing(
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
 
-    const { subject, html, text } = renderOrderProcessing({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName: firstNameOf(order.user?.name) ?? "there",
-      items: order.items.map((i) => ({
-        name: i.name,
-        variantLabel: i.variantLabel,
-        quantity: i.quantity,
-      })),
-    });
-
-    return dispatchEmail({
-      type: "order_processing",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_PROCESSING:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "order_processing",
+        to: order.email,
+        idempotencyKey: `ORDER_PROCESSING:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOrderProcessing({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName: firstNameOf(order.user?.name) ?? "there",
+          items: order.items.map((i) => ({
+            name: i.name,
+            variantLabel: i.variantLabel,
+            quantity: i.quantity,
+          })),
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOrderProcessing", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -246,30 +335,29 @@ export async function sendOrderShipped(
     const shippingAddress = safeParse<Record<string, unknown>>(order.shippingAddress, {});
     const customerName = firstNameOf(order.user?.name) ?? "there";
 
-    const { subject, html, text } = renderOrderShipped({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName,
-      courierLabel: courierLabel(order.courier, order.courierName) || "Courier",
-      trackingNumber: order.trackingNumber,
-      trackingUrl: order.trackingUrl,
-      shippedAt: order.shippedAt,
-      shippingAddress,
-    });
-
-    return dispatchEmail({
-      type: "order_shipped",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_SHIPPED:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "order_shipped",
+        to: order.email,
+        idempotencyKey: `ORDER_SHIPPED:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOrderShipped({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName,
+          courierLabel: courierLabel(order.courier, order.courierName) || "Courier",
+          trackingNumber: order.trackingNumber,
+          trackingUrl: order.trackingUrl,
+          shippedAt: order.shippedAt,
+          shippingAddress,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOrderShipped", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -293,28 +381,27 @@ export async function sendOutForDelivery(
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
 
-    const { subject, html, text } = renderOutForDelivery({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName: firstNameOf(order.user?.name) ?? "there",
-      courierLabel: courierLabel(order.courier, order.courierName) || "Courier",
-      trackingNumber: order.trackingNumber,
-      trackingUrl: order.trackingUrl,
-    });
-
-    return dispatchEmail({
-      type: "out_for_delivery",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_OUT_FOR_DELIVERY:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "out_for_delivery",
+        to: order.email,
+        idempotencyKey: `ORDER_OUT_FOR_DELIVERY:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOutForDelivery({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName: firstNameOf(order.user?.name) ?? "there",
+          courierLabel: courierLabel(order.courier, order.courierName) || "Courier",
+          trackingNumber: order.trackingNumber,
+          trackingUrl: order.trackingUrl,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOutForDelivery", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -335,27 +422,26 @@ export async function sendOrderDelivered(
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
 
-    const { subject, html, text } = renderOrderDelivered({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName: firstNameOf(order.user?.name) ?? "there",
-      deliveredAt: order.deliveredAt,
-      storePickup: isStorePickupCode(order.shippingMethodCode),
-    });
-
-    return dispatchEmail({
-      type: "order_delivered",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_DELIVERED:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "order_delivered",
+        to: order.email,
+        idempotencyKey: `ORDER_DELIVERED:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOrderDelivered({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName: firstNameOf(order.user?.name) ?? "there",
+          deliveredAt: order.deliveredAt,
+          storePickup: isStorePickupCode(order.shippingMethodCode),
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOrderDelivered", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -377,27 +463,26 @@ export async function sendOrderCancelled(
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
 
-    const { subject, html, text } = renderOrderCancelled({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName: firstNameOf(order.user?.name) ?? "there",
-      grandTotal: order.grandTotal,
-      reason: (reason ?? "").trim() || null,
-    });
-
-    return dispatchEmail({
-      type: "order_cancelled",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: `ORDER_CANCELLED:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "order_cancelled",
+        to: order.email,
+        idempotencyKey: `ORDER_CANCELLED:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderOrderCancelled({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName: firstNameOf(order.user?.name) ?? "there",
+          grandTotal: order.grandTotal,
+          reason: (reason ?? "").trim() || null,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendOrderCancelled", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -435,24 +520,23 @@ export async function sendWelcomeEmail(
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
 
-    const { subject, html, text } = renderWelcome({
-      brand,
-      siteUrl,
-      accountUrl: `${siteUrl}/account`,
-      firstName: firstNameOf(user.name),
-    });
-
-    return dispatchEmail({
-      type: "welcome",
-      to: user.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `WELCOME:${user.id}`,
-      userId: user.id,
-      retry: opts.retry,
-    });
+    return renderAndDispatch(
+      {
+        type: "welcome",
+        to: user.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `WELCOME:${user.id}`,
+        userId: user.id,
+        retry: opts.retry,
+      },
+      () =>
+        renderWelcome({
+          brand,
+          siteUrl,
+          accountUrl: `${siteUrl}/account`,
+          firstName: firstNameOf(user.name),
+        }),
+    );
   } catch (err) {
     console.error("[email] sendWelcomeEmail", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -477,25 +561,24 @@ export async function sendPasswordChanged(
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
     const at = opts.at ?? new Date();
 
-    const { subject, html, text } = renderPasswordChanged({
-      brand,
-      siteUrl,
-      accountEmail: user.email,
-      changedAt: at,
-      deviceSummary: opts.deviceSummary ?? null,
-      resetUrl: `${siteUrl}/forgot-password`,
-    });
-
-    return dispatchEmail({
-      type: "password_changed",
-      to: user.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `PASSWORD_CHANGED:${user.id}:${hourBucket(at)}`,
-      userId: user.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "password_changed",
+        to: user.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `PASSWORD_CHANGED:${user.id}:${hourBucket(at)}`,
+        userId: user.id,
+      },
+      () =>
+        renderPasswordChanged({
+          brand,
+          siteUrl,
+          accountEmail: user.email,
+          changedAt: at,
+          deviceSummary: opts.deviceSummary ?? null,
+          resetUrl: `${siteUrl}/forgot-password`,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendPasswordChanged", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -522,26 +605,25 @@ export async function sendEmailChanged(
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
     const at = opts.at ?? new Date();
 
-    const { subject, html, text } = renderEmailChanged({
-      brand,
-      siteUrl,
-      currentEmail: user.email,
-      newEmailMasked: maskEmail(target),
-      requestedAt: at,
-      deviceSummary: opts.deviceSummary ?? null,
-      resetUrl: `${siteUrl}/forgot-password`,
-    });
-
-    return dispatchEmail({
-      type: "email_changed",
-      to: user.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `EMAIL_CHANGE:${user.id}:${shortHash(target)}`,
-      userId: user.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "email_changed",
+        to: user.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `EMAIL_CHANGE:${user.id}:${shortHash(target)}`,
+        userId: user.id,
+      },
+      () =>
+        renderEmailChanged({
+          brand,
+          siteUrl,
+          currentEmail: user.email,
+          newEmailMasked: maskEmail(target),
+          requestedAt: at,
+          deviceSummary: opts.deviceSummary ?? null,
+          resetUrl: `${siteUrl}/forgot-password`,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendEmailChanged", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -564,25 +646,24 @@ export async function sendSignInAlert(
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
     const at = params.at ?? new Date();
 
-    const { subject, html, text } = renderSignInAlert({
-      brand,
-      siteUrl,
-      accountEmail: user.email,
-      signedInAt: at,
-      deviceSummary: params.deviceSummary || "Unknown device",
-      resetUrl: `${siteUrl}/forgot-password`,
-    });
-
-    return dispatchEmail({
-      type: "sign_in_alert",
-      to: user.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `SIGNIN_ALERT:${user.id}:${params.uaHash.slice(0, 16)}:${dayBucket(at)}`,
-      userId: user.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "sign_in_alert",
+        to: user.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `SIGNIN_ALERT:${user.id}:${params.uaHash.slice(0, 16)}:${dayBucket(at)}`,
+        userId: user.id,
+      },
+      () =>
+        renderSignInAlert({
+          brand,
+          siteUrl,
+          accountEmail: user.email,
+          signedInAt: at,
+          deviceSummary: params.deviceSummary || "Unknown device",
+          resetUrl: `${siteUrl}/forgot-password`,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendSignInAlert", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -605,26 +686,25 @@ export async function sendSupportInbound(input: SupportMessageInput): Promise<Di
     const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
     const at = input.at ?? new Date();
 
-    const { subject, html, text } = renderSupportInbound({
-      brand,
-      siteUrl,
-      name: input.name,
-      email: input.email,
-      subject: input.subject,
-      message: input.message,
-      submittedAt: at,
-    });
-
-    return dispatchEmail({
-      type: "support_inbound",
-      to,
-      subject,
-      html,
-      text,
-      from: SUPPORT_FROM,
-      replyTo: input.email,
-      idempotencyKey: `SUPPORT_INBOUND:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
-    });
+    return renderAndDispatch(
+      {
+        type: "support_inbound",
+        to,
+        from: SUPPORT_FROM,
+        replyTo: input.email,
+        idempotencyKey: `SUPPORT_INBOUND:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
+      },
+      () =>
+        renderSupportInbound({
+          brand,
+          siteUrl,
+          name: input.name,
+          email: input.email,
+          subject: input.subject,
+          message: input.message,
+          submittedAt: at,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendSupportInbound", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -637,23 +717,22 @@ export async function sendSupportAck(input: SupportMessageInput): Promise<Dispat
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
     const at = input.at ?? new Date();
 
-    const { subject, html, text } = renderSupportAck({
-      brand,
-      siteUrl,
-      customerName: firstNameOf(input.name) ?? "there",
-      subject: input.subject,
-      responseWindow: SUPPORT_RESPONSE_WINDOW,
-    });
-
-    return dispatchEmail({
-      type: "support_ack",
-      to: input.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `SUPPORT_ACK:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
-    });
+    return renderAndDispatch(
+      {
+        type: "support_ack",
+        to: input.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `SUPPORT_ACK:${supportDigest(input.email, input.subject, input.message)}:${dayBucket(at)}`,
+      },
+      () =>
+        renderSupportAck({
+          brand,
+          siteUrl,
+          customerName: firstNameOf(input.name) ?? "there",
+          subject: input.subject,
+          responseWindow: SUPPORT_RESPONSE_WINDOW,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendSupportAck", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -741,28 +820,27 @@ export async function sendReturnRequested(returnId: string): Promise<DispatchRes
     const ctx = await loadReturnContext(returnId);
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
 
-    const { subject, html, text } = renderReturnRequested({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      reasonLabel: returnReasonLabel(ctx.ret.reason),
-      items: ctx.items,
-    });
-
-    return dispatchEmail({
-      type: "return_requested",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_REQUESTED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_requested",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_REQUESTED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnRequested({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          reasonLabel: returnReasonLabel(ctx.ret.reason),
+          items: ctx.items,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnRequested", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -776,31 +854,30 @@ export async function sendReturnInbound(returnId: string): Promise<DispatchResul
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
     const to = await getSupportInboxEmail();
 
-    const { subject, html, text } = renderReturnInbound({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      adminUrl: ctx.adminUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      customerEmail: ctx.order.email,
-      reasonLabel: returnReasonLabel(ctx.ret.reason),
-      customerNote: ctx.ret.customerNote,
-      adminAssisted: ctx.ret.adminAssisted,
-      items: ctx.items,
-    });
-
-    return dispatchEmail({
-      type: "return_inbound",
-      to,
-      subject,
-      html,
-      text,
-      from: ORDERS_FROM,
-      replyTo: ctx.order.email,
-      idempotencyKey: `RETURN_INBOUND:${ctx.ret.id}`,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_inbound",
+        to,
+        from: ORDERS_FROM,
+        replyTo: ctx.order.email,
+        idempotencyKey: `RETURN_INBOUND:${ctx.ret.id}`,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnInbound({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          adminUrl: ctx.adminUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          customerEmail: ctx.order.email,
+          reasonLabel: returnReasonLabel(ctx.ret.reason),
+          customerNote: ctx.ret.customerNote,
+          adminAssisted: ctx.ret.adminAssisted,
+          items: ctx.items,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnInbound", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -814,30 +891,29 @@ export async function sendReturnApproved(returnId: string): Promise<DispatchResu
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
     const cfg = await getReturnsConfig();
 
-    const { subject, html, text } = renderReturnApproved({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      items: ctx.items,
-      instructions: cfg.instructions || null,
-      policyUrl: cfg.policyUrl || null,
-      resolutionNote: ctx.ret.resolutionNote,
-    });
-
-    return dispatchEmail({
-      type: "return_approved",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_APPROVED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_approved",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_APPROVED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          items: ctx.items,
+          instructions: cfg.instructions || null,
+          policyUrl: cfg.policyUrl || null,
+          resolutionNote: ctx.ret.resolutionNote,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnApproved", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -850,28 +926,27 @@ export async function sendReturnRejected(returnId: string): Promise<DispatchResu
     const ctx = await loadReturnContext(returnId);
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
 
-    const { subject, html, text } = renderReturnRejected({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      supportUrl: ctx.supportUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      resolutionNote: ctx.ret.resolutionNote,
-    });
-
-    return dispatchEmail({
-      type: "return_rejected",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_REJECTED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_rejected",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_REJECTED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnRejected({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          supportUrl: ctx.supportUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          resolutionNote: ctx.ret.resolutionNote,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnRejected", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -884,27 +959,26 @@ export async function sendReturnReceived(returnId: string): Promise<DispatchResu
     const ctx = await loadReturnContext(returnId);
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
 
-    const { subject, html, text } = renderReturnReceived({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      items: ctx.items,
-    });
-
-    return dispatchEmail({
-      type: "return_received",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_RECEIVED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_received",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_RECEIVED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnReceived({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          items: ctx.items,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnReceived", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -916,32 +990,32 @@ export async function sendReturnRefundInitiated(returnId: string): Promise<Dispa
   try {
     const ctx = await loadReturnContext(returnId);
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
-    if (ctx.ret.refundAmount == null) {
+    const refundAmount = ctx.ret.refundAmount;
+    if (refundAmount == null) {
       return { ok: false, status: "FAILED", error: "no_refund_amount" };
     }
 
-    const { subject, html, text } = renderReturnRefundInitiated({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      refundAmount: ctx.ret.refundAmount,
-      refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
-    });
-
-    return dispatchEmail({
-      type: "return_refund_initiated",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_REFUND_INITIATED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_refund_initiated",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_REFUND_INITIATED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnRefundInitiated({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          refundAmount,
+          refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnRefundInitiated", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -953,33 +1027,33 @@ export async function sendReturnRefundCompleted(returnId: string): Promise<Dispa
   try {
     const ctx = await loadReturnContext(returnId);
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
-    if (ctx.ret.refundAmount == null) {
+    const refundAmount = ctx.ret.refundAmount;
+    if (refundAmount == null) {
       return { ok: false, status: "FAILED", error: "no_refund_amount" };
     }
 
-    const { subject, html, text } = renderReturnRefundCompleted({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      returnNumber: ctx.ret.returnNumber,
-      orderNumber: ctx.order.orderNumber,
-      customerName: ctx.customerName,
-      refundAmount: ctx.ret.refundAmount,
-      refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
-      refundReference: ctx.ret.refundReference,
-    });
-
-    return dispatchEmail({
-      type: "return_refund_completed",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: SECURITY_FROM,
-      idempotencyKey: `RETURN_REFUND_COMPLETED:${ctx.ret.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "return_refund_completed",
+        to: ctx.order.email,
+        from: SECURITY_FROM,
+        idempotencyKey: `RETURN_REFUND_COMPLETED:${ctx.ret.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderReturnRefundCompleted({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          returnNumber: ctx.ret.returnNumber,
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          refundAmount,
+          refundMethod: (ctx.ret.refundMethod ?? "").trim() || null,
+          refundReference: ctx.ret.refundReference,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendReturnRefundCompleted", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -1043,28 +1117,27 @@ export async function sendPaymentConfirmation(orderId: string): Promise<Dispatch
       (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
       "there";
 
-    const { subject, html, text } = renderPaymentConfirmation({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName,
-      amount: payment.amount,
-      methodLabel: paidMethodLabel(payment.method),
-      paidAt: payment.paidAt ?? new Date(),
-    });
-
-    return dispatchEmail({
-      type: "payment_confirmation",
-      to: order.email,
-      subject,
-      html,
-      text,
-      from: ORDERS_FROM,
-      idempotencyKey: `PAYMENT_CONFIRMATION:${order.id}`,
-      userId: order.userId,
-      orderId: order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "payment_confirmation",
+        to: order.email,
+        from: ORDERS_FROM,
+        idempotencyKey: `PAYMENT_CONFIRMATION:${order.id}`,
+        userId: order.userId,
+        orderId: order.id,
+      },
+      () =>
+        renderPaymentConfirmation({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName,
+          amount: payment.amount,
+          methodLabel: paidMethodLabel(payment.method),
+          paidAt: payment.paidAt ?? new Date(),
+        }),
+    );
   } catch (err) {
     console.error("[email] sendPaymentConfirmation", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -1125,28 +1198,27 @@ export async function sendRefundIssued(paymentRefundId: string): Promise<Dispatc
     const ctx = await loadRefundEmailContext(paymentRefundId);
     if (!ctx) return { ok: false, status: "FAILED", error: "refund_not_found" };
 
-    const { subject, html, text } = renderRefundIssued({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      orderNumber: ctx.order.orderNumber,
-      returnNumber: ctx.returnNumber,
-      customerName: ctx.customerName,
-      amount: ctx.r.amount,
-      methodLabel: paidMethodLabel(ctx.r.payment.method),
-    });
-
-    return dispatchEmail({
-      type: "refund_issued",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: ORDERS_FROM,
-      idempotencyKey: `REFUND_ISSUED:${ctx.r.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "refund_issued",
+        to: ctx.order.email,
+        from: ORDERS_FROM,
+        idempotencyKey: `REFUND_ISSUED:${ctx.r.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderRefundIssued({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          orderNumber: ctx.order.orderNumber,
+          returnNumber: ctx.returnNumber,
+          customerName: ctx.customerName,
+          amount: ctx.r.amount,
+          methodLabel: paidMethodLabel(ctx.r.payment.method),
+        }),
+    );
   } catch (err) {
     console.error("[email] sendRefundIssued", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -1159,29 +1231,28 @@ export async function sendRefundCompleted(paymentRefundId: string): Promise<Disp
     const ctx = await loadRefundEmailContext(paymentRefundId);
     if (!ctx) return { ok: false, status: "FAILED", error: "refund_not_found" };
 
-    const { subject, html, text } = renderRefundCompleted({
-      brand: ctx.brand,
-      siteUrl: ctx.siteUrl,
-      returnUrl: ctx.returnUrl,
-      orderNumber: ctx.order.orderNumber,
-      returnNumber: ctx.returnNumber,
-      customerName: ctx.customerName,
-      amount: ctx.r.amount,
-      methodLabel: paidMethodLabel(ctx.r.payment.method),
-      partial: ctx.r.amount < ctx.r.payment.amount,
-    });
-
-    return dispatchEmail({
-      type: "refund_completed",
-      to: ctx.order.email,
-      subject,
-      html,
-      text,
-      from: ORDERS_FROM,
-      idempotencyKey: `REFUND_COMPLETED:${ctx.r.id}`,
-      userId: ctx.order.userId,
-      orderId: ctx.order.id,
-    });
+    return renderAndDispatch(
+      {
+        type: "refund_completed",
+        to: ctx.order.email,
+        from: ORDERS_FROM,
+        idempotencyKey: `REFUND_COMPLETED:${ctx.r.id}`,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+      },
+      () =>
+        renderRefundCompleted({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          returnUrl: ctx.returnUrl,
+          orderNumber: ctx.order.orderNumber,
+          returnNumber: ctx.returnNumber,
+          customerName: ctx.customerName,
+          amount: ctx.r.amount,
+          methodLabel: paidMethodLabel(ctx.r.payment.method),
+          partial: ctx.r.amount < ctx.r.payment.amount,
+        }),
+    );
   } catch (err) {
     console.error("[email] sendRefundCompleted", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
@@ -1220,60 +1291,11 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
       // Order-scoped, deterministic (re-reads the PAID Payment) — safe to re-send.
       return log.orderId ? sendPaymentConfirmation(log.orderId) : { ok: false, status: "FAILED", error: "no_order" };
     default:
-      // refund_notification / auth emails / P2 security notices / support
-      // (contact-form) emails / return (P3) emails / refund_issued /
-      // refund_completed are not retryable here: they carry time-of-event
-      // content (or a single-use provider reference) that must not be
-      // regenerated and re-sent later.
+      // auth emails / P2 security notices / support (contact-form) emails /
+      // return (P3) emails / refund_issued / refund_completed are not retryable
+      // here: they carry time-of-event content (or a single-use provider
+      // reference) that must not be regenerated and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Refund — FOUNDATION ONLY. Not called anywhere. A future real refund event
-// supplies the authoritative refund record.
-// ---------------------------------------------------------------------------
-
-export async function sendRefundNotification(params: {
-  orderId: string;
-  refundAmount: number;
-  refundReference: string;
-  method?: string;
-  idempotencyKey: string; // MUST be unique per real refund, e.g. "REFUND:<refundId>"
-}): Promise<DispatchResult> {
-  try {
-    const order = await prisma.order.findUnique({
-      where: { id: params.orderId },
-      include: { user: { select: { name: true } } },
-    });
-    if (!order || !order.email) return { ok: false, status: "FAILED", error: "order_not_found" };
-
-    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
-
-    const { subject, html, text } = renderRefundNotification({
-      brand,
-      siteUrl,
-      orderUrl: orderLink(siteUrl, order),
-      orderNumber: order.orderNumber,
-      customerName: firstNameOf(order.user?.name) ?? "there",
-      refundAmount: params.refundAmount,
-      refundReference: params.refundReference,
-      method: params.method ?? "your original payment method",
-    });
-
-    return dispatchEmail({
-      type: "refund_notification",
-      to: order.email,
-      subject,
-      html,
-      text,
-      idempotencyKey: params.idempotencyKey,
-      userId: order.userId,
-      orderId: order.id,
-    });
-  } catch (err) {
-    console.error("[email] sendRefundNotification", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
 
@@ -1290,21 +1312,21 @@ export async function sendEmailVerification(params: {
   userId?: string | null;
 }): Promise<DispatchResult> {
   const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
-  const { subject, html, text } = renderEmailVerification({
-    brand,
-    siteUrl,
-    actionUrl: params.actionUrl,
-    firstName: params.firstName ?? null,
-  });
-  return dispatchEmail({
-    type: "email_verification",
-    to: params.to,
-    subject,
-    html,
-    text,
-    idempotencyKey: params.idempotencyKey,
-    userId: params.userId ?? null,
-  });
+  return renderAndDispatch(
+    {
+      type: "email_verification",
+      to: params.to,
+      idempotencyKey: params.idempotencyKey,
+      userId: params.userId ?? null,
+    },
+    () =>
+      renderEmailVerification({
+        brand,
+        siteUrl,
+        actionUrl: params.actionUrl,
+        firstName: params.firstName ?? null,
+      }),
+  );
 }
 
 export async function sendPasswordReset(params: {
@@ -1315,19 +1337,19 @@ export async function sendPasswordReset(params: {
   userId?: string | null;
 }): Promise<DispatchResult> {
   const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
-  const { subject, html, text } = renderPasswordReset({
-    brand,
-    siteUrl,
-    actionUrl: params.actionUrl,
-    firstName: params.firstName ?? null,
-  });
-  return dispatchEmail({
-    type: "password_reset",
-    to: params.to,
-    subject,
-    html,
-    text,
-    idempotencyKey: params.idempotencyKey,
-    userId: params.userId ?? null,
-  });
+  return renderAndDispatch(
+    {
+      type: "password_reset",
+      to: params.to,
+      idempotencyKey: params.idempotencyKey,
+      userId: params.userId ?? null,
+    },
+    () =>
+      renderPasswordReset({
+        brand,
+        siteUrl,
+        actionUrl: params.actionUrl,
+        firstName: params.firstName ?? null,
+      }),
+  );
 }

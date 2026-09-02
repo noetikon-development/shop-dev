@@ -26,7 +26,6 @@ export {
   sendPaymentConfirmation,
   sendRefundIssued,
   sendRefundCompleted,
-  sendRefundNotification,
   sendEmailVerification,
   sendPasswordReset,
 } from "@/lib/email/notifications";

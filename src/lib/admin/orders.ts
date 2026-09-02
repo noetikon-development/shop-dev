@@ -229,6 +229,14 @@ export async function getAdminOrder(id: string) {
           createdAt: true,
         },
       },
+      // Presence of an online payment attempt — used to decide whether the
+      // "Confirm order" (pay-on-delivery) action applies. An order with one of
+      // these is confirmed only by the verified PayMongo webhook.
+      payments: {
+        where: { status: { in: ["PENDING", "AWAITING_PAYMENT", "PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
+        select: { id: true },
+        take: 1,
+      },
     },
   });
 
@@ -240,13 +248,17 @@ export async function getAdminOrder(id: string) {
     shippingAddress?.recipient ||
     "";
 
+  const { payments, ...rest } = order;
+
   return {
-    ...order,
+    ...rest,
     placedAt: order.placedAt.toISOString(),
     updatedAt: order.updatedAt.toISOString(),
     shippedAt: order.shippedAt?.toISOString() ?? null,
     deliveredAt: order.deliveredAt?.toISOString() ?? null,
     events: order.events.map((e) => ({ ...e, createdAt: e.createdAt.toISOString() })),
+    /** True when an online payment attempt exists — "Confirm order" then does NOT apply. */
+    hasOnlinePayment: payments.length > 0,
     shippingAddress,
     billingAddress: parseAddress(order.billingAddress),
     // Header convenience: the linked account name, else the (immutable) shipping

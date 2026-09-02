@@ -995,7 +995,7 @@ model SignInDevice {
 
 model EmailLog {
   id                String    @id @default(cuid())
-  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | return_requested | return_inbound | return_approved | return_rejected | return_received | return_refund_initiated | return_refund_completed | payment_confirmation | refund_issued | refund_completed | refund_notification | email_verification | password_reset
+  type              String // order_confirmation | order_processing | order_shipped | out_for_delivery | order_delivered | order_cancelled | welcome | password_changed | email_changed | sign_in_alert | support_inbound | support_ack | return_requested | return_inbound | return_approved | return_rejected | return_received | return_refund_initiated | return_refund_completed | payment_confirmation | refund_issued | refund_completed | email_verification | password_reset
   recipient         String // destination email address
   subject           String
   idempotencyKey    String    @unique

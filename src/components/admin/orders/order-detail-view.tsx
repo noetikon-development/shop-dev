@@ -50,12 +50,15 @@ export function OrderDetailView({
   forwardStatuses,
   cancellable,
   canManage,
+  canConfirm = false,
   storePickup,
 }: {
   order: Order;
   forwardStatuses: string[];
   cancellable: boolean;
   canManage: boolean;
+  /** Pay-on-delivery "Confirm order" is available (PENDING_PAYMENT, no online payment). */
+  canConfirm?: boolean;
   storePickup: boolean;
 }) {
   const paymentMethod = PAYMENT_METHODS.find((p) => p.id === order.paymentMethod);
@@ -194,6 +197,7 @@ export function OrderDetailView({
           forwardStatuses={forwardStatuses}
           cancellable={cancellable}
           canManage={canManage}
+          canConfirm={canConfirm}
         />
 
         <FulfillmentPanel

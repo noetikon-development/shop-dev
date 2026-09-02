@@ -47,6 +47,9 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
     .filter((s) => !isFulfillmentStatus(s));
   const cancellable = isCancellable(order.status);
   const storePickup = isStorePickupCode(order.shippingMethodCode);
+  // Pay-on-delivery "Confirm order": only for an unconfirmed order with no
+  // online payment. The server action re-checks both.
+  const canConfirm = canManage && order.status === "PENDING_PAYMENT" && !order.hasOnlinePayment;
 
   const canManageReturns = admin.isSuperAdmin || admin.permissions.has("manage_returns");
   const [returnable, openReturn] = canManageReturns
@@ -78,6 +81,7 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
         forwardStatuses={forwardStatuses}
         cancellable={cancellable}
         canManage={canManage}
+        canConfirm={canConfirm}
         storePickup={storePickup}
       />
 
