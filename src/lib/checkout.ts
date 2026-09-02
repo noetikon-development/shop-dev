@@ -90,8 +90,9 @@ export type CheckoutData = {
   defaultBillingId: string | null;
   /** Phase 6B. When `enabled`, "Place order" starts a PayMongo hosted checkout
    *  (`methods` = the lowercased non-COD methods). When false, checkout is
-   *  pay-on-delivery exactly as before. */
-  onlinePayment: { enabled: boolean; methods: string[] };
+   *  pay-on-delivery exactly as before. `testMode` = the configured PayMongo
+   *  mode is "test" (surface a "no real charge" note). */
+  onlinePayment: { enabled: boolean; methods: string[]; testMode: boolean };
 };
 
 function withEffectiveRates(
@@ -115,7 +116,7 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       addresses: [],
       defaultShippingId: null,
       defaultBillingId: null,
-      onlinePayment: { enabled: false, methods: [] },
+      onlinePayment: { enabled: false, methods: [], testMode: false },
     };
   }
 
@@ -130,7 +131,11 @@ export async function getCheckoutData(): Promise<CheckoutData> {
   const onlineMethods = paymentsConfig.sessionsEnabled
     ? paymentsConfig.enabledMethods.filter((m) => m.toUpperCase() !== "COD").map((m) => m.toLowerCase())
     : [];
-  const onlinePayment = { enabled: paymentsConfig.sessionsEnabled && onlineMethods.length > 0, methods: onlineMethods };
+  const onlinePayment = {
+    enabled: paymentsConfig.sessionsEnabled && onlineMethods.length > 0,
+    methods: onlineMethods,
+    testMode: paymentsConfig.mode === "test",
+  };
 
   const lines: CheckoutLine[] = cart.lines.map((l) => ({
     variantId: l.variantId,

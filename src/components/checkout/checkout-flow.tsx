@@ -231,13 +231,20 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
 
         <Section step={4} icon={<Lock size={15} />} title="Payment">
           {onlinePayment.enabled ? (
-            <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
-              <span className="font-medium text-ink">
-                You’ll be taken to our secure payment page
-              </span>{" "}
-              to pay by {formatMethods(onlinePayment.methods)}. Your order is held until payment is
-              confirmed.
-            </p>
+            <div className="space-y-2">
+              <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
+                <span className="font-medium text-ink">
+                  You’ll be taken to our secure payment page
+                </span>{" "}
+                to pay by {formatMethods(onlinePayment.methods)}. Your order is held until payment is
+                confirmed.
+              </p>
+              {onlinePayment.testMode && (
+                <p className="rounded-sm border border-warning/30 bg-warning-50 px-3 py-2 text-meta font-medium text-warning">
+                  Test mode — no real charge is made.
+                </p>
+              )}
+            </div>
           ) : (
             <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
               <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
