@@ -15,7 +15,7 @@ export function CartButton() {
     <button
       onClick={openCart}
       className="relative grid h-10 w-10 tap place-items-center rounded-full text-ink-soft transition-colors hover:bg-surface hover:text-ink"
-      aria-label={`Open bag${hydrated && count ? `, ${count} items` : ""}`}
+      aria-label={`Open cart${hydrated && count ? `, ${count} items` : ""}`}
     >
       <ShoppingBag size={19} strokeWidth={1.6} />
       {hydrated && count > 0 && (

@@ -42,8 +42,8 @@ export function ProductCard({
       quantity: 1,
     });
     setAdding(false);
-    if (res.ok) toast.success(`Added ${product.name} to your bag`);
-    else toast.error(res.error ?? "Couldn’t add that to your bag");
+    if (res.ok) toast.success(`Added ${product.name} to your cart`);
+    else toast.error(res.error ?? "Couldn’t add that to your cart");
   }
 
   return (

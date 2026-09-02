@@ -37,7 +37,7 @@ export function CartDrawer() {
     <SlideOver
       open={cartOpen}
       onClose={closeCart}
-      title={`Your bag (${totals.itemCount})`}
+      title={`Your cart (${totals.itemCount})`}
       footer={
         lines.length > 0 ? (
           <div className="space-y-3">
@@ -72,7 +72,7 @@ export function CartDrawer() {
               onClick={closeCart}
               className="block text-center text-meta font-medium text-ink-soft underline underline-offset-4 hover:text-ink"
             >
-              View full bag
+              View full cart
             </Link>
           </div>
         ) : null
@@ -82,7 +82,7 @@ export function CartDrawer() {
         <EmptyState
           className="h-full justify-center border-0 px-6 py-10"
           icon={<ShoppingBag size={24} />}
-          title="Your bag is empty"
+          title="Your cart is empty"
           message="Saved pieces and past orders live in your account."
           action={
             <Button variant="outline" onClick={closeCart}>

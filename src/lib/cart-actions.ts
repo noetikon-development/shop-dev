@@ -129,7 +129,7 @@ function formatNotice(n: MergeNotice): string {
   if (n.kind === "capped") {
     return `${n.name}: only ${n.finalQty} in stock — quantity set to ${n.finalQty}.`;
   }
-  return `${n.name} ${n.reason === "out of stock" ? "is out of stock" : "is no longer available"} and wasn’t added to your bag.`;
+  return `${n.name} ${n.reason === "out of stock" ? "is out of stock" : "is no longer available"} and wasn’t added to your cart.`;
 }
 
 /**

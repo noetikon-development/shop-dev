@@ -128,7 +128,7 @@ export function evaluateCoupon(
     return { ok: false, error: "This coupon is no longer available." };
   }
   if (subtotal <= 0) {
-    return { ok: false, error: "Add items to your bag to use a coupon." };
+    return { ok: false, error: "Add items to your cart to use a coupon." };
   }
   if (subtotal < coupon.minSubtotal) {
     return {

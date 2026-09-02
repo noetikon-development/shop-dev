@@ -61,17 +61,17 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
   if (summary.blocked) {
     const copy =
       summary.blocked === "EMPTY"
-        ? "Your bag is empty."
+        ? "Your cart is empty."
         : summary.blocked === "UNAVAILABLE"
-          ? "Some items in your bag are no longer available."
-          : "Some quantities in your bag are more than we have in stock.";
+          ? "Some items in your cart are no longer available."
+          : "Some quantities in your cart are more than we have in stock.";
     return (
       <EmptyState
         icon={<ShoppingBag size={24} />}
         title={copy}
         action={
           <Link href="/cart" className={buttonClasses()}>
-            Return to bag
+            Return to cart
           </Link>
         }
       />
@@ -360,7 +360,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <p>{error}</p>
               {backToBag && (
                 <Link href="/cart" className="mt-1 inline-block font-medium underline">
-                  Return to bag
+                  Return to cart
                 </Link>
               )}
             </div>

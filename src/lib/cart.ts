@@ -518,7 +518,7 @@ export async function updateCartItemCore(input: {
   }
 
   const owner = await resolveOwner();
-  if (!owner) return { ok: false, code: "NO_CART", error: "Your bag is empty." };
+  if (!owner) return { ok: false, code: "NO_CART", error: "Your cart is empty." };
   const cart = await prisma.cart.findFirst({
     where:
       owner.kind === "user"
@@ -526,7 +526,7 @@ export async function updateCartItemCore(input: {
         : { token: owner.token, status: "ACTIVE" },
     select: { id: true },
   });
-  if (!cart) return { ok: false, code: "NO_CART", error: "Your bag is empty." };
+  if (!cart) return { ok: false, code: "NO_CART", error: "Your cart is empty." };
 
   const check = await validateVariant(input.variantId, undefined);
   if (!check.ok) return { ok: false, code: check.code, error: check.message };
@@ -540,7 +540,7 @@ export async function updateCartItemCore(input: {
     data: { quantity: finalQty, priceSnapshot: check.variant.price, updatedAt: new Date() },
   });
   if (updated.count === 0) {
-    return { ok: false, code: "NOT_IN_CART", error: "That item isn’t in your bag." };
+    return { ok: false, code: "NOT_IN_CART", error: "That item isn’t in your cart." };
   }
   await touchCart(prisma, cart.id);
 
@@ -602,12 +602,12 @@ export async function applyCartCouponCore(rawCode: string): Promise<CouponMutati
 
   const owner = await resolveOwner();
   const cart = await activeCartFor(owner);
-  if (!cart) return { ok: false, error: "Add items to your bag before applying a coupon." };
+  if (!cart) return { ok: false, error: "Add items to your cart before applying a coupon." };
 
   // Evaluate against the CURRENT purchasable subtotal, server-side.
   const current = await prisma.cart.findUnique({ where: { id: cart.id }, include: cartInclude });
   const subtotal = buildDTO(current).subtotal;
-  if (subtotal <= 0) return { ok: false, error: "Add items to your bag before applying a coupon." };
+  if (subtotal <= 0) return { ok: false, error: "Add items to your cart before applying a coupon." };
 
   const coupon = await prisma.coupon.findUnique({
     where: { code },

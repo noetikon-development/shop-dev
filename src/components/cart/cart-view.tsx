@@ -39,7 +39,7 @@ export function CartView() {
     return (
       <EmptyState
         icon={<ShoppingBag size={24} />}
-        title="Your bag is empty"
+        title="Your cart is empty"
         message="Browse the catalogue and add a few pieces — they'll show up here."
         action={
           <Link href="/c/all" className={buttonClasses()}>

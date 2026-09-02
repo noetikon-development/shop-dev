@@ -18,7 +18,7 @@ export default async function CheckoutPage() {
           href="/cart"
           className="text-meta font-medium text-ink-soft underline underline-offset-4 hover:text-ink"
         >
-          Back to bag
+          Back to cart
         </Link>
       </PageHeader>
       <CheckoutFlow data={data} />

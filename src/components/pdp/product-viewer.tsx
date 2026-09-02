@@ -138,10 +138,10 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
     });
     setAdding(false);
     if (res.ok) {
-      toast.success("Added to your bag");
+      toast.success("Added to your cart");
       openCart();
     } else {
-      toast.error(res.error ?? "Couldn’t add that to your bag");
+      toast.error(res.error ?? "Couldn’t add that to your cart");
     }
   }
 

@@ -377,11 +377,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     return {
       ok: false,
       code: "CART_GONE",
-      error: "Your bag is empty or has already been checked out.",
+      error: "Your cart is empty or has already been checked out.",
     };
   }
   if (cart.items.length === 0) {
-    return { ok: false, code: "EMPTY", error: "Your bag is empty." };
+    return { ok: false, code: "EMPTY", error: "Your cart is empty." };
   }
 
   // 2. Both addresses must belong to this customer (no IDOR).
@@ -431,7 +431,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     }
     if (available < item.quantity) {
       problems.push(
-        `“${p.name}” — only ${available} left, but your bag has ${item.quantity}.`,
+        `“${p.name}” — only ${available} left, but your cart has ${item.quantity}.`,
       );
       continue;
     }
@@ -464,11 +464,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     return {
       ok: false,
       code: "STOCK",
-      error: `${problems.join(" ")} Update your bag and try again.`,
+      error: `${problems.join(" ")} Update your cart and try again.`,
     };
   }
   if (lines.length === 0) {
-    return { ok: false, code: "EMPTY", error: "Your bag has nothing available to order." };
+    return { ok: false, code: "EMPTY", error: "Your cart has nothing available to order." };
   }
 
   // 4. Server-authoritative totals. The shipping fee is the ACTIVE method's
@@ -512,7 +512,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       },
     });
     if (!c) {
-      return { ok: false, code: "COUPON", error: "The coupon on your bag is no longer valid. Remove it and try again." };
+      return { ok: false, code: "COUPON", error: "The coupon on your cart is no longer valid. Remove it and try again." };
     }
     const evaln = evaluateCoupon(c as EvaluableCoupon, subtotal, now);
     if (!evaln.ok) {
@@ -544,7 +544,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         UPDATE "Cart" SET "status" = 'CONVERTED', "updatedAt" = now()
         WHERE "id" = ${cart.id} AND "status" = 'ACTIVE'`;
       if (converted === 0) {
-        throw new CheckoutError("ALREADY_ORDERED", "This bag has already been checked out.");
+        throw new CheckoutError("ALREADY_ORDERED", "This cart has already been checked out.");
       }
 
       // 4a-ii. Coupon usage limits — race-safe. Lock the Coupon row for the rest
