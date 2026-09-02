@@ -498,7 +498,19 @@ const rail = (
     { revalidate: 180, tags: ["products"] },
   );
 
-const bestSellersRail = rail("bestsellers", { status: "ACTIVE" }, { soldCount: "desc" });
+// The Everyday Organic Oxford Shirt is temporarily held out of the homepage
+// Bestsellers rail: Phase 8B.1B removed its competitor-branded imagery, so it
+// currently has no photo and shows only the "image coming soon" placeholder.
+// The product stays ACTIVE, purchasable, badged and searchable — this is a
+// presentation-only merchandising hold. Remove this once real Axiaro
+// photography for the Oxford Shirt ships.
+const OXFORD_SHIRT_ID = "cmtdrx9ld00j8kg5kif4gyvan";
+
+const bestSellersRail = rail(
+  "bestsellers",
+  { status: "ACTIVE", id: { not: OXFORD_SHIRT_ID } },
+  { soldCount: "desc" },
+);
 const newArrivalsRail = rail("new-arrivals", { status: "ACTIVE" }, { createdAt: "desc" });
 const onSaleRail = rail(
   "on-sale",
