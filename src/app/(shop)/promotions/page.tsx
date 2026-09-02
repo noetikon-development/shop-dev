@@ -4,6 +4,7 @@ import { Tag, ArrowRight } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { getOnSale } from "@/lib/data";
 import { ProductRail } from "@/components/product-rail";
+import { buttonClasses } from "@/components/ui/button";
 import { formatPrice } from "@/lib/utils";
 
 export const metadata: Metadata = {
@@ -34,7 +35,7 @@ export default async function PromotionsPage() {
     <div className="pb-10">
       <div className="container-page py-10">
         <p className="eyebrow">Promotions</p>
-        <h1 className="mt-2 max-w-2xl text-3xl sm:text-display">
+        <h1 className="mt-2 max-w-2xl text-title sm:text-display">
           Codes and markdowns, all in one place
         </h1>
         <p className="mt-3 max-w-xl text-ink-soft">
@@ -60,7 +61,10 @@ export default async function PromotionsPage() {
                   </p>
                 )}
               </div>
-              <Link href="/c/all" className="btn btn-outline shrink-0 !py-2 text-sm">
+              <Link
+                href="/c/all"
+                className={buttonClasses({ variant: "outline", size: "sm", className: "shrink-0" })}
+              >
                 Shop <ArrowRight size={14} />
               </Link>
             </div>

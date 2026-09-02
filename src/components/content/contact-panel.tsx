@@ -78,13 +78,13 @@ export function ContactPanel({ settings }: { settings: SiteSettings }) {
               <span className="mt-0.5 shrink-0 text-ink-soft">{r.icon}</span>
               <div>
                 <dt className="text-xs uppercase tracking-wide text-ink-faint">{r.label}</dt>
-                <dd className="mt-0.5 text-[15px] text-ink-soft">{r.node}</dd>
+                <dd className="mt-0.5 text-body text-ink-soft">{r.node}</dd>
               </div>
             </div>
           ))}
         </dl>
       ) : (
-        <p className="mt-4 text-[15px] text-ink-soft">
+        <p className="mt-4 text-body text-ink-soft">
           The quickest way to reach us about an order is{" "}
           <a href="/track" className="underline underline-offset-2 hover:text-ink">
             Track your order
@@ -104,7 +104,7 @@ export function ContactPanel({ settings }: { settings: SiteSettings }) {
                 href={s.url}
                 target="_blank"
                 rel="noopener noreferrer nofollow"
-                className="text-[15px] text-ink-soft underline underline-offset-2 hover:text-ink"
+                className="text-body text-ink-soft underline underline-offset-2 hover:text-ink"
               >
                 {s.label}
               </a>

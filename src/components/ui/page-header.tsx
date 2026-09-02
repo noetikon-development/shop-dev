@@ -4,7 +4,7 @@ import { cn } from "@/lib/utils";
  * Storefront page header (Phase 5D Stage 2). One treatment for the top-of-page
  * title block used by the cart, content pages, the account shell and the
  * category / collection pages — previously each hand-rolled
- * `h1 text-3xl sm:text-display` plus a subtitle.
+ * `h1` plus a subtitle.
  *
  * The heading is on the type scale (`text-title sm:text-display`). `children`
  * renders as trailing actions on the same baseline as the title.

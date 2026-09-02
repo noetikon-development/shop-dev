@@ -8,6 +8,7 @@ import { ProductGrid } from "@/components/product-grid";
 import { Breadcrumbs } from "@/components/ui/breadcrumbs";
 import { PageHeader } from "@/components/ui/page-header";
 import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import { FilterControls } from "@/components/plp/filter-controls";
 import { FilterDrawer } from "@/components/plp/filter-drawer";
 import { SortSelect } from "@/components/plp/sort-select";
@@ -174,7 +175,7 @@ export default async function CategoryPage({ params, searchParams }: PageProps<"
                 title="No products match those filters"
                 message="Try widening your price range or clearing a filter or two."
                 action={
-                  <Link href={`/c/${slug}`} className="btn btn-outline">
+                  <Link href={`/c/${slug}`} className={buttonClasses({ variant: "outline" })}>
                     Clear filters
                   </Link>
                 }

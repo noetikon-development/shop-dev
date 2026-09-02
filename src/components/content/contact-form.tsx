@@ -39,14 +39,14 @@ export function ContactForm() {
       <h2 id="contact-form-heading" className="font-display text-xl text-ink">
         Send us a message
       </h2>
-      <p className="mt-2 text-[15px] text-ink-soft">
+      <p className="mt-2 text-body text-ink-soft">
         Fill in the form and we&apos;ll reply by email, usually within 1–2 business days.
       </p>
 
       {state.ok ? (
         <div
           role="status"
-          className="mt-5 flex items-start gap-3 rounded-md border border-line bg-surface-sunken/50 p-4 text-[15px] text-ink-soft"
+          className="mt-5 flex items-start gap-3 rounded-md border border-line bg-surface-sunken/50 p-4 text-body text-ink-soft"
         >
           <CheckCircle2 size={18} className="mt-0.5 shrink-0 text-ink" aria-hidden />
           <span>

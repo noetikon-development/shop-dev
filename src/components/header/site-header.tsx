@@ -24,7 +24,7 @@ export async function SiteHeader() {
       {announcements.length > 0 && (
         <div className="bg-ink text-paper">
           <div className="container-page flex h-9 items-center overflow-hidden">
-            <div className="flex animate-marquee gap-16 whitespace-nowrap text-[11px] tracking-wide">
+            <div className="flex animate-marquee gap-16 whitespace-nowrap text-micro tracking-wide">
               {[...announcements, ...announcements].map((a, i) => (
                 <span key={i} className="text-paper/80">
                   {a}

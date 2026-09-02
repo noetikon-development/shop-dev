@@ -26,7 +26,7 @@ export function DetailsAccordion({
               className="flex w-full items-center justify-between gap-4 py-5 text-left"
               aria-expanded={isOpen}
             >
-              <span className="text-[15px] font-medium">{s.title}</span>
+              <span className="text-body font-medium">{s.title}</span>
               {isOpen ? (
                 <Minus size={16} className="shrink-0 text-ink-soft" />
               ) : (

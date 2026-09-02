@@ -4,6 +4,7 @@ import { listProducts } from "@/lib/data";
 import { parseListingParams, buildQuery, countActiveFilters } from "@/lib/listing-params";
 import { ProductGrid } from "@/components/product-grid";
 import { EmptyState } from "@/components/ui/empty-state";
+import { buttonClasses } from "@/components/ui/button";
 import { FilterControls } from "@/components/plp/filter-controls";
 import { FilterDrawer } from "@/components/plp/filter-drawer";
 import { SortSelect } from "@/components/plp/sort-select";
@@ -40,7 +41,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
     <div className="container-page py-8">
       <header className="max-w-2xl">
         <p className="eyebrow">Search</p>
-        <h1 className="mt-2 text-3xl">
+        <h1 className="mt-2 text-title sm:text-display">
           {query ? (
             <>
               Results for <span className="italic">“{query}”</span>
@@ -69,7 +70,7 @@ export default async function SearchPage({ searchParams }: PageProps<"/search">)
             title="Nothing matched that search"
             message="Check the spelling, or browse by category instead."
             action={
-              <Link href="/c/all" className="btn btn-outline">
+              <Link href="/c/all" className={buttonClasses({ variant: "outline" })}>
                 Browse all products
               </Link>
             }
