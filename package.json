@@ -21,6 +21,10 @@
     "db:seed:legal": "node --env-file=.env --import tsx scripts/seed-legal-content.ts",
     "storage:setup": "node --env-file=.env scripts/setup-storage.mjs",
     "db:rls": "node --env-file=.env scripts/apply-rls.mjs",
+    "db:rls:offers": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260903120000_marketplace_offer_foundation.sql",
+    "db:backfill:marketplace": "node --env-file=.env --import tsx scripts/backfill-marketplace-foundation.ts",
+    "db:reconcile:marketplace": "node --env-file=.env --import tsx scripts/reconcile-marketplace-foundation.ts",
+    "db:test:marketplace": "node --env-file=.env --conditions=react-server --import tsx scripts/test-marketplace-foundation.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"
   },

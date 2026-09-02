@@ -59,6 +59,9 @@ model User {
   auditEvents          AdminAuditLog[]       @relation("AdminAuditActor")
   inventoryAdjustments InventoryAdjustment[] @relation("InventoryAdjustmentActor")
 
+  // Marketplace (Phase 9C foundation). Back-relation only — no column on User.
+  sellerUsers          SellerUser[]
+
   // Analytics (Step 18): new-customers-in-period is a createdAt range scan.
   @@index([createdAt])
 }
@@ -357,6 +360,10 @@ model Variant {
   orderItems   OrderItem[]
   cartItems    CartItem[]
   inventory    Inventory?
+  // Marketplace (Phase 9C foundation). Back-relation only — no column on Variant.
+  // A catalog Variant may carry many seller Offers; in Phase 9C there is exactly
+  // one (the Axiaro FIRST_PARTY offer) per ACTIVE variant.
+  offers       Offer[]
 
   @@index([productId])
   @@index([status])
@@ -1104,4 +1111,159 @@ model MediaAsset {
   @@unique([bucket, path])
   @@index([folder])
   @@index([mimeType])
+}
+
+// ----------------------------------------------------------------------------
+// Marketplace — Sellers & Offers (Phase 9C foundation)
+//
+// ADDITIVE FOUNDATION ONLY. As of Phase 9C these tables are NOT authoritative
+// for anything customer-facing. Every storefront / cart / checkout price and
+// stock read still goes through Product.price / Variant.price / Variant.stock /
+// Inventory, exactly as before. `Offer.price` (and compareAtPrice / costPrice)
+// is a one-time COPY of the catalog value, taken by the backfill script
+// (scripts/backfill-marketplace-foundation.ts). Nothing dual-writes it, and
+// src/lib/inventory.ts is untouched — `OfferInventory` is a copied foundation,
+// not a live mirror.
+//
+// Model split (approved Phase 9B design):
+//   Product / Variant   — seller-neutral CATALOG identity (what the item is)
+//   Seller / Offer       — WHO sells it and on what commercial terms
+//   OfferInventory       — stock owned by exactly one Offer
+//   OfferAdjustment      — append-only stock history for an OfferInventory
+//                          (the future equivalent of InventoryAdjustment)
+//
+// Axiaro is represented as one ordinary Seller row of type FIRST_PARTY. It is
+// never a hard-coded exception in marketplace code.
+//
+// Deliberately NOT added in Phase 9C: sellerId on Product / Variant / Inventory
+// / Order / OrderItem; SellerOrder; Shipment; commission calculation; payout /
+// settlement tables; any seller route or UI.
+// ----------------------------------------------------------------------------
+
+// A marketplace merchant. Exactly one FIRST_PARTY row (Axiaro); zero or more
+// THIRD_PARTY rows. Seller-scoped data access is enforced in the application
+// layer (src/lib/marketplace/seller-repository.ts) — there is no per-seller RLS
+// policy in Phase 9C, matching the store's existing "RLS on, no policy" posture.
+model Seller {
+  id             String   @id @default(cuid())
+  type           String   @default("THIRD_PARTY") // FIRST_PARTY | THIRD_PARTY
+  status         String   @default("PENDING") // PENDING | APPROVED | SUSPENDED | CLOSED
+  displayName    String // customer-facing "Sold by …"
+  slug           String   @unique // reserved for a future /seller/<slug> page
+  supportEmail   String // customer contact for this seller's orders
+  // Marketplace commission withheld from this seller's sales, in BASIS POINTS
+  // (1500 = 15.00%). STORED ONLY — Phase 9C never reads or calculates it.
+  // FIRST_PARTY (Axiaro) = 0.
+  commissionRate Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  sellerUsers SellerUser[]
+  offers      Offer[]
+
+  @@index([type])
+  @@index([status])
+}
+
+// Membership of an application User in a Seller, with a seller-scoped role.
+// Independent of the global admin RBAC (UserRole / Role / Permission): a person
+// may hold both, or either, or neither. Phase 9C ships this as a data model
+// only — there is no seller login route and no /seller UI.
+model SellerUser {
+  id        String   @id @default(cuid())
+  sellerId  String
+  userId    String
+  role      String   @default("STAFF") // OWNER | MANAGER | STAFF
+  status    String   @default("INVITED") // ACTIVE | INVITED | DISABLED
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sellerId, userId])
+  @@index([userId])
+  @@index([sellerId])
+}
+
+// The commercial listing: a Seller offering a catalog Variant on specific terms.
+// Catalog identity (name, images, specs, reviews) stays on Product / Variant.
+model Offer {
+  id               String   @id @default(cuid())
+  sellerId         String
+  variantId        String
+  // Commercial terms. In Phase 9C these are COPIES of the catalog values
+  // (Variant.price / Variant.compareAtPrice / Product.costPrice) taken once by
+  // the backfill. The catalog columns remain the authoritative source for the
+  // storefront until a later, separately-approved phase.
+  price            Int
+  compareAtPrice   Int?
+  costPrice        Int?
+  // The seller's own SKU for this offer, unique per seller (Postgres treats
+  // NULLs as distinct, so a seller may leave it unset). The catalog identifier
+  // stays Variant.sku, which is untouched.
+  sellerSku        String?
+  condition        String   @default("NEW") // NEW | REFURBISHED | USED_LIKE_NEW | USED_GOOD
+  status           String   @default("DRAFT") // DRAFT | ACTIVE | INACTIVE | ARCHIVED
+  // SELLER_FULFILLED only at launch. PLATFORM_FULFILLED is a reserved future
+  // value and must not be used in Phase 9C.
+  fulfillmentType  String   @default("SELLER_FULFILLED") // SELLER_FULFILLED | PLATFORM_FULFILLED
+  handlingTimeDays Int      @default(2)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  seller    Seller          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  variant   Variant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  inventory OfferInventory?
+
+  // One offer per (seller, variant, condition).
+  @@unique([sellerId, variantId, condition])
+  // Seller-scoped SKU uniqueness.
+  @@unique([sellerId, sellerSku])
+  @@index([sellerId])
+  @@index([variantId])
+  @@index([status])
+}
+
+// Stock owned by exactly one Offer (offerId @unique). Same shape and invariants
+// as Inventory. DB CHECK constraints (quantity >= 0, reserved >= 0,
+// quantity >= reserved, reorderPoint >= 0) are added in
+// supabase/migrations/20260903120000_marketplace_offer_foundation.sql.
+model OfferInventory {
+  id           String    @id @default(cuid())
+  offerId      String    @unique
+  sellerSku    String?
+  quantity     Int       @default(0)
+  reserved     Int       @default(0)
+  reorderPoint Int       @default(3)
+  restockEta   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  offer       Offer             @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  adjustments OfferAdjustment[]
+
+  @@index([offerId])
+}
+
+// Append-only history of every quantity change to an OfferInventory row —
+// the future equivalent of InventoryAdjustment. The backfill writes exactly one
+// row per OfferInventory with reason "MIGRATION_OPENING" to establish the
+// opening balance; historical InventoryAdjustment rows are left untouched.
+model OfferAdjustment {
+  id               String   @id @default(cuid())
+  offerInventoryId String
+  previousQuantity Int
+  delta            Int
+  newQuantity      Int
+  reason           String // MIGRATION_OPENING | RESTOCK | MANUAL_ADJUSTMENT | DAMAGE | LOSS | RETURN | CORRECTION | SALE | …
+  note             String?
+  actorUserId      String?
+  createdAt        DateTime @default(now())
+
+  offerInventory OfferInventory @relation(fields: [offerInventoryId], references: [id], onDelete: Cascade)
+
+  @@index([offerInventoryId])
+  @@index([reason])
+  @@index([createdAt])
 }
