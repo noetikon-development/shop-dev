@@ -36,7 +36,6 @@ function escapeRegExp(s: string): string {
 function searchRelevance(
   row: {
     name: string;
-    brand: string;
     shortDescription: string;
     description?: string | null;
     category: { name: string; parent?: { name: string } | null };
@@ -48,7 +47,6 @@ function searchRelevance(
   const name = row.name.toLowerCase();
   const cat = row.category.name.toLowerCase();
   const parentCat = (row.category.parent?.name ?? "").toLowerCase();
-  const brand = (row.brand ?? "").toLowerCase();
   const sd = (row.shortDescription ?? "").toLowerCase();
   const d = (row.description ?? "").toLowerCase();
   // `\b<q>` — the query begins a word (so "sof" scores on "Sofa" AND "soft",
@@ -67,10 +65,6 @@ function searchRelevance(
   // Department (parent) category — e.g. query "living" for a product in
   // "Sofas & Seating" under "Living".
   if (wordStart.test(parentCat)) s += 110;
-
-  // Only a word-start brand hit counts — every product's brand is "Axiaro", so
-  // a mid-word substring ("aro") must not score the whole catalogue.
-  if (wordStart.test(brand)) s += 60;
 
   if (wordStart.test(sd)) s += 45;
   else if (sd.includes(ql)) s += 25;
@@ -368,12 +362,13 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
   if (categoryIds) AND.push({ categoryId: { in: categoryIds } });
   if (query) {
     const m = { contains: query, mode: "insensitive" as const };
+    // NOT `brand` — every product's brand is the store name ("Axiaro"), so
+    // matching it turns a query like "aro" into the whole catalogue.
     AND.push({
       OR: [
         { name: m },
         { shortDescription: m },
         { description: m },
-        { brand: m },
         { category: { name: m } },
         { category: { parent: { name: m } } },
       ],
@@ -857,9 +852,9 @@ export async function searchSuggestions(q: string, take = 6) {
   const rows = await prisma.product.findMany({
     where: {
       status: "ACTIVE",
+      // Same field set as /search — NOT `brand` (every product is "Axiaro").
       OR: [
         { name: m },
-        { brand: m },
         { shortDescription: m },
         { description: m },
         { category: { name: m } },
@@ -873,7 +868,6 @@ export async function searchSuggestions(q: string, take = 6) {
     select: {
       slug: true,
       name: true,
-      brand: true,
       shortDescription: true,
       description: true,
       price: true,
