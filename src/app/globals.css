@@ -88,11 +88,32 @@
 @layer base {
   :root {
     color-scheme: light;
+
+    /* Height of the sticky <header> (announcement bar excluded — it is not
+       sticky). Responsive because the header gains/loses rows at the same
+       breakpoints its markup uses: the mobile search row is md:hidden and the
+       mega-nav row is xl:flex. Measured against the live header:
+         < md  → 64 logo row + 56 search row + 1 border = 121px
+         md    → 64 logo row + 1 border                 = 65px
+         xl    → 64 logo row + 1 border + 44 mega-nav + 1 = 110px */
+    --sticky-header: 121px;
+  }
+
+  @media (min-width: 768px) {
+    :root { --sticky-header: 65px; }
+  }
+
+  @media (min-width: 1280px) {
+    :root { --sticky-header: 110px; }
   }
 
   html {
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
+    /* Keep anchored / route-navigation scroll targets clear of the sticky
+       header. Without this, client-side navigation from a scrolled position
+       leaves the destination's heading hidden behind the header. */
+    scroll-padding-top: calc(var(--sticky-header) + 1.25rem);
   }
 
   body {
