@@ -9,7 +9,7 @@ export default async function AccountLayout({ children }: LayoutProps<"/account"
 
   return (
     <div className="container-page py-8 sm:py-12">
-      <PageHeader title="My account" description={`Signed in as ${user.name ?? user.email}`} />
+      <PageHeader title="My Account" description={`Signed in as ${user.name ?? user.email}`} />
 
       <div className="grid gap-10 lg:grid-cols-[200px_1fr]">
         <aside className="lg:sticky lg:top-28 lg:h-fit">

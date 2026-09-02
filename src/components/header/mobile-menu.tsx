@@ -113,7 +113,7 @@ export function MobileMenu({
           className="tap flex items-center gap-3 rounded-sm px-2 py-2.5 text-body hover:bg-surface"
         >
           <User size={17} aria-hidden="true" className="text-ink-soft" />
-          {signedIn ? "My account" : "Sign in / Register"}
+          {signedIn ? "My Account" : "Sign in / Register"}
         </Link>
         <Link
           href="/account/wishlist"

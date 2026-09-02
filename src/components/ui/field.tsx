@@ -1,6 +1,7 @@
 "use client";
 
-import { useId } from "react";
+import { useId, useState } from "react";
+import { Eye, EyeOff } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -15,6 +16,10 @@ import { cn } from "@/lib/utils";
  * Custom control: <Field label="Message" error={e}>
  *                   {(p) => <textarea {...p} name="message" rows={6} className="field" />}
  *                 </Field>
+ *
+ * `type="password"` fields automatically get a show/hide toggle. It only swaps
+ * the input's `type` between "password" and "text" — the value, `name`,
+ * `autoComplete`, `minLength`, `required` and form submission are untouched.
  */
 
 type ControlProps = {
@@ -51,6 +56,8 @@ export function Field({
 }: FieldProps) {
   const autoId = useId();
   const fieldId = id ?? autoId;
+  const [revealPassword, setRevealPassword] = useState(false);
+  const isPassword = inputProps.type === "password";
   const hintId = hint ? `${fieldId}-hint` : undefined;
   const errorId = error ? `${fieldId}-error` : undefined;
   const describedBy = [hintId, errorId].filter(Boolean).join(" ") || undefined;
@@ -75,6 +82,29 @@ export function Field({
 
       {children ? (
         children(control)
+      ) : isPassword ? (
+        <div className="relative">
+          <input
+            {...control}
+            required={required}
+            {...inputProps}
+            type={revealPassword ? "text" : "password"}
+            className="field pr-12"
+          />
+          <button
+            type="button"
+            onClick={() => setRevealPassword((v) => !v)}
+            aria-label={revealPassword ? "Hide password" : "Show password"}
+            aria-pressed={revealPassword}
+            className="tap absolute inset-y-0 right-0 grid place-items-center px-3 text-ink-soft transition-colors hover:text-ink"
+          >
+            {revealPassword ? (
+              <EyeOff size={18} aria-hidden="true" />
+            ) : (
+              <Eye size={18} aria-hidden="true" />
+            )}
+          </button>
+        </div>
       ) : (
         <input {...control} required={required} className="field" {...inputProps} />
       )}
