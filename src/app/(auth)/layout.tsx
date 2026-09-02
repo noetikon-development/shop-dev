@@ -1,10 +1,12 @@
 import Link from "next/link";
+import Image from "next/image";
 import { Logo } from "@/components/logo";
 import { ProductArt } from "@/lib/product-art";
 import { getSiteSettings } from "@/lib/site-settings";
+import { getAuthArtwork } from "@/lib/content";
 
 export default async function AuthLayout({ children }: { children: React.ReactNode }) {
-  const { tagline } = await getSiteSettings();
+  const [{ tagline }, artwork] = await Promise.all([getSiteSettings(), getAuthArtwork()]);
   return (
     <div className="lg:grid lg:h-screen lg:grid-cols-2 lg:overflow-hidden">
       {/* Form column. On desktop it owns the full viewport height and scrolls
@@ -25,11 +27,23 @@ export default async function AuthLayout({ children }: { children: React.ReactNo
           </Link>
         </p>
       </div>
-      {/* Art column — a single large in-house illustration, editorial scale, no
-          grid and no per-panel borders. Desktop only (unchanged `lg` behaviour);
-          `overflow-hidden` keeps the illustration from adding page height. */}
+      {/* Art column — desktop only (unchanged `lg` behaviour); `overflow-hidden`
+          keeps the artwork from adding page height. The image is CMS-managed
+          (Admin → Content → Authentication); with none configured it falls back
+          to the in-house `ProductArt` sofa illustration, editorial scale, no
+          grid and no per-panel borders. */}
       <div className="relative hidden overflow-hidden border-l border-line bg-surface-sunken lg:block">
-        <ProductArt kind="sofa" seed="auth-sofa" className="h-full w-full" />
+        {artwork ? (
+          <Image
+            src={artwork.url}
+            alt={artwork.alt}
+            fill
+            sizes="(min-width: 1024px) 50vw, 1px"
+            className="object-cover"
+          />
+        ) : (
+          <ProductArt kind="sofa" seed="auth-sofa" className="h-full w-full" />
+        )}
       </div>
     </div>
   );

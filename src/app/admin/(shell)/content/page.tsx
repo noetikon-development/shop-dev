@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, LayoutTemplate, ImageIcon, PanelBottom, PanelTop } from "lucide-react";
+import { FileText, LayoutTemplate, ImageIcon, PanelBottom, PanelTop, KeyRound } from "lucide-react";
 import { requireAnyPermission } from "@/lib/admin/rbac";
 import { prisma } from "@/lib/prisma";
+import { authArtworkSchema } from "@/lib/content-blocks";
 import { PageHeader, Card } from "@/components/admin/ui";
 
 export const metadata: Metadata = { title: "Content" };
@@ -10,16 +11,35 @@ export const metadata: Metadata = { title: "Content" };
 export default async function AdminContentHubPage() {
   await requireAnyPermission(["view_content"]);
 
-  const [pageCount, publishedPages, blockCount, publishedBlocks, mediaCount, footerBlock, navBlock] =
-    await Promise.all([
-      prisma.contentPage.count(),
-      prisma.contentPage.count({ where: { status: "PUBLISHED" } }),
-      prisma.contentBlock.count({ where: { area: "homepage" } }),
-      prisma.contentBlock.count({ where: { area: "homepage", status: "PUBLISHED" } }),
-      prisma.mediaAsset.count(),
-      prisma.contentBlock.findUnique({ where: { key: "footer.default" }, select: { status: true } }),
-      prisma.contentBlock.findUnique({ where: { key: "nav.primary" }, select: { status: true } }),
-    ]);
+  const [
+    pageCount,
+    publishedPages,
+    blockCount,
+    publishedBlocks,
+    mediaCount,
+    footerBlock,
+    navBlock,
+    authArtworkBlock,
+  ] = await Promise.all([
+    prisma.contentPage.count(),
+    prisma.contentPage.count({ where: { status: "PUBLISHED" } }),
+    prisma.contentBlock.count({ where: { area: "homepage" } }),
+    prisma.contentBlock.count({ where: { area: "homepage", status: "PUBLISHED" } }),
+    prisma.mediaAsset.count(),
+    prisma.contentBlock.findUnique({ where: { key: "footer.default" }, select: { status: true } }),
+    prisma.contentBlock.findUnique({ where: { key: "nav.primary" }, select: { status: true } }),
+    prisma.contentBlock.findUnique({ where: { key: "auth.artwork" }, select: { status: true, data: true } }),
+  ]);
+
+  let authArtworkOn = false;
+  if (authArtworkBlock?.status === "PUBLISHED") {
+    try {
+      const parsed = authArtworkSchema.safeParse(JSON.parse(authArtworkBlock.data || "{}"));
+      authArtworkOn = parsed.success && parsed.data.enabled && Boolean(parsed.data.imageMediaId);
+    } catch {
+      /* treat as off */
+    }
+  }
 
   const cards = [
     {
@@ -42,6 +62,13 @@ export default async function AdminContentHubPage() {
       title: "Footer",
       body: footerBlock?.status === "PUBLISHED" ? "Published" : "Using built-in defaults",
       hint: "Brand text, link columns, newsletter copy and copyright.",
+    },
+    {
+      href: "/admin/content/authentication",
+      icon: <KeyRound size={18} />,
+      title: "Authentication",
+      body: authArtworkOn ? "Custom image" : "Using the built-in illustration",
+      hint: "The artwork on the desktop sign-in and sign-up screens.",
     },
     {
       href: "/admin/content/pages",

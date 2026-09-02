@@ -176,6 +176,31 @@ export const footerSchema = z.object({
 
 export type FooterData = z.infer<typeof footerSchema>;
 
+// --- auth artwork -------------------------------------------------------------
+//
+// A single `area:"global"` block (`auth.artwork`). It controls the large
+// illustration on the desktop authentication screens (/login, /register,
+// /forgot-password, /reset-password). Reuses `MediaAsset` for the image itself —
+// the block only stores a reference, an alt-text override and an on/off switch.
+//
+// When the block is absent, disabled, or has no image, the auth layout keeps its
+// built-in `ProductArt` sofa illustration — the artwork never disappears.
+
+export const authArtworkSchema = z.object({
+  /** MediaAsset id of the chosen image ("" = none). */
+  imageMediaId: mediaId,
+  /**
+   * Alt text for this placement. Blank falls back to the MediaAsset's own alt;
+   * an image beside a sign-in form is essentially decorative, so a blank value
+   * (rendered as `alt=""`) is a valid choice.
+   */
+  alt: shortText.default(""),
+  /** Off by default — the built-in illustration shows until an admin enables this. */
+  enabled: z.boolean().default(false),
+});
+
+export type AuthArtworkData = z.infer<typeof authArtworkSchema>;
+
 // --- navigation (Phase 5C) -----------------------------------------------------
 //
 // A single `area:"global"` block (`nav.primary`). It drives the header
@@ -239,7 +264,8 @@ export type BlockTypeKey =
   | "editorial"
   | "category_tiles"
   | "footer"
-  | "navigation";
+  | "navigation"
+  | "auth_artwork";
 
 export const BLOCK_TYPES: Record<
   BlockTypeKey,
@@ -254,18 +280,20 @@ export const BLOCK_TYPES: Record<
   editorial: { label: "Editorial statement", description: "A quiet full-width line between product sections — an editorial pause.", schema: editorialSchema },
   footer: { label: "Footer", description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.", schema: footerSchema },
   navigation: { label: "Navigation", description: "The header menu, mega-menu and mobile menu — labels, order and visibility.", schema: navSchema },
+  auth_artwork: { label: "Authentication artwork", description: "The large illustration on the desktop sign-in / sign-up screens.", schema: authArtworkSchema },
 };
 
 export const BLOCK_TYPE_KEYS = Object.keys(BLOCK_TYPES) as BlockTypeKey[];
 
 /**
  * Block types an admin can add as a homepage section. The site-wide blocks
- * (`footer`, `navigation`) are edited on their own pages, never added to a page.
+ * (`footer`, `navigation`, `auth_artwork`) are edited on their own pages, never
+ * added to a page.
  */
-export const SITE_WIDE_BLOCK_TYPE_KEYS = ["footer", "navigation"] as const;
+export const SITE_WIDE_BLOCK_TYPE_KEYS = ["footer", "navigation", "auth_artwork"] as const;
 export const HOMEPAGE_BLOCK_TYPE_KEYS = BLOCK_TYPE_KEYS.filter(
   (k) => !(SITE_WIDE_BLOCK_TYPE_KEYS as readonly string[]).includes(k),
-) as Exclude<BlockTypeKey, "footer" | "navigation">[];
+) as Exclude<BlockTypeKey, "footer" | "navigation" | "auth_artwork">[];
 
 export function isBlockType(v: string): v is BlockTypeKey {
   return v in BLOCK_TYPES;

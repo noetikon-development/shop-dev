@@ -62,6 +62,18 @@ export const CATEGORY_IMAGE_SPEC: ImageSpec = {
   recommendation: "1600×1200px, 4:3, sRGB, WebP, quality 82–85, 150–500 KB",
 };
 
+export const AUTH_ARTWORK_IMAGE_SPEC: ImageSpec = {
+  label: "Authentication artwork",
+  width: 1440,
+  height: 1800,
+  ratio: 4 / 5,
+  minBytes: 120 * 1024,
+  maxBytes: 500 * 1024,
+  preferredType: "image/webp",
+  recommendation:
+    "1440×1800px, 4:5 portrait (the sign-in art column is 4:5 at 1280 and 1440), sRGB, WebP, quality 85, under ~500 KB",
+};
+
 export const FEATURE_CARD_IMAGE_SPEC: ImageSpec = {
   label: "Feature card",
   width: 1600,
@@ -120,6 +132,7 @@ function ratioLabel(ratio: number): string {
   if (Math.abs(ratio - 4 / 3) < 0.02) return "4:3";
   if (Math.abs(ratio - 16 / 9) < 0.02) return "16:9";
   if (Math.abs(ratio - 3 / 2) < 0.02) return "3:2";
+  if (Math.abs(ratio - 4 / 5) < 0.02) return "4:5";
   return ratio.toFixed(2);
 }
 

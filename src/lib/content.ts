@@ -5,6 +5,7 @@ import {
   parseBlockData,
   footerSchema,
   navSchema,
+  authArtworkSchema,
   type BlockTypeKey,
   type FooterData,
   type NavData,
@@ -163,4 +164,40 @@ const loadNavBlock = unstable_cache(
 
 export function getNavBlock(): Promise<NavData | null> {
   return loadNavBlock();
+}
+
+/**
+ * The authentication-page artwork. One PUBLISHED `area:"global"` block keyed
+ * `auth.artwork`. Returns the resolved image URL + alt only when the block
+ * exists, is enabled AND references a real image asset — otherwise `null`, and
+ * the auth layout keeps its built-in `ProductArt` sofa illustration.
+ *
+ * The MediaAsset lookup is folded into this cached read (rather than calling the
+ * media resolver separately) so the auth pages do one cached query, not two.
+ */
+const loadAuthArtwork = unstable_cache(
+  async (): Promise<{ url: string; alt: string } | null> => {
+    const row = await prisma.contentBlock.findFirst({
+      where: { area: "global", type: "auth_artwork", status: "PUBLISHED" },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: { data: true },
+    });
+    if (!row) return null;
+    const parsed = authArtworkSchema.safeParse(safeJson(row.data));
+    if (!parsed.success || !parsed.data.enabled || !parsed.data.imageMediaId) return null;
+
+    const asset = await prisma.mediaAsset.findUnique({
+      where: { id: parsed.data.imageMediaId },
+      select: { url: true, alt: true, mimeType: true },
+    });
+    if (!asset || !asset.mimeType.startsWith("image/")) return null;
+
+    return { url: asset.url, alt: parsed.data.alt || asset.alt || "" };
+  },
+  ["content-auth-artwork"],
+  { revalidate: 300, tags: ["content"] },
+);
+
+export function getAuthArtwork(): Promise<{ url: string; alt: string } | null> {
+  return loadAuthArtwork();
 }

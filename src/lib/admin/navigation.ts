@@ -214,6 +214,15 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     live: true,
   },
   {
+    path: "/admin/content/authentication",
+    label: "Authentication",
+    description: "The artwork on the desktop sign-in and sign-up screens.",
+    group: "content",
+    accepts: ["view_content"],
+    emptyLabel: "Authentication is using the built-in illustration.",
+    live: true,
+  },
+  {
     path: "/admin/content/pages",
     label: "Pages",
     description: "Standalone content pages (About, policies, guides).",
