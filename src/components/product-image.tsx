@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  *   lazy-loading and zero layout shift (Phase 5D Stage 3).
  * - Otherwise the reference is an in-house `art:` illustration ref, which means
  *   the product has no real photo yet. In the storefront that renders the
- *   branded "photography coming soon" placeholder. Admin previews pass
+ *   branded "image coming soon" placeholder. Admin previews pass
  *   `allowArt` to keep rendering the illustration instead.
  *
  * The colour → image mapping is unchanged: callers still resolve which URL to

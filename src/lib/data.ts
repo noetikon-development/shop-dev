@@ -21,6 +21,66 @@ function safeParse<T>(value: string, fallback: T): T {
   }
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Relevance score for a product against a free-text search query (higher wins).
+ *
+ * The catalogue is small, so search fetches every matched row and ranks it here
+ * rather than at the database (Prisma cannot express a CASE-WHEN ranking). The
+ * point of the scale is that a title / title-prefix match always beats a match
+ * that only occurs mid-word inside a description ("sof" inside "soft").
+ */
+function searchRelevance(
+  row: {
+    name: string;
+    brand: string;
+    shortDescription: string;
+    description?: string | null;
+    category: { name: string; parent?: { name: string } | null };
+  },
+  q: string,
+): number {
+  const ql = q.trim().toLowerCase();
+  if (!ql) return 0;
+  const name = row.name.toLowerCase();
+  const cat = row.category.name.toLowerCase();
+  const parentCat = (row.category.parent?.name ?? "").toLowerCase();
+  const brand = (row.brand ?? "").toLowerCase();
+  const sd = (row.shortDescription ?? "").toLowerCase();
+  const d = (row.description ?? "").toLowerCase();
+  // `\b<q>` — the query begins a word (so "sof" scores on "Sofa" AND "soft",
+  // but a bare substring like "ofa" does not get the word-start bonus).
+  const wordStart = new RegExp(`\\b${escapeRegExp(ql)}`);
+
+  let s = 0;
+  if (name === ql) s += 1000;
+  else if (name.startsWith(ql)) s += 600;
+  else if (wordStart.test(name)) s += 400;
+  else if (name.includes(ql)) s += 250;
+
+  if (wordStart.test(cat)) s += 140;
+  else if (cat.includes(ql)) s += 90;
+
+  // Department (parent) category — e.g. query "living" for a product in
+  // "Sofas & Seating" under "Living".
+  if (wordStart.test(parentCat)) s += 110;
+
+  // Only a word-start brand hit counts — every product's brand is "Axiaro", so
+  // a mid-word substring ("aro") must not score the whole catalogue.
+  if (wordStart.test(brand)) s += 60;
+
+  if (wordStart.test(sd)) s += 45;
+  else if (sd.includes(ql)) s += 25;
+
+  if (wordStart.test(d)) s += 18;
+  else if (d.includes(ql)) s += 6;
+
+  return s;
+}
+
 const cardSelect = {
   id: true,
   slug: true,
@@ -303,17 +363,19 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
     categoryIds = await descendantCategoryIds(catId);
   }
 
+  const query = params.query?.trim() ?? "";
   const AND: Record<string, unknown>[] = [{ status: "ACTIVE" }];
   if (categoryIds) AND.push({ categoryId: { in: categoryIds } });
-  if (params.query) {
-    const q = params.query.trim();
+  if (query) {
+    const m = { contains: query, mode: "insensitive" as const };
     AND.push({
       OR: [
-        { name: { contains: q } },
-        { shortDescription: { contains: q } },
-        { description: { contains: q } },
-        { brand: { contains: q } },
-        { category: { name: { contains: q } } },
+        { name: m },
+        { shortDescription: m },
+        { description: m },
+        { brand: m },
+        { category: { name: m } },
+        { category: { parent: { name: m } } },
       ],
     });
   }
@@ -337,16 +399,33 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
   }
 
   const where = { AND };
+  const sort = params.sort ?? "relevance";
 
-  const [rows, total, priceAgg, colorGroups] = await Promise.all([
-    prisma.product.findMany({
-      where,
-      orderBy: orderBy(params.sort ?? "relevance"),
-      skip: (page - 1) * perPage,
-      take: perPage,
-      select: cardSelect,
-    }),
-    prisma.product.count({ where }),
+  // A free-text search with the default "relevance" sort is ranked in memory:
+  // the catalogue is small, Prisma can't express a CASE-WHEN ranking, and a
+  // title / title-prefix hit must outrank a mid-word description hit (the "sof"
+  // inside "soft" problem). Any explicit sort (price, newest, …) keeps the
+  // database ordering + pagination unchanged.
+  const rankInMemory = Boolean(query) && sort === "relevance";
+
+  const [rawRows, dbTotal, priceAgg, colorGroups] = await Promise.all([
+    rankInMemory
+      ? prisma.product.findMany({
+          where,
+          select: {
+            ...cardSelect,
+            description: true,
+            category: { select: { slug: true, name: true, parent: { select: { name: true } } } },
+          },
+        })
+      : prisma.product.findMany({
+          where,
+          orderBy: orderBy(sort),
+          skip: (page - 1) * perPage,
+          take: perPage,
+          select: cardSelect,
+        }),
+    rankInMemory ? Promise.resolve(0) : prisma.product.count({ where }),
     prisma.product.aggregate({
       where: categoryIds ? { status: "ACTIVE", categoryId: { in: categoryIds } } : { status: "ACTIVE" },
       _min: { price: true },
@@ -372,8 +451,23 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
     else colorMap.set(c.value, { name: c.value, hex: c.swatchHex, count: 1 });
   }
 
+  let pageRows = rawRows as unknown as CardRow[];
+  let total = dbTotal;
+  if (rankInMemory) {
+    const ranked = (rawRows as unknown as (CardRow & { description?: string | null })[])
+      .map((r) => ({ r, score: searchRelevance(r, query) }))
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          b.r.soldCount - a.r.soldCount ||
+          b.r.ratingAvg - a.r.ratingAvg,
+      );
+    total = ranked.length;
+    pageRows = ranked.slice((page - 1) * perPage, page * perPage).map((x) => x.r);
+  }
+
   return {
-    products: (rows as unknown as CardRow[]).map(toCard),
+    products: pageRows.map(toCard),
     total,
     page,
     perPage,
@@ -757,19 +851,35 @@ export async function getUserOrders(userId: string) {
 }
 
 export async function searchSuggestions(q: string, take = 6) {
-  if (!q.trim()) return [];
+  const query = q.trim();
+  if (!query) return [];
+  const m = { contains: query, mode: "insensitive" as const };
   const rows = await prisma.product.findMany({
     where: {
       status: "ACTIVE",
-      OR: [{ name: { contains: q } }, { brand: { contains: q } }, { shortDescription: { contains: q } }],
+      OR: [
+        { name: m },
+        { brand: m },
+        { shortDescription: m },
+        { description: m },
+        { category: { name: m } },
+        { category: { parent: { name: m } } },
+      ],
     },
-    orderBy: { soldCount: "desc" },
-    take,
+    // Fetch a wider set, then relevance-rank + trim — same ranking as /search so
+    // the dropdown and the results page agree, and a title match ("Sofa") beats
+    // a mid-word description hit ("soft").
+    take: 24,
     select: {
       slug: true,
       name: true,
+      brand: true,
+      shortDescription: true,
+      description: true,
       price: true,
-      category: { select: { name: true } },
+      soldCount: true,
+      ratingAvg: true,
+      category: { select: { name: true, parent: { select: { name: true } } } },
       images: {
         orderBy: [
           { optionValueId: { sort: "asc", nulls: "first" } },
@@ -781,11 +891,15 @@ export async function searchSuggestions(q: string, take = 6) {
       },
     },
   });
-  return rows.map((r) => ({
-    slug: r.slug,
-    name: r.name,
-    price: r.price,
-    category: r.category.name,
-    art: artKindFromRef(r.images[0]?.url),
-  }));
+  return rows
+    .map((r) => ({ r, score: searchRelevance(r, query) }))
+    .sort((a, b) => b.score - a.score || b.r.soldCount - a.r.soldCount || b.r.ratingAvg - a.r.ratingAvg)
+    .slice(0, take)
+    .map(({ r }) => ({
+      slug: r.slug,
+      name: r.name,
+      price: r.price,
+      category: r.category.name,
+      art: artKindFromRef(r.images[0]?.url),
+    }));
 }

@@ -104,7 +104,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
     // Presentation-layer de-duplication (Phase 5D Stage 6). Entries that render
     // as real photography stay individually navigable. Entries that render as
-    // the "photography coming soon" placeholder are visually identical to one
+    // the "image coming soon" placeholder are visually identical to one
     // another, so collapse them to a single gallery slot. No image data is
     // touched — only what the gallery shows. If this selection has any real
     // photo, the placeholder slots drop out entirely.
