@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { Truck, RotateCcw, ShieldCheck, Wrench, Check, Star, Sparkles } from "lucide-react";
+import { Truck, RotateCcw, ShieldCheck, Wrench, Check, Star, Sparkles, Compass, Headset } from "lucide-react";
 import { ProductArt } from "@/lib/product-art";
 import { ProductRail } from "@/components/product-rail";
 import { CategoryTiles } from "@/components/home/category-tiles";
@@ -287,14 +287,16 @@ const VALUE_ICONS: Record<string, typeof Truck> = {
   star: Star,
   sparkles: Sparkles,
   check: Check,
+  compass: Compass,
+  headset: Headset,
 };
 
 function ValuePropsBlock({ data }: { data: Record<string, unknown> }) {
   const items = Array.isArray(data.items) ? (data.items as Record<string, unknown>[]) : [];
   if (!items.length) return null;
   return (
-    <section className="border-y border-line bg-surface">
-      <div className="container-page grid gap-x-8 gap-y-6 py-10 sm:grid-cols-2 lg:grid-cols-4">
+    <section>
+      <div className="container-page grid gap-x-8 gap-y-6 sm:grid-cols-2 lg:grid-cols-4">
         {items.map((p, i) => {
           const Icon = VALUE_ICONS[str(p.icon)] ?? Check;
           return (

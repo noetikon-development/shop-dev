@@ -18,7 +18,7 @@ export function Hero() {
             Considered things for everyday living
           </h1>
           <p className="max-w-md text-pretty text-ink-soft">
-            Furniture, lighting, textiles and a small wardrobe — designed in-house and made to last.
+            Everything for everyday living.
           </p>
           <div className="flex flex-wrap gap-3">
             <Link href="/c/all" className="btn btn-primary">
@@ -29,9 +29,9 @@ export function Hero() {
             </Link>
           </div>
           <div className="mt-1 flex flex-wrap gap-x-8 gap-y-2 text-meta text-ink-faint">
-            <span>Designed in-house</span>
+            <span>Free standard shipping</span>
             <span>Easy returns</span>
-            <span>Assembly help included</span>
+            <span>Helpful support</span>
           </div>
         </div>
 
