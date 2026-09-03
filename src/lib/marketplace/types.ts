@@ -40,6 +40,12 @@ export type OfferCandidate = {
 export type CardOffer = OfferCandidate & { compareAtPrice: number | null };
 
 /**
+ * A candidate enriched with its OfferInventory reorder point — the shape the
+ * variant-availability computation needs (Phase 9D-D).
+ */
+export type StockOfferCandidate = OfferCandidate & { reorderPoint: number };
+
+/**
  * Product-card pricing derived from the winning offers across a product's ACTIVE
  * variants (Phase 9D-A). `minPrice` is `null` only when NO variant has a
  * display-eligible offer — the card then shows no price and the existing

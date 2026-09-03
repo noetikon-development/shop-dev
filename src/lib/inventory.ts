@@ -106,21 +106,32 @@ export async function adjustStock(
   return prisma.$transaction(run);
 }
 
-/** Update the low-stock threshold. No history row (it isn't a quantity change). */
+/**
+ * Update the low-stock threshold. No history row (it isn't a quantity change).
+ * Accepts an `externalTx` (same pattern as `adjustStock`) so the admin action
+ * can bundle the Phase 9D-D `OfferInventory.reorderPoint` sync atomically.
+ */
 export async function setReorderPoint(
   variantId: string,
   reorderPoint: number,
+  externalTx?: Prisma.TransactionClient,
 ): Promise<{ ok: boolean; error?: string; previous?: number }> {
   if (!Number.isInteger(reorderPoint) || reorderPoint < 0) {
     return { ok: false, error: "Reorder point must be a whole number ≥ 0." };
   }
-  const inv = await prisma.inventory.findUnique({
-    where: { variantId },
-    select: { id: true, reorderPoint: true },
-  });
-  if (!inv) return { ok: false, error: "No inventory record for that variant." };
-  await prisma.inventory.update({ where: { id: inv.id }, data: { reorderPoint } });
-  return { ok: true, previous: inv.reorderPoint };
+  const run = async (
+    tx: Prisma.TransactionClient | typeof prisma,
+  ): Promise<{ ok: boolean; error?: string; previous?: number }> => {
+    const inv = await tx.inventory.findUnique({
+      where: { variantId },
+      select: { id: true, reorderPoint: true },
+    });
+    if (!inv) return { ok: false, error: "No inventory record for that variant." };
+    await tx.inventory.update({ where: { id: inv.id }, data: { reorderPoint } });
+    return { ok: true, previous: inv.reorderPoint };
+  };
+  if (externalTx) return run(externalTx);
+  return run(prisma);
 }
 
 // ---------------------------------------------------------------------------

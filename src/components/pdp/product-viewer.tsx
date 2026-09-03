@@ -65,7 +65,9 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
     : product.compareAtPrice;
   const priceUnavailable = matchedVariant != null && activePrice == null;
   const showFromPrefix = !matchedVariant && product.priceFrom;
-  // STOCK IS UNCHANGED — still Variant.stock (Phase 9D-B does not migrate stock).
+  // Phase 9D-D: `VariantView.stock` / `product.totalStock` are now the winning
+  // 1P Offer's OfferInventory availability (resolved in the DTO layer) — this
+  // component reads them unchanged.
   const stock = matchedVariant?.stock ?? product.totalStock;
   const outOfStock = Boolean(matchedVariant) && matchedVariant!.stock <= 0;
   const reorderPoint = matchedVariant?.reorderPoint ?? 0;

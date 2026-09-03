@@ -5,8 +5,12 @@ import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import { getStoreBrand } from "@/lib/site-settings";
-import { computeCatalogCardPricing, pickWinningOffer } from "@/lib/marketplace/buy-box-rule";
-import type { CardOffer, OfferCandidate } from "@/lib/marketplace/types";
+import {
+  computeCatalogCardPricing,
+  pickWinningOffer,
+  resolveVariantAvailability,
+} from "@/lib/marketplace/buy-box-rule";
+import type { CardOffer, OfferCandidate, StockOfferCandidate } from "@/lib/marketplace/types";
 import type {
   CategoryNode,
   ProductCardView,
@@ -112,12 +116,10 @@ const cardSelect = {
     where: { status: "ACTIVE" },
     select: {
       id: true,
-      stock: true,
-      inventory: { select: { reorderPoint: true } },
-      // Phase 9D-A: the card SELLING PRICE is derived from the winning Axiaro
-      // FIRST_PARTY Offer per variant (stock stays on Variant.stock). Nested
-      // here so a listing pays NO extra query — Prisma loads this relation once
-      // per page via `WHERE variantId IN (...)`, not once per card.
+      // Phase 9D-A: card SELLING PRICE from the winning 1P Offer per variant.
+      // Phase 9D-D: card STOCK/AVAILABILITY from that same offer's OfferInventory.
+      // Nested here so a listing pays NO extra query — Prisma loads each relation
+      // once per page via `WHERE ... IN (...)`, not once per card.
       offers: {
         select: {
           id: true,
@@ -126,6 +128,7 @@ const cardSelect = {
           compareAtPrice: true,
           createdAt: true,
           seller: { select: { type: true, status: true } },
+          inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
         },
       },
     },
@@ -139,6 +142,7 @@ type CardOfferRow = {
   compareAtPrice: number | null;
   createdAt: Date;
   seller: { type: string; status: string };
+  inventory: { quantity: number; reserved: number; reorderPoint: number } | null;
 };
 
 type CardRow = {
@@ -160,24 +164,53 @@ type CardRow = {
   options: { values: { swatchHex: string | null }[] }[];
   variants: {
     id: string;
-    stock: number;
-    inventory: { reorderPoint: number } | null;
     offers: CardOfferRow[];
   }[];
 };
 
-/** Map a nested offer row onto the pure card-pricing input shape. */
-function toCardOffer(o: CardOfferRow): CardOffer {
+/**
+ * Map a nested offer row onto the pure card-PRICE input shape (stock-blind).
+ * Accepts the price-only subset too — the price-range facet query (which never
+ * needs `OfferInventory`) passes rows without an `inventory` selection.
+ */
+function toCardOffer(o: Omit<CardOfferRow, "inventory">): CardOffer {
   return {
     offerId: o.id,
     sellerId: "",
     sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
     sellerStatus: o.seller.status as CardOffer["sellerStatus"],
     offerStatus: o.status as CardOffer["offerStatus"],
-    available: 0, // stock-blind — the card-price rule ignores this in Slice 1
+    available: 0, // stock-blind — the card-PRICE rule ignores this (9D-A)
     price: o.price,
     createdAt: o.createdAt,
     compareAtPrice: o.compareAtPrice,
+  };
+}
+
+/** Map a nested offer row onto the STOCK-AWARE availability input shape (9D-D). */
+function toStockOffer(o: CardOfferRow): StockOfferCandidate {
+  return {
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as CardOffer["sellerStatus"],
+    offerStatus: o.status as CardOffer["offerStatus"],
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    price: o.price,
+    createdAt: o.createdAt,
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
+  };
+}
+
+/** Offer-derived availability + rollup stock status for a product's variants (9D-D). */
+function cardStock(variants: { offers: CardOfferRow[] }[]): {
+  inStock: boolean;
+  stockStatus: ReturnType<typeof rollupStatus>;
+} {
+  const perVariant = variants.map((v) => resolveVariantAvailability(v.offers.map(toStockOffer)));
+  return {
+    inStock: perVariant.some((a) => a.available > 0),
+    stockStatus: rollupStatus(perVariant.map((a) => stockStatusFromAvailable(a.available, a.reorderPoint))),
   };
 }
 
@@ -203,9 +236,7 @@ function toCard(p: CardRow): ProductCardView {
   const swatches = (p.options[0]?.values ?? [])
     .map((v) => v.swatchHex)
     .filter((h): h is string => Boolean(h));
-  const stockStatus = rollupStatus(
-    p.variants.map((v) => stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0)),
-  );
+  const { inStock, stockStatus } = cardStock(p.variants);
   const { price, compareAtPrice, priceFrom } = cardPricing(p);
   return {
     id: p.id,
@@ -226,7 +257,7 @@ function toCard(p: CardRow): ProductCardView {
     categorySlug: p.category.slug,
     categoryName: p.category.name,
     colorSwatches: swatches,
-    inStock: p.variants.some((v) => v.stock > 0),
+    inStock,
     stockStatus,
     defaultVariantId: p.variants.length === 1 ? p.variants[0].id : null,
     createdAt: p.createdAt.toISOString(),
@@ -448,13 +479,12 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
     });
   }
   // Phase 9D-C: price-asc/desc sort, min/max price filter and the on-sale filter
-  // now evaluate the DERIVED PRODUCT PRICE = the minimum winning Axiaro
-  // FIRST_PARTY Offer price across the product's ACTIVE variants (identical
-  // semantic to the product card / PDP pre-selection). These are applied in
-  // memory AFTER offer resolution, so they are NOT added to the DB `where`.
-  // Non-price filters (status / category / text / freeShipping / rating /
-  // colours / in-stock) stay at the database. In-stock still reads Variant.stock
-  // (stock migration is a later slice).
+  // evaluate the DERIVED PRODUCT PRICE (min winning 1P Offer across ACTIVE
+  // variants). Phase 9D-D: the in-stock filter evaluates the DERIVED
+  // AVAILABILITY (winning stock-bearing Offer's OfferInventory). All are applied
+  // in memory AFTER offer resolution, so they are NOT added to the DB `where`.
+  // Non-price/non-stock filters (status / category / text / freeShipping /
+  // rating / colours) stay at the database.
   if (params.freeShipping) AND.push({ freeShipping: true });
   if (params.minRating) AND.push({ ratingAvg: { gte: params.minRating } });
   if (params.colors?.length) {
@@ -467,9 +497,6 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
       },
     });
   }
-  if (params.inStock) {
-    AND.push({ variants: { some: { stock: { gt: 0 } } } });
-  }
 
   const where = { AND };
   const sort = params.sort ?? "relevance";
@@ -477,10 +504,11 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
   const rankInMemory = Boolean(query) && sort === "relevance";
   const priceFiltered = params.minPrice != null || params.maxPrice != null;
   const onSaleFilter = Boolean(params.onSale);
+  const inStockFilter = Boolean(params.inStock);
   const priceSorted = sort === "price-asc" || sort === "price-desc";
-  // Any offer-aware price operation forces the small in-memory pipeline:
+  // Any offer-aware price/stock operation forces the small in-memory pipeline:
   // resolve → filter → sort → paginate (pagination AFTER the derived sort/filter).
-  const inMemory = rankInMemory || priceFiltered || onSaleFilter || priceSorted;
+  const inMemory = rankInMemory || priceFiltered || onSaleFilter || inStockFilter || priceSorted;
 
   const scopeWhere = categoryIds
     ? { status: "ACTIVE" as const, categoryId: { in: categoryIds } }
@@ -548,6 +576,8 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
     computeCatalogCardPricing(r.variants.map((v) => v.offers.map(toCardOffer))).minPrice;
   const derivedOnSale = (r: CardRow): boolean =>
     computeCatalogCardPricing(r.variants.map((v) => v.offers.map(toCardOffer))).onSale;
+  const derivedInStock = (r: CardRow): boolean =>
+    r.variants.some((v) => resolveVariantAvailability(v.offers.map(toStockOffer)).available > 0);
 
   const boundsPrices = boundsRows
     .map((p) => computeCatalogCardPricing(p.variants.map((v) => v.offers.map(toCardOffer))).minPrice)
@@ -563,8 +593,10 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
   if (inMemory) {
     let rows = rawRows as unknown as (CardRow & { description?: string | null })[];
 
-    // 1. offer-aware price / on-sale filter. Unpriced products (no eligible
-    //    offer) are excluded from a price filter; kept for relevance/default.
+    // 1. offer-aware price / on-sale / in-stock filter. Unpriced products (no
+    //    eligible offer) are excluded from a price filter; kept for
+    //    relevance/default. In-stock uses the winning stock-bearing offer's
+    //    OfferInventory availability (9D-D).
     if (priceFiltered) {
       rows = rows.filter((r) => {
         const mp = derivedMinPrice(r);
@@ -575,6 +607,7 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
       });
     }
     if (onSaleFilter) rows = rows.filter(derivedOnSale);
+    if (inStockFilter) rows = rows.filter(derivedInStock);
 
     // 2. sort
     if (rankInMemory) {
@@ -723,11 +756,12 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
       variants: {
         include: {
           optionValues: { select: { optionValueId: true } },
-          inventory: { select: { reorderPoint: true } },
           // Phase 9D-B: the PDP selling price is the winning Axiaro FIRST_PARTY
-          // Offer for the selected variant. Nested here so the PDP pays NO extra
-          // query — Prisma loads offers / sellers / offer-inventory once each via
-          // `WHERE ... IN (...)`. Stock display stays on Variant.stock.
+          // Offer for the selected variant. Phase 9D-D: the same winning offer
+          // also supplies stock (`OfferInventory.quantity - reserved`) and the
+          // reorder point. Nested here so the PDP pays NO extra query — Prisma
+          // loads offers / sellers / offer-inventory once each via
+          // `WHERE ... IN (...)`.
           offers: {
             select: {
               id: true,
@@ -736,7 +770,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
               compareAtPrice: true,
               createdAt: true,
               seller: { select: { type: true, status: true } },
-              inventory: { select: { quantity: true, reserved: true } },
+              inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
             },
           },
         },
@@ -754,33 +788,52 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     .map((v) => v.swatchHex)
     .filter((h): h is string => Boolean(h));
   const activeVariants = p.variants.filter((v) => v.status === "ACTIVE");
-  const totalStock = activeVariants.reduce((n, v) => n + Math.max(0, v.stock), 0);
 
   type PdpOfferRow = (typeof activeVariants)[number]["offers"][number];
 
-  // Per-variant winning offer — the FULL stock-aware buy-box rule (Phase 9D-B).
-  const stockAwareCandidate = (o: PdpOfferRow): OfferCandidate => ({
+  // Per-variant winning offer — the FULL stock-aware buy-box rule. The SAME
+  // winning offer supplies price + compare-at (Phase 9D-B) AND available units +
+  // reorder point (Phase 9D-D). Stock no longer reads `Variant.stock`.
+  const stockCandidate = (o: PdpOfferRow): StockOfferCandidate => ({
     offerId: o.id,
     sellerId: "",
     sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
     sellerStatus: o.seller.status as OfferCandidate["sellerStatus"],
     offerStatus: o.status as OfferCandidate["offerStatus"],
     available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
     price: o.price,
     createdAt: o.createdAt,
   });
-  const variantOffer = (offers: PdpOfferRow[]): { price: number | null; compareAtPrice: number | null } => {
-    const winner = pickWinningOffer(offers.map(stockAwareCandidate));
-    if (!winner) return { price: null, compareAtPrice: null };
+  const variantOffer = (
+    offers: PdpOfferRow[],
+  ): {
+    price: number | null;
+    compareAtPrice: number | null;
+    available: number;
+    reorderPoint: number;
+  } => {
+    const candidates = offers.map(stockCandidate);
+    const winner = pickWinningOffer(candidates);
+    const { available, reorderPoint } = resolveVariantAvailability(candidates);
+    if (!winner) return { price: null, compareAtPrice: null, available, reorderPoint };
     const row = offers.find((o) => o.id === winner.offerId)!;
-    return { price: row.price, compareAtPrice: row.compareAtPrice };
+    return { price: row.price, compareAtPrice: row.compareAtPrice, available, reorderPoint };
   };
+
+  // One resolution per ACTIVE variant, reused for totalStock, the rollup status
+  // and each variant DTO.
+  const resolvedByVariant = new Map(activeVariants.map((v) => [v.id, variantOffer(v.offers)]));
+  const totalStock = activeVariants.reduce(
+    (n, v) => n + (resolvedByVariant.get(v.id)?.available ?? 0),
+    0,
+  );
 
   // Pre-selection product-level price — the SAME stock-blind range the product
   // card shows (Phase 9D-A), so the PDP and the card agree before any variant is
   // chosen. `Product.price` is only a production liveness guard.
   const rangePricing = computeCatalogCardPricing(
-    activeVariants.map((v) => v.offers.map((o): CardOffer => ({ ...stockAwareCandidate(o), compareAtPrice: o.compareAtPrice }))),
+    activeVariants.map((v) => v.offers.map((o): CardOffer => ({ ...stockCandidate(o), compareAtPrice: o.compareAtPrice }))),
   );
   if (rangePricing.minPrice == null) {
     const msg = `[loadProductBySlug] no resolvable Axiaro offer price for ${p.slug} — 1P write-through gap`;
@@ -823,9 +876,10 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     colorSwatches: swatches,
     inStock: totalStock > 0,
     stockStatus: rollupStatus(
-      activeVariants.map((v) =>
-        stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0),
-      ),
+      activeVariants.map((v) => {
+        const r = resolvedByVariant.get(v.id)!;
+        return stockStatusFromAvailable(r.available, r.reorderPoint);
+      }),
     ),
     defaultVariantId: activeVariants.length === 1 ? activeVariants[0].id : null,
     totalStock,
@@ -836,7 +890,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
       values: o.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })),
     })),
     variants: activeVariants.map((v) => {
-      const off = variantOffer(v.offers);
+      const off = resolvedByVariant.get(v.id)!;
       return {
         id: v.id,
         sku: v.sku,
@@ -844,8 +898,9 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         compareAtPrice: v.compareAtPrice,
         offerPrice: off.price,
         offerCompareAtPrice: off.compareAtPrice,
-        stock: Math.max(0, v.stock),
-        reorderPoint: v.inventory?.reorderPoint ?? 0,
+        // Phase 9D-D: available units of the stock-bearing winning 1P Offer.
+        stock: off.available,
+        reorderPoint: off.reorderPoint,
         status: v.status,
         imageUrl: v.imageUrl,
         optionValueIds: v.optionValues.map((ov) => ov.optionValueId),

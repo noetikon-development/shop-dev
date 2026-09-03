@@ -18,7 +18,12 @@
  * price competitiveness, buy-box rotation, Axiaro-1P platform preference.
  */
 
-import type { OfferCandidate, CardOffer, CatalogCardPricing } from "@/lib/marketplace/types";
+import type {
+  OfferCandidate,
+  CardOffer,
+  CatalogCardPricing,
+  StockOfferCandidate,
+} from "@/lib/marketplace/types";
 
 /** True when a candidate is allowed into the buy box at all. */
 export function isEligibleCandidate(c: OfferCandidate): boolean {
@@ -125,4 +130,26 @@ export function computeCatalogCardPricing(variantOfferGroups: CardOffer[][]): Ca
     onSale,
     eligibleVariantCount: winners.length,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Variant availability (Phase 9D-D) — pure, STOCK-AWARE
+// ---------------------------------------------------------------------------
+
+/**
+ * The available units + reorder point of the STOCK-BEARING winning offer for one
+ * variant (Phase 9D-D). Uses the FULL stock-aware buy-box rule
+ * (`pickWinningOffer` → `isEligibleCandidate`, which requires `available > 0`),
+ * so the offer that supplies availability is the SAME offer that supplies the
+ * price. When no offer is eligible AND in stock → `{ available: 0 }` → the
+ * storefront shows out-of-stock; it never falls back to `Variant.stock`.
+ */
+export function resolveVariantAvailability(offers: StockOfferCandidate[]): {
+  available: number;
+  reorderPoint: number;
+} {
+  const winner = pickWinningOffer(offers);
+  if (!winner) return { available: 0, reorderPoint: 0 };
+  const row = offers.find((o) => o.offerId === winner.offerId)!;
+  return { available: winner.available, reorderPoint: row.reorderPoint };
 }

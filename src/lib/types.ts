@@ -41,7 +41,14 @@ export type VariantView = {
    */
   offerPrice: number | null;
   offerCompareAtPrice: number | null;
-  stock: number; // available (quantity - reserved) — UNCHANGED, still Variant.stock
+  /**
+   * Available units (quantity - reserved). Phase 9D-D: sourced from the winning
+   * stock-bearing Axiaro FIRST_PARTY `OfferInventory` — the SAME offer that
+   * supplies `offerPrice` — not `Variant.stock`. `0` when no offer is eligible
+   * AND in stock; the PDP then shows out-of-stock and never reads `Variant.stock`.
+   */
+  stock: number;
+  /** Reorder point of that same winning offer's `OfferInventory` (Phase 9D-D). */
   reorderPoint: number;
   status: string; // ACTIVE | ARCHIVED
   imageUrl: string | null;

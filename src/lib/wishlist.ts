@@ -3,8 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
-import { computeCatalogCardPricing } from "@/lib/marketplace/buy-box-rule";
-import type { CardOffer } from "@/lib/marketplace/types";
+import { computeCatalogCardPricing, resolveVariantAvailability } from "@/lib/marketplace/buy-box-rule";
+import type { CardOffer, StockOfferCandidate } from "@/lib/marketplace/types";
 import type { ProductCardView } from "@/lib/types";
 
 /**
@@ -64,10 +64,9 @@ const wishlistSelect = {
         where: { status: "ACTIVE" },
         select: {
           id: true,
-          stock: true,
-          inventory: { select: { reorderPoint: true } },
           // Phase 9D-A: card selling price from the winning Axiaro FIRST_PARTY
-          // Offer (stock stays on Variant.stock). Nested — one query per load.
+          // Offer. Phase 9D-D: card stock/availability from that same offer's
+          // OfferInventory. Nested — one query per load.
           offers: {
             select: {
               id: true,
@@ -76,6 +75,7 @@ const wishlistSelect = {
               compareAtPrice: true,
               createdAt: true,
               seller: { select: { type: true, status: true } },
+              inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
             },
           },
         },
@@ -91,6 +91,7 @@ type WishlistOfferRow = {
   compareAtPrice: number | null;
   createdAt: Date;
   seller: { type: string; status: string };
+  inventory: { quantity: number; reserved: number; reorderPoint: number } | null;
 };
 
 function toWishlistCardOffer(o: WishlistOfferRow): CardOffer {
@@ -104,6 +105,21 @@ function toWishlistCardOffer(o: WishlistOfferRow): CardOffer {
     price: o.price,
     createdAt: o.createdAt,
     compareAtPrice: o.compareAtPrice,
+  };
+}
+
+/** Map a wishlist offer row onto the STOCK-AWARE availability input shape (9D-D). */
+function toWishlistStockOffer(o: WishlistOfferRow): StockOfferCandidate {
+  return {
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as StockOfferCandidate["sellerStatus"],
+    offerStatus: o.status as StockOfferCandidate["offerStatus"],
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
+    price: o.price,
+    createdAt: o.createdAt,
   };
 }
 
@@ -133,9 +149,14 @@ export async function loadWishlist(userId: string): Promise<WishlistCard[]> {
       .map((v) => v.swatchHex)
       .filter((h): h is string => Boolean(h));
     const available = p.status === "ACTIVE";
-    const inStock = available && p.variants.some((v) => v.stock > 0);
+    // Phase 9D-D: availability from the winning stock-bearing 1P Offer's
+    // OfferInventory, per ACTIVE variant — same source as the storefront cards.
+    const perVariantAvail = p.variants.map((v) =>
+      resolveVariantAvailability(v.offers.map(toWishlistStockOffer)),
+    );
+    const inStock = available && perVariantAvail.some((a) => a.available > 0);
     const stockStatus = rollupStatus(
-      p.variants.map((v) => stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0)),
+      perVariantAvail.map((a) => stockStatusFromAvailable(a.available, a.reorderPoint)),
     );
     // Card selling price from the winning 1P offers. A retired product (no ACTIVE
     // variant / no offer) legitimately falls back to its last-known

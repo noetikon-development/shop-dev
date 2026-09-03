@@ -6,6 +6,10 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock, setReorderPoint } from "@/lib/inventory";
+import {
+  syncFirstPartyOfferStock,
+  syncFirstPartyOfferReorderPoint,
+} from "@/lib/admin/offer-sync";
 
 export type InventoryActionState = {
   error?: string;
@@ -71,12 +75,20 @@ export async function adjustStockAction(
     return { ok: true, message: "No change — quantity already at that value." };
   }
 
-  const result = await adjustStock({
-    variantId,
-    delta,
-    reason: mode === "set" ? "CORRECTION" : reason,
-    note: note || null,
-    actorUserId: admin.user.id,
+  const effectiveReason = mode === "set" ? "CORRECTION" : reason;
+  // Phase 9D-D: the existing Inventory mutation AND the matching 1P
+  // OfferInventory sync run in ONE transaction — both move by the same delta or
+  // neither does. `adjustStock` keeps its own row-lock / InventoryAdjustment /
+  // Variant.stock-mirror behaviour unchanged (it just runs on the passed tx).
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await adjustStock(
+      { variantId, delta, reason: effectiveReason, note: note || null, actorUserId: admin.user.id },
+      tx,
+    );
+    if (r.ok) {
+      await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
+    }
+    return r;
   });
   if (!result.ok) return { error: result.error ?? "Adjustment failed." };
 
@@ -90,7 +102,7 @@ export async function adjustStockAction(
       previousQuantity: result.previousQuantity,
       newQuantity: result.newQuantity,
       delta,
-      reason: mode === "set" ? "CORRECTION" : reason,
+      reason: effectiveReason,
       reserved: result.reserved,
     },
   });
@@ -128,7 +140,13 @@ export async function updateThresholdAction(
   });
   if (!inv) return { error: "No inventory record for that variant." };
 
-  const result = await setReorderPoint(variantId, reorderPoint);
+  // Phase 9D-D: Inventory.reorderPoint AND the matching 1P
+  // OfferInventory.reorderPoint move together, atomically.
+  const result = await prisma.$transaction(async (tx) => {
+    const r = await setReorderPoint(variantId, reorderPoint, tx);
+    if (r.ok) await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
+    return r;
+  });
   if (!result.ok) return { error: result.error ?? "Could not update the threshold." };
   if (result.previous === reorderPoint) return { ok: true, message: "Threshold unchanged." };
 

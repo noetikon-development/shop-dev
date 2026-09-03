@@ -3,22 +3,27 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /**
- * 1P Offer write-through (Phase 9D-A).
+ * 1P Offer write-through (Phase 9D-A price, Phase 9D-D stock).
  *
- * The product-card selling price now reads the Axiaro FIRST_PARTY `Offer`
- * (`src/lib/data.ts` `toCard`, `src/lib/wishlist.ts`). `Offer.price` was a frozen
- * 9C copy of `Variant.price`, so the existing admin catalogue write paths must
- * keep the matching 1P offer in step — otherwise a price edit would leave the
+ * The storefront selling price (9D-A) AND stock/availability (9D-D) now read the
+ * Axiaro FIRST_PARTY `Offer` / `OfferInventory`. `Offer.price` and
+ * `OfferInventory` were frozen 9C copies, so the existing admin write paths must
+ * keep the matching 1P offer in step — otherwise an admin edit would leave the
  * storefront showing the stale copy.
  *
- * This is ONE-WAY transitional sync only:  admin write → Variant/Product → 1P Offer.
- * It never makes `Offer` the source of truth, never touches `Inventory` /
- * `Variant.stock` / `src/lib/inventory.ts`, and never touches a THIRD_PARTY offer
- * (ownership is pinned to the FIRST_PARTY seller id).
+ * This is ONE-WAY transitional sync only:
+ *   admin write → Inventory / Variant / Product → matching 1P Offer / OfferInventory.
+ * It never makes `Offer` the source of truth, never has `OfferInventory` write
+ * back to `Inventory`, never changes `src/lib/inventory.ts`'s row-lock behaviour,
+ * and never touches a THIRD_PARTY offer (ownership is pinned to the FIRST_PARTY
+ * seller id / `condition = 'NEW'`).
  *
- * `OfferInventory` is created alongside a new offer (quantity copied from the
- * new `Inventory` row, which is 0 at creation) purely to keep the 9C 1:1
- * invariant intact. Stock changes are NOT synced here — that is a later slice.
+ * NOT synced here (deferred to Phase 9E with the checkout inventory writer):
+ * the SALE deduction at checkout, the order-cancellation reversal, and the
+ * returns restock. Between 9D-D and 9E those paths move `Inventory` without
+ * `OfferInventory`, so the storefront availability figure can be transiently
+ * stale — but checkout re-reads live `Inventory` transactionally, so it can
+ * never oversell (see the §26 display-vs-reservation split).
  */
 
 type Tx = Prisma.TransactionClient | typeof prisma;
@@ -47,6 +52,86 @@ export async function syncFirstPartyOfferPrice(
   await tx.offer.updateMany({
     where: { variantId, sellerId, condition: "NEW" },
     data: { price: data.price, compareAtPrice: data.compareAtPrice },
+  });
+}
+
+/**
+ * Apply the SAME signed `delta` an `adjustStock` call applied to `Inventory` to
+ * the matching Axiaro FIRST_PARTY `OfferInventory`, and record an
+ * `OfferAdjustment` (Phase 9D-D). MUST be called inside the same transaction as
+ * the `adjustStock` call so the two moves are atomic.
+ *
+ * Row-locks the `OfferInventory` row (`FOR UPDATE`) scoped to the FIRST_PARTY
+ * seller — a THIRD_PARTY offer on the same variant is never touched. Throws on an
+ * invariant violation (`quantity < 0` or `< reserved`) so the whole transaction
+ * rolls back; this can only fire if `OfferInventory` had already drifted, since
+ * `adjustStock` guards `Inventory` with the identical rules first.
+ *
+ * `reserved` is never changed here (admin stock adjustments only move on-hand
+ * quantity — reservation state is owned by checkout, deferred to 9E).
+ */
+export async function syncFirstPartyOfferStock(
+  variantId: string,
+  delta: number,
+  reason: string,
+  note: string | null,
+  actorUserId: string | null,
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  if (delta === 0) return;
+  const sellerId = await firstPartySellerId(tx);
+  if (!sellerId) return;
+
+  const locked = await tx.$queryRaw<{ id: string; quantity: number; reserved: number }[]>`
+    SELECT oi."id", oi."quantity", oi."reserved"
+    FROM "OfferInventory" oi
+    JOIN "Offer" o ON o."id" = oi."offerId"
+    WHERE o."variantId" = ${variantId} AND o."sellerId" = ${sellerId} AND o."condition" = 'NEW'
+    FOR UPDATE OF oi`;
+  const inv = locked[0];
+  // No 1P OfferInventory yet — `ensureFirstPartyOffer` creates it on variant
+  // creation, so this only happens for a pre-migration gap; nothing to sync.
+  if (!inv) return;
+
+  const previousQuantity = inv.quantity;
+  const newQuantity = previousQuantity + delta;
+  if (newQuantity < 0 || newQuantity < inv.reserved) {
+    throw new Error(
+      `syncFirstPartyOfferStock: OfferInventory invariant violation for variant ${variantId} ` +
+        `(prev ${previousQuantity}, delta ${delta}, reserved ${inv.reserved}) — rolling back.`,
+    );
+  }
+
+  await tx.offerInventory.update({ where: { id: inv.id }, data: { quantity: newQuantity } });
+  await tx.offerAdjustment.create({
+    data: {
+      offerInventoryId: inv.id,
+      previousQuantity,
+      delta,
+      newQuantity,
+      reason,
+      note: note?.trim() || null,
+      actorUserId,
+    },
+  });
+}
+
+/**
+ * Sync the Axiaro FIRST_PARTY `OfferInventory.reorderPoint` to the value an admin
+ * just wrote to `Inventory.reorderPoint` (Phase 9D-D). Call inside the same
+ * transaction as `setReorderPoint`. No `OfferAdjustment` (not a quantity change,
+ * mirroring `setReorderPoint`).
+ */
+export async function syncFirstPartyOfferReorderPoint(
+  variantId: string,
+  reorderPoint: number,
+  tx: Prisma.TransactionClient,
+): Promise<void> {
+  const sellerId = await firstPartySellerId(tx);
+  if (!sellerId) return;
+  await tx.offerInventory.updateMany({
+    where: { offer: { variantId, sellerId, condition: "NEW" } },
+    data: { reorderPoint },
   });
 }
 
