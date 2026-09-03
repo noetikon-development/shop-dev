@@ -26,6 +26,7 @@ export function ProductRail({
   variant = "scroller",
   compact = false,
   fluidHeight = false,
+  mobileGrid = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -41,6 +42,13 @@ export function ProductRail({
    * cards, which keeps their heights close together without hiding anything.
    */
   fluidHeight?: boolean;
+  /**
+   * Layout-only. Below `md` the rail is a two-column grid (each row sizes to
+   * its own content) instead of one horizontal strip sized to its tallest
+   * card; `md` and up it is the normal swipeable strip / desktop grid.
+   * Homepage rails only.
+   */
+  mobileGrid?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -65,7 +73,7 @@ export function ProductRail({
           className="flex-1"
         />
         {!isGrid && (
-          <div className="hidden gap-2 sm:flex">
+          <div className={cn("hidden gap-2", mobileGrid ? "md:flex" : "sm:flex")}>
             <button
               type="button"
               onClick={() => scroll(-1)}
@@ -89,8 +97,14 @@ export function ProductRail({
       <div
         ref={scroller}
         className={cn(
-          "no-scrollbar -mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0",
-          fluidHeight && "items-start",
+          "no-scrollbar mt-6",
+          mobileGrid
+            ? // < md: two-column grid; md+: the normal swipeable strip
+              "grid grid-cols-2 gap-x-4 gap-y-8 md:-mx-4 md:flex md:snap-x md:snap-mandatory md:gap-y-0 md:overflow-x-auto md:px-4 md:pb-2 lg:mx-0 lg:px-0"
+            : "-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0",
+          // In the mobile grid, rows equalise like a normal product grid; the
+          // strip (md+) lets each card keep its own height.
+          fluidHeight && (mobileGrid ? "md:items-start" : "items-start"),
           isGrid &&
             "lg:grid lg:grid-cols-5 lg:gap-x-4 lg:gap-y-9 lg:overflow-visible lg:px-0",
         )}
@@ -103,10 +117,19 @@ export function ProductRail({
             priority={i < 4}
             railCard={fluidHeight}
             className={cn(
-              "shrink-0 snap-start",
-              compact
-                ? "w-[52vw] sm:w-[38vw] md:w-[27vw] lg:w-[calc((100%-4.5rem)/4.5)]"
-                : "w-[58vw] sm:w-[42vw] md:w-[30vw] lg:w-[calc((100%-3rem)/4)]",
+              mobileGrid
+                ? cn(
+                    "w-auto md:shrink-0 md:snap-start",
+                    compact
+                      ? "md:w-[38vw] lg:w-[calc((100%-4.5rem)/4.5)]"
+                      : "md:w-[42vw] lg:w-[calc((100%-3rem)/4)]",
+                  )
+                : cn(
+                    "shrink-0 snap-start",
+                    compact
+                      ? "w-[52vw] sm:w-[38vw] md:w-[27vw] lg:w-[calc((100%-4.5rem)/4.5)]"
+                      : "w-[58vw] sm:w-[42vw] md:w-[30vw] lg:w-[calc((100%-3rem)/4)]",
+                  ),
               isGrid && "lg:w-auto",
             )}
           />

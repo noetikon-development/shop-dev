@@ -31,7 +31,7 @@ export default async function HomePage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-9 pb-8 md:gap-12 lg:gap-16">
+    <div className="flex flex-col gap-9 md:gap-12 lg:gap-16">
       <Hero />
       <CategoryTiles categories={tree} />
       <ProductRail
@@ -41,6 +41,7 @@ export default async function HomePage() {
         products={newArrivals}
         showCategory
         fluidHeight
+        mobileGrid
       />
       <FeatureBand />
       {/* Bestsellers → value-props → sale form a tighter cluster so the strip
@@ -53,6 +54,7 @@ export default async function HomePage() {
           products={bestSellers}
           showCategory
           fluidHeight
+          mobileGrid
         />
         <ValueProps />
         <ProductRail
@@ -62,6 +64,7 @@ export default async function HomePage() {
           products={onSale}
           showCategory
           fluidHeight
+          mobileGrid
         />
       </div>
     </div>
