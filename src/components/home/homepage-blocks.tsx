@@ -235,7 +235,7 @@ async function ProductRailBlock({ data }: { data: Record<string, unknown> }) {
       action={actionLabel && actionHref ? { label: actionLabel, href: actionHref } : undefined}
       products={products}
       showCategory
-      dense
+      fluidHeight
       {...style}
     />
   );

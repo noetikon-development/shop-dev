@@ -40,7 +40,7 @@ export default async function HomePage() {
         action={{ label: "View all new", href: "/c/new" }}
         products={newArrivals}
         showCategory
-        dense
+        fluidHeight
       />
       <FeatureBand />
       {/* Bestsellers → value-props → sale form a tighter cluster so the strip
@@ -52,7 +52,7 @@ export default async function HomePage() {
           action={{ label: "Shop bestsellers", href: "/c/all?sort=bestselling" }}
           products={bestSellers}
           showCategory
-          dense
+          fluidHeight
         />
         <ValueProps />
         <ProductRail
@@ -61,7 +61,7 @@ export default async function HomePage() {
           action={{ label: "All sale items", href: "/c/sale" }}
           products={onSale}
           showCategory
-          dense
+          fluidHeight
         />
       </div>
     </div>

@@ -25,7 +25,7 @@ export function ProductRail({
   showCategory,
   variant = "scroller",
   compact = false,
-  dense = false,
+  fluidHeight = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -35,11 +35,12 @@ export function ProductRail({
   variant?: "scroller" | "grid";
   compact?: boolean;
   /**
-   * Tightens each card's info block (one-line title, no free-shipping line) so
-   * cards in the swipeable strip stay close in height and shorter cards don't
-   * reserve a tall block of empty space on mobile.
+   * Layout-only. Cards size to their own content instead of every card
+   * stretching to the height of the tallest one, so a shorter card doesn't
+   * carry a tall block of empty space beneath it. Paired with `railCard` on the
+   * cards, which keeps their heights close together without hiding anything.
    */
-  dense?: boolean;
+  fluidHeight?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -89,6 +90,7 @@ export function ProductRail({
         ref={scroller}
         className={cn(
           "no-scrollbar -mx-4 mt-6 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 sm:mx-0 sm:px-0",
+          fluidHeight && "items-start",
           isGrid &&
             "lg:grid lg:grid-cols-5 lg:gap-x-4 lg:gap-y-9 lg:overflow-visible lg:px-0",
         )}
@@ -99,7 +101,7 @@ export function ProductRail({
             product={p}
             showCategory={showCategory}
             priority={i < 4}
-            dense={dense}
+            railCard={fluidHeight}
             className={cn(
               "shrink-0 snap-start",
               compact

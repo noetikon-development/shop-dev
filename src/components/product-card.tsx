@@ -18,19 +18,27 @@ export function ProductCard({
   showCategory = false,
   className,
   priority,
-  dense = false,
+  railCard = false,
 }: {
   product: ProductCardView;
   showCategory?: boolean;
   className?: string;
   priority?: boolean;
   /**
-   * Tightens the info block for horizontal rails: title clamped to one line and
-   * the free-shipping line dropped. Keeps card heights close together so a
-   * swipeable strip doesn't reserve a tall block of empty space under the
-   * shorter cards. Full-width grids leave it off.
+   * Layout-only tweak for cards in a horizontal rail. Nothing is hidden or
+   * truncated:
+   *   • the info block takes its natural height instead of growing to fill a
+   *     stretched card (`flex-none` vs `flex-1`), so the card ends right after
+   *     its content instead of reserving empty space at the bottom;
+   *   • the "Free shipping" flag moves onto the image as a small badge rather
+   *     than a separate info line, so its presence/absence no longer changes
+   *     the card height;
+   *   • `line-clamp-2` guards against a hypothetical 3+ line name (every
+   *     current product name already fits in one or two lines).
+   * Paired with `fluidHeight` on the rail (cards keep their own height instead
+   * of all stretching to the tallest). Full-width grids leave it off.
    */
-  dense?: boolean;
+  railCard?: boolean;
 }) {
   const wished = useWishlist((s) => s.ids.includes(product.id));
   const toggleWish = useWishlistToggle();
@@ -104,16 +112,22 @@ export function ProductCard({
             Low stock
           </div>
         )}
+
+        {railCard && product.freeShipping && product.inStock && (
+          <div className="pointer-events-none absolute right-3 bottom-3 rounded-full bg-surface/95 px-2 py-1 text-micro font-medium text-success backdrop-blur">
+            Free shipping
+          </div>
+        )}
       </div>
 
-      <div className="mt-3.5 flex flex-1 flex-col">
+      <div className={cn("mt-3.5 flex flex-col", railCard ? "flex-none" : "flex-1")}>
         {showCategory && (
           <p className="eyebrow mb-1">{product.categoryName}</p>
         )}
         <h3
           className={cn(
             "text-body font-medium leading-snug text-ink",
-            dense && "line-clamp-1",
+            railCard && "line-clamp-2",
           )}
         >
           <Link href={href} className="link-underline">
@@ -154,7 +168,7 @@ export function ProductCard({
           )}
         </div>
 
-        {product.freeShipping && !dense && (
+        {product.freeShipping && !railCard && (
           <p className="mt-2 text-micro font-medium text-success">Free shipping</p>
         )}
       </div>
