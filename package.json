@@ -44,6 +44,7 @@
     "test:9e3c1": "node --env-file=.env --import tsx scripts/test-9e3c1.ts",
     "test:9e3c2": "node --env-file=.env --import tsx scripts/test-9e3c2.ts",
     "reconcile:9e3d": "node --env-file=.env --import tsx scripts/reconcile-9e3d.ts",
+    "monitor:9e3d": "node --env-file=.env --import tsx scripts/monitor-9e3d.ts",
     "test:9e3d1": "node --env-file=.env --import tsx scripts/test-9e3d1.ts",
     "test:9e3d2": "node --env-file=.env --import tsx scripts/test-9e3d2.ts",
     "test:9e3d3": "node --env-file=.env --import tsx scripts/test-9e3d3.ts",
