@@ -27,6 +27,8 @@
     "db:test:marketplace": "node --env-file=.env --conditions=react-server --import tsx scripts/test-marketplace-foundation.ts",
     "parity:9da": "node --env-file=.env --import tsx scripts/parity-offer-card-9da.ts",
     "test:9da": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9da.ts",
+    "parity:9db": "node --env-file=.env --import tsx scripts/parity-pdp-9db.ts",
+    "test:9db": "node --env-file=.env --import tsx scripts/test-9db.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"
   },

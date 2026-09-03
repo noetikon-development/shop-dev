@@ -25,9 +25,23 @@ export type OptionView = {
 export type VariantView = {
   id: string;
   sku: string;
+  /**
+   * `Variant.price` / `Variant.compareAtPrice` — retained as compatibility /
+   * legacy fields (still kept current by the 9D-A admin write-through). Phase
+   * 9D-B: the PDP no longer renders these; it reads `offerPrice` /
+   * `offerCompareAtPrice` below.
+   */
   price: number;
   compareAtPrice: number | null;
-  stock: number; // available (quantity - reserved)
+  /**
+   * The winning Axiaro FIRST_PARTY `Offer` price for this variant, resolved
+   * server-side with the FULL stock-aware buy-box rule (Phase 9D-B). `null` =
+   * no eligible offer (seller suspended / offer inactive / out of stock / none)
+   * → the PDP shows "Currently unavailable" and never falls back to `price`.
+   */
+  offerPrice: number | null;
+  offerCompareAtPrice: number | null;
+  stock: number; // available (quantity - reserved) — UNCHANGED, still Variant.stock
   reorderPoint: number;
   status: string; // ACTIVE | ARCHIVED
   imageUrl: string | null;

@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import { getStoreBrand } from "@/lib/site-settings";
-import { computeCatalogCardPricing } from "@/lib/marketplace/buy-box-rule";
-import type { CardOffer } from "@/lib/marketplace/types";
+import { computeCatalogCardPricing, pickWinningOffer } from "@/lib/marketplace/buy-box-rule";
+import type { CardOffer, OfferCandidate } from "@/lib/marketplace/types";
 import type {
   CategoryNode,
   ProductCardView,
@@ -628,6 +628,21 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         include: {
           optionValues: { select: { optionValueId: true } },
           inventory: { select: { reorderPoint: true } },
+          // Phase 9D-B: the PDP selling price is the winning Axiaro FIRST_PARTY
+          // Offer for the selected variant. Nested here so the PDP pays NO extra
+          // query — Prisma loads offers / sellers / offer-inventory once each via
+          // `WHERE ... IN (...)`. Stock display stays on Variant.stock.
+          offers: {
+            select: {
+              id: true,
+              status: true,
+              price: true,
+              compareAtPrice: true,
+              createdAt: true,
+              seller: { select: { type: true, status: true } },
+              inventory: { select: { quantity: true, reserved: true } },
+            },
+          },
         },
       },
     },
@@ -645,6 +660,38 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
   const activeVariants = p.variants.filter((v) => v.status === "ACTIVE");
   const totalStock = activeVariants.reduce((n, v) => n + Math.max(0, v.stock), 0);
 
+  type PdpOfferRow = (typeof activeVariants)[number]["offers"][number];
+
+  // Per-variant winning offer — the FULL stock-aware buy-box rule (Phase 9D-B).
+  const stockAwareCandidate = (o: PdpOfferRow): OfferCandidate => ({
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as OfferCandidate["sellerStatus"],
+    offerStatus: o.status as OfferCandidate["offerStatus"],
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    price: o.price,
+    createdAt: o.createdAt,
+  });
+  const variantOffer = (offers: PdpOfferRow[]): { price: number | null; compareAtPrice: number | null } => {
+    const winner = pickWinningOffer(offers.map(stockAwareCandidate));
+    if (!winner) return { price: null, compareAtPrice: null };
+    const row = offers.find((o) => o.id === winner.offerId)!;
+    return { price: row.price, compareAtPrice: row.compareAtPrice };
+  };
+
+  // Pre-selection product-level price — the SAME stock-blind range the product
+  // card shows (Phase 9D-A), so the PDP and the card agree before any variant is
+  // chosen. `Product.price` is only a production liveness guard.
+  const rangePricing = computeCatalogCardPricing(
+    activeVariants.map((v) => v.offers.map((o): CardOffer => ({ ...stockAwareCandidate(o), compareAtPrice: o.compareAtPrice }))),
+  );
+  if (rangePricing.minPrice == null) {
+    const msg = `[loadProductBySlug] no resolvable Axiaro offer price for ${p.slug} — 1P write-through gap`;
+    if (process.env.NODE_ENV !== "production") throw new Error(msg);
+    console.error(msg);
+  }
+
   return {
     id: p.id,
     slug: p.slug,
@@ -652,11 +699,13 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     brand: p.brand,
     shortDescription: p.shortDescription,
     description: p.description,
-    // PDP price stays on Product.price / Variant.price in Slice 1 (PDP migration
-    // is Slice 2). `priceFrom` is a type-completeness field the PDP does not use.
-    price: p.price,
-    compareAtPrice: p.compareAtPrice,
-    priceFrom: false,
+    // Phase 9D-B: pre-selection price = min winning 1P Offer across ACTIVE
+    // variants (identical semantic to the product card). Per-variant prices are
+    // on `variants[].offerPrice`. `Product.price` / `Variant.price` are retained
+    // (not removed) and kept current by the admin write-through.
+    price: rangePricing.minPrice ?? p.price,
+    compareAtPrice: rangePricing.minPrice != null ? rangePricing.minCompareAtPrice : p.compareAtPrice,
+    priceFrom: rangePricing.isFrom,
     ratingAvg: p.ratingAvg,
     ratingCount: p.ratingCount,
     soldCount: p.soldCount,
@@ -690,17 +739,22 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
       name: o.name,
       values: o.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })),
     })),
-    variants: activeVariants.map((v) => ({
-      id: v.id,
-      sku: v.sku,
-      price: v.price,
-      compareAtPrice: v.compareAtPrice,
-      stock: Math.max(0, v.stock),
-      reorderPoint: v.inventory?.reorderPoint ?? 0,
-      status: v.status,
-      imageUrl: v.imageUrl,
-      optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
-    })),
+    variants: activeVariants.map((v) => {
+      const off = variantOffer(v.offers);
+      return {
+        id: v.id,
+        sku: v.sku,
+        price: v.price,
+        compareAtPrice: v.compareAtPrice,
+        offerPrice: off.price,
+        offerCompareAtPrice: off.compareAtPrice,
+        stock: Math.max(0, v.stock),
+        reorderPoint: v.inventory?.reorderPoint ?? 0,
+        status: v.status,
+        imageUrl: v.imageUrl,
+        optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
+      };
+    }),
   };
 }
 

@@ -54,8 +54,18 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   // All options chosen, but no Variant sells that combination.
   const comboUnavailable = !missingSelection && !matchedVariant;
 
-  const activePrice = matchedVariant?.price ?? product.price;
-  const activeCompareAt = matchedVariant?.compareAtPrice ?? product.compareAtPrice;
+  // Phase 9D-B: selling price = the winning Axiaro FIRST_PARTY Offer for the
+  // selected variant (server-resolved into `variant.offerPrice`). Before a
+  // variant is chosen, the product-level range (`product.price`). `null` when a
+  // selected variant has no eligible offer → "Currently unavailable"; never
+  // falls back to Variant.price / Product.price.
+  const activePrice: number | null = matchedVariant ? matchedVariant.offerPrice : product.price;
+  const activeCompareAt: number | null = matchedVariant
+    ? matchedVariant.offerCompareAtPrice
+    : product.compareAtPrice;
+  const priceUnavailable = matchedVariant != null && activePrice == null;
+  const showFromPrefix = !matchedVariant && product.priceFrom;
+  // STOCK IS UNCHANGED — still Variant.stock (Phase 9D-B does not migrate stock).
   const stock = matchedVariant?.stock ?? product.totalStock;
   const outOfStock = Boolean(matchedVariant) && matchedVariant!.stock <= 0;
   const reorderPoint = matchedVariant?.reorderPoint ?? 0;
@@ -128,6 +138,10 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
     }
     if (!matchedVariant || outOfStock) {
       toast.error("That combination is out of stock");
+      return;
+    }
+    if (priceUnavailable) {
+      toast.error("This item is currently unavailable");
       return;
     }
     setAdding(true);
@@ -244,7 +258,16 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
         </div>
 
         <div className="mt-5">
-          <PriceTag price={activePrice} compareAt={activeCompareAt} size="lg" />
+          {activePrice == null ? (
+            <span className="font-display text-title text-ink-faint">Currently unavailable</span>
+          ) : (
+            <PriceTag
+              price={activePrice}
+              compareAt={activeCompareAt}
+              from={showFromPrefix}
+              size="lg"
+            />
+          )}
         </div>
 
         <p className="mt-4 text-pretty text-ink-soft">{product.shortDescription}</p>
@@ -351,7 +374,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           <Button
             size="lg"
             onClick={addToBag}
-            disabled={outOfStock || comboUnavailable || adding}
+            disabled={outOfStock || comboUnavailable || priceUnavailable || adding}
             className="w-full sm:flex-1"
           >
             <ShoppingBag size={16} />
@@ -359,9 +382,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
               ? "Unavailable"
               : outOfStock
                 ? "Out of stock"
-                : adding
-                  ? "Adding…"
-                  : `Add to cart · ${formatPrice(activePrice * qty)}`}
+                : priceUnavailable
+                  ? "Currently unavailable"
+                  : adding
+                    ? "Adding…"
+                    : `Add to cart · ${formatPrice((activePrice ?? 0) * qty)}`}
           </Button>
         </div>
 
@@ -381,7 +406,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             <Truck size={17} className="mt-0.5 shrink-0 text-ink-soft" />
             <p className="text-ink-soft">
               {product.freeShipping ||
-              (freeShippingThreshold > 0 && activePrice >= freeShippingThreshold) ? (
+              (freeShippingThreshold > 0 && activePrice != null && activePrice >= freeShippingThreshold) ? (
                 <>
                   <span className="font-medium text-ink">Free standard shipping.</span> Estimated
                   delivery {estimatedDelivery()}.
