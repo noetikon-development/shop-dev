@@ -704,6 +704,14 @@ model Order {
   emailLogs        EmailLog[]
   returnRequests   ReturnRequest[]
   payments         Payment[]
+  // Marketplace (Phase 9E-3C-1). One SellerOrder per distinct seller in this
+  // order — exactly one (Axiaro FIRST_PARTY) for every order that exists today.
+  // Back-relation only; nothing reads it yet (`createOrderFromCart` still writes
+  // a single Order + OrderItem[] as before — the writer switches in 9E-3C-2).
+  // `Order.status` gains the reserved rollup values PARTIALLY_SHIPPED /
+  // PARTIALLY_CANCELLED (free-form string column — no migration) when
+  // `deriveOrderStatus` is wired in 9E-3E.
+  sellerOrders     SellerOrder[]
 
   @@index([userId])
   @@index([status])
@@ -753,14 +761,31 @@ model OrderItem {
   quantity     Int
   lineTotal    Int
 
+  // Marketplace snapshot (Phase 9E-3C-1). NULLABLE during the additive
+  // migration; the 9E-3C-1 backfill populates them for every historical line
+  // (all Axiaro FIRST_PARTY). The checkout writer starts setting them in
+  // 9E-3C-2, when `unitPrice` also switches source from `Variant.price` to the
+  // bound `Offer.price`. `sellerId` is a plain snapshot string (no FK — same
+  // pattern as `productId`); `offerId` keeps a SET NULL FK so a deleted Offer
+  // never removes a historical order line.
+  sellerOrderId  String?
+  sellerId       String?
+  offerId        String?
+  commissionRate Int? // Seller.commissionRate snapshot, basis points (0 for Axiaro)
+
   order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant     Variant?     @relation(fields: [variantId], references: [id])
+  sellerOrder SellerOrder? @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
+  offer       Offer?       @relation(fields: [offerId], references: [id], onDelete: SetNull)
   returnItems ReturnItem[]
 
   @@index([orderId])
   // Analytics (Step 18): best-selling / product-performance aggregation groups
   // OrderItem by productId (joined to Order for the date/status filter).
   @@index([productId])
+  @@index([sellerOrderId])
+  @@index([sellerId])
+  @@index([offerId])
 }
 
 model OrderEvent {
@@ -1174,6 +1199,9 @@ model Seller {
 
   sellerUsers SellerUser[]
   offers      Offer[]
+  // Marketplace (Phase 9E-3C-1). Back-relation only. RESTRICT on the FK side —
+  // a Seller that owns any historical seller order cannot be hard-deleted.
+  sellerOrders SellerOrder[]
 
   @@index([type])
   @@index([status])
@@ -1232,6 +1260,10 @@ model Offer {
   // Back-relation only — the FK column lives on CartItem (Phase 9E-1). A deleted
   // Offer nulls the binding (onDelete: SetNull on CartItem.offerId).
   cartItems CartItem[]
+  // Marketplace (Phase 9E-3C-1). Back-relation only — the FK column lives on
+  // OrderItem. A deleted Offer nulls the historical line's `offerId` but leaves
+  // its price / name / sku snapshot intact (onDelete: SetNull).
+  orderItems OrderItem[]
 
   // One offer per (seller, variant, condition).
   @@unique([sellerId, variantId, condition])
@@ -1283,4 +1315,109 @@ model OfferAdjustment {
   @@index([offerInventoryId])
   @@index([reason])
   @@index([createdAt])
+}
+
+// ----------------------------------------------------------------------------
+// Marketplace — Parent Order → SellerOrder → OrderItem (Phase 9E-3C-1)
+//
+// ADDITIVE FOUNDATION for the approved 9E-3B contract. Every Order that exists
+// today is Axiaro-owned, so the 9E-3C-1 backfill gives each one EXACTLY ONE
+// SellerOrder (the FIRST_PARTY seller) and leaves all historical economics
+// unchanged.
+//
+// Nothing reads these tables yet:
+//   - `createOrderFromCart` still writes a single Order + OrderItem[] as before
+//     (the checkout writer switches to SellerOrders in Phase 9E-3C-2);
+//   - `cancelOrderAction` / `returns-actions` / the PayMongo webhook are
+//     untouched (later phases);
+//   - `marketplace.multiSellerCheckout` stays false — its presence never
+//     auto-enables multi-seller checkout.
+//
+// Money rules (9E-3B §15, all integer centavos, PHP):
+//   total          = merchandiseSubtotal - discountAllocated + shippingFee
+//   commissionAmount = roundHalfUp(merchandiseSubtotal * commissionRate / 10000)
+//   FIRST_PARTY (Axiaro) commissionRate = 0 -> commissionAmount = 0
+//   shippingFee IS the seller's shipping revenue (9E-3C-0 / O-3)
+//   platformShippingSubsidy defaults 0 and is NEVER inferred from a
+//     rate-vs-charge gap (9E-3C-0 / O-3)
+// ----------------------------------------------------------------------------
+
+model SellerOrder {
+  id       String @id @default(cuid())
+  orderId  String
+  sellerId String
+
+  // Seller identity snapshot — a historical seller order never depends on a
+  // later Seller row change (the rule the schema already applies to Coupon /
+  // ShippingMethod).
+  sellerName     String // Seller.displayName at order time
+  sellerType     String // FIRST_PARTY | THIRD_PARTY
+  supportEmail   String // Seller.supportEmail at order time
+  commissionRate Int    @default(0) // Seller.commissionRate snapshot, basis points
+
+  // Shipping snapshot — the method the customer chose (one store-wide method in
+  // this phase). Code / name are NULL for pre-Step-11 historical orders, which
+  // carry only the legacy `Order.shippingMethod` string.
+  shippingMethodCode      String?
+  shippingMethodName      String?
+  shippingFee             Int      @default(0) // amount actually charged for this seller = seller shipping revenue (O-3)
+  platformShippingSubsidy Int      @default(0) // reserved; written explicitly, never inferred (O-3)
+  // Per-seller free-shipping threshold result. NULL for historical orders — it
+  // is NOT recomputed from today's threshold (9E-3C-1 §9).
+  freeShippingApplied     Boolean?
+
+  // Money (centavos).
+  merchandiseSubtotal Int    @default(0) // Σ OrderItem.lineTotal, pre-discount
+  discountAllocated   Int    @default(0) // this seller's slice of the order coupon
+  discountFundedBy     String @default("PLATFORM") // PLATFORM (this phase) | SELLER (future)
+  commissionAmount    Int    @default(0)
+  total               Int    @default(0) // merchandiseSubtotal - discountAllocated + shippingFee
+
+  // The seller's own fulfilment machine (9E-3B §7). Separate from the parent
+  // Order.status rollup, which is not wired until 9E-3E.
+  status           String @default("PENDING_PAYMENT")
+  // PENDING_PAYMENT | PROCESSING | READY_TO_SHIP | SHIPPED | DELIVERED | CANCELLED
+  settlementStatus String @default("PENDING_CAPTURE")
+  // PENDING_CAPTURE | CAPTURED | SETTLED | REFUNDED | CLAWED_BACK
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  seller    Seller      @relation(fields: [sellerId], references: [id])
+  items     OrderItem[]
+  shipments Shipment[]
+
+  @@unique([orderId, sellerId])
+  @@index([orderId])
+  @@index([sellerId])
+  @@index([status])
+  @@index([settlementStatus])
+}
+
+// One or more parcels for a SellerOrder (Phase 9E-3C-1). MVP: a shipment covers
+// all of its SellerOrder's items — no ShipmentItem join yet. The legacy
+// per-Order courier / tracking columns are NOT retired in this phase.
+//
+// Zero rows are backfilled: no historical Order carries courier / tracking /
+// shippedAt data to build one from safely (9E-3C-1 §11).
+model Shipment {
+  id             String    @id @default(cuid())
+  sellerOrderId  String
+  carrier        String? // courier code (src/lib/orders/couriers.ts); null until assigned
+  carrierName    String? // display-name snapshot / custom text for "OTHER"
+  trackingNumber String?
+  trackingUrl    String? // HTTPS only
+  status         String    @default("PENDING") // PENDING | SHIPPED | DELIVERED
+  shippedAt      DateTime?
+  deliveredAt    DateTime?
+  note           String? // internal — never customer-facing
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  sellerOrder SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+
+  @@index([sellerOrderId])
+  @@index([status])
+  @@index([carrier])
 }

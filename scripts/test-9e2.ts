@@ -192,6 +192,12 @@ async function dbTests() {
   if (!axiaro || !product) return ok("(skipped — no seller/product)", true);
   const suffix = "9e2-" + Date.now();
 
+  // Snapshot the CartItem schema BEFORE the test transaction. The 9E-2 migration
+  // is now applied on the shared DB, so "rolled back" must mean "returned to
+  // whatever state the DB was already in", not "restored the pre-9E-2 schema".
+  const preOldIdx = (await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_indexes WHERE tablename='CartItem' AND indexname='CartItem_cartId_variantId_key'`)) as unknown[];
+  const preNullable = (await prisma.$queryRawUnsafe(`SELECT is_nullable FROM information_schema.columns WHERE table_name='CartItem' AND column_name='offerId'`)) as { is_nullable: string }[];
+
   try {
     await prisma.$transaction(
       async (tx) => {
@@ -331,7 +337,11 @@ async function dbTests() {
   const stillOld = (await prisma.$queryRawUnsafe(`SELECT 1 FROM pg_indexes WHERE tablename='CartItem' AND indexname='CartItem_cartId_variantId_key'`)) as unknown[];
   const nullableAgain = (await prisma.$queryRawUnsafe(`SELECT is_nullable FROM information_schema.columns WHERE table_name='CartItem' AND column_name='offerId'`)) as { is_nullable: string }[];
   ok("ROLLBACK  no seller / variant fixture leaked", leakedSeller === 0 && leakedVariant === 0, `s=${leakedSeller} v=${leakedVariant}`);
-  ok("ROLLBACK  DDL undone — old unique index back, offerId nullable again", stillOld.length === 1 && nullableAgain[0]?.is_nullable === "YES");
+  ok(
+    "ROLLBACK  DDL undone — CartItem schema returned to its pre-test state",
+    stillOld.length === preOldIdx.length && nullableAgain[0]?.is_nullable === preNullable[0]?.is_nullable,
+    `old idx ${stillOld.length}->was ${preOldIdx.length}; nullable ${nullableAgain[0]?.is_nullable}->was ${preNullable[0]?.is_nullable}`,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -370,7 +380,10 @@ function staticChecks() {
   ok("L  schema: @@unique([cartId, offerId]) + offerId required + no [cartId, variantId]", /@@unique\(\[cartId, offerId\]\)/.test(schema) && /\n\s*offerId\s+String\s*\n/.test(schema) && !/@@unique\(\[cartId, variantId\]\)/.test(schema));
   ok("L  checkout.ts has no cart-schema coupling (no cartId_variantId / cartId_offerId / offerId)", !/cartId_variantId|cartId_offerId|offerId/.test(checkout));
   ok("L  checkout order line still built from v.price (unchanged)", /unitPrice: v\.price/.test(checkout));
-  ok("L  no SellerOrder / Shipment model added", !/model SellerOrder|model Shipment/.test(schema));
+  // 9E-3C-1 adds the SellerOrder / Shipment models (additive foundation); the
+  // checkout WRITER is still single-seller (asserted above via `unitPrice: v.price`
+  // + the 9E-3C-1 runner). Assert the checkout file itself gained no coupling.
+  ok("L  checkout.ts does not reference SellerOrder", !/sellerOrder/i.test(checkout));
   ok("L  coupon stays order-wide (Cart.couponCode, one CouponRedemption per order)", /couponCode\s+String\?/.test(schema) && /orderId\s+String\s+@unique/.test(schema));
 }
 
