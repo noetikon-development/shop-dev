@@ -7,6 +7,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock } from "@/lib/inventory";
+import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { cleanUserText } from "@/lib/ugc";
 import { scheduleEmail } from "@/lib/email/schedule";
 import {
@@ -38,8 +39,11 @@ import { hasPermission } from "@/lib/admin/rbac";
  * - Every transition is validated server-side against `canTransitionReturn` and
  *   applied with an atomic status-guarded `updateMany` (0 rows ⇒ concurrent
  *   change ⇒ abort). The client can never post an arbitrary status.
- * - `Order` / `OrderItem` are never mutated. Restock goes through the existing
- *   row-locked `adjustStock` primitive with reason "RETURN".
+ * - `Order` / `OrderItem` are never mutated. Restock (Phase 9E-3D-1): an
+ *   offer-native order (SALE `OfferAdjustment` present) restocks `OfferInventory`
+ *   per `ReturnItem → OrderItem.offerId` AND the legacy `Inventory` (the 1P
+ *   mirror) in one transaction, OfferInventory locked first; a legacy order
+ *   restocks `Inventory` only. Idempotent via `ReturnRequest.restockedAt`.
  * - Refunds are BOOKKEEPING ONLY — `Order.paymentStatus` is not touched, no
  *   Payment / gateway record is created.
  * - Every action writes an `AdminAuditLog` entry and schedules the matching
@@ -95,7 +99,7 @@ const RETURN_SELECT = {
   order: { select: { id: true, orderNumber: true, grandTotal: true, subtotal: true, shippingFee: true, paymentMethod: true } },
   items: {
     orderBy: { id: "asc" as const },
-    select: { id: true, variantId: true, name: true, quantity: true, refundAmount: true },
+    select: { id: true, orderItemId: true, variantId: true, name: true, quantity: true, refundAmount: true },
   },
 } satisfies Prisma.ReturnRequestSelect;
 
@@ -256,14 +260,44 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
 
   const restocked: { name: string; qty: number }[] = [];
   const skippedRestock: string[] = [];
+  let restockPath: "offer-native" | "legacy" = "legacy";
 
   try {
     await prisma.$transaction(async (tx) => {
+      // Idempotency: `restockedAt` set-once + status guard. A repeated receive
+      // matches 0 rows and never re-restocks.
       const res = await tx.returnRequest.updateMany({
         where: { id: ret.id, status: "APPROVED", restockedAt: null },
         data: { status: "RECEIVED", restockedAt: new Date(), staffNote },
       });
       if (res.count === 0) throw new StaleReturnError();
+
+      // Phase 9E-3D-1: an offer-native order (placed by the 9E-3C-2 writer —
+      // detected by a SALE `OfferAdjustment`) restocks `OfferInventory` per
+      // `ReturnItem → OrderItem.offerId` AND the legacy `Inventory` (the 1P
+      // mirror), in this transaction, OfferInventory locked first (§12). A
+      // legacy order restocks `Inventory` only, exactly as before.
+      const saleOfferAdjustments = await tx.offerAdjustment.count({
+        where: { reason: "SALE", note: `Order ${ret.order.orderNumber}` },
+      });
+      const offerNative = saleOfferAdjustments > 0;
+      restockPath = offerNative ? "offer-native" : "legacy";
+
+      // Resolve each return line's bound Offer via its order line (offer-native).
+      const orderItemIds = lines.map((l) => l.item.orderItemId).filter(Boolean) as string[];
+      const offerByOrderItem = new Map<string, { offerId: string | null; sellerType: string }>();
+      if (offerNative && orderItemIds.length > 0) {
+        const ois = await tx.orderItem.findMany({
+          where: { id: { in: orderItemIds } },
+          select: { id: true, offerId: true, offer: { select: { seller: { select: { type: true } } } } },
+        });
+        for (const oi of ois) {
+          offerByOrderItem.set(oi.id, {
+            offerId: oi.offerId,
+            sellerType: oi.offer?.seller.type ?? "FIRST_PARTY",
+          });
+        }
+      }
 
       for (const l of lines) {
         await tx.returnItem.update({
@@ -271,8 +305,32 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           data: { restockQuantity: l.restockQuantity, condition: l.condition },
         });
         if (l.restockQuantity <= 0) continue;
-        if (!l.item.variantId) {
-          skippedRestock.push(l.item.name);
+
+        const bound = l.item.orderItemId ? offerByOrderItem.get(l.item.orderItemId) : undefined;
+        const useOfferPath = offerNative && bound?.offerId;
+
+        // 1. OfferInventory restock — offer-native only. Locked FIRST.
+        if (useOfferPath) {
+          const oRes = await restoreOfferStock(
+            {
+              offerId: bound!.offerId!,
+              units: l.restockQuantity,
+              reason: "RETURN",
+              note: `Return ${ret.returnNumber} (order ${ret.order.orderNumber}) · item ${l.item.orderItemId}`,
+              actorUserId: admin.user.id,
+            },
+            tx,
+          );
+          if (!oRes.ok) throw new Error(oRes.error ?? "Could not restock a line — receipt aborted.");
+        }
+
+        // 2. Legacy Inventory restock. For an offer-native FIRST_PARTY line this
+        //    is the 1P mirror; for a legacy order it is the whole restock.
+        //    Skipped only for a (future) 3P line, which has no Inventory row.
+        const isThirdParty = bound?.sellerType === "THIRD_PARTY";
+        if (!l.item.variantId || isThirdParty) {
+          if (!useOfferPath) skippedRestock.push(l.item.name);
+          if (useOfferPath) restocked.push({ name: l.item.name, qty: l.restockQuantity });
           continue;
         }
         const inv = await tx.inventory.findUnique({
@@ -280,7 +338,8 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           select: { id: true },
         });
         if (!inv) {
-          skippedRestock.push(l.item.name);
+          if (!useOfferPath) skippedRestock.push(l.item.name);
+          if (useOfferPath) restocked.push({ name: l.item.name, qty: l.restockQuantity });
           continue;
         }
         const adj = await adjustStock(
@@ -313,12 +372,14 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
     summary:
       `${admin.user.email} received return ${ret.returnNumber} (order ${ret.order.orderNumber}); ` +
       `restocked ${restocked.reduce((n, r) => n + r.qty, 0)} unit(s) across ${restocked.length} line(s)` +
-      (skippedRestock.length ? `; ${skippedRestock.length} line(s) not restocked` : ""),
+      (skippedRestock.length ? `; ${skippedRestock.length} line(s) not restocked` : "") +
+      ` [${restockPath}]`,
     meta: {
       returnNumber: ret.returnNumber,
       orderNumber: ret.order.orderNumber,
       from: "APPROVED",
       to: "RECEIVED",
+      restockPath,
       restocked,
       skippedRestock,
     },

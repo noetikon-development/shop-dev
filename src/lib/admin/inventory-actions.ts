@@ -76,20 +76,28 @@ export async function adjustStockAction(
   }
 
   const effectiveReason = mode === "set" ? "CORRECTION" : reason;
-  // Phase 9D-D: the existing Inventory mutation AND the matching 1P
-  // OfferInventory sync run in ONE transaction — both move by the same delta or
-  // neither does. `adjustStock` keeps its own row-lock / InventoryAdjustment /
-  // Variant.stock-mirror behaviour unchanged (it just runs on the passed tx).
-  const result = await prisma.$transaction(async (tx) => {
-    const r = await adjustStock(
-      { variantId, delta, reason: effectiveReason, note: note || null, actorUserId: admin.user.id },
-      tx,
-    );
-    if (r.ok) {
+  // Phase 9D-D + 9E-3D-1: the 1P `OfferInventory` sync AND the legacy `Inventory`
+  // mutation run in ONE transaction — both move by the same delta or neither
+  // does. LOCK ORDER (9E-3D-1 §12/§14): OfferInventory is locked FIRST (via
+  // `syncFirstPartyOfferStock`'s `FOR UPDATE OF oi`), then `Inventory` (via
+  // `adjustStock`), matching checkout / cancel / return. `adjustStock` keeps
+  // its own row-lock / InventoryAdjustment / Variant.stock-mirror behaviour.
+  let result: Awaited<ReturnType<typeof adjustStock>>;
+  try {
+    result = await prisma.$transaction(async (tx) => {
       await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
-    }
-    return r;
-  });
+      const r = await adjustStock(
+        { variantId, delta, reason: effectiveReason, note: note || null, actorUserId: admin.user.id },
+        tx,
+      );
+      // `adjustStock` returns { ok: false } without throwing on an invariant
+      // violation — throw so the OfferInventory write above rolls back too.
+      if (!r.ok) throw new Error(r.error ?? "Adjustment failed.");
+      return r;
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Adjustment failed." };
+  }
   if (!result.ok) return { error: result.error ?? "Adjustment failed." };
 
   await writeAudit({
@@ -140,13 +148,21 @@ export async function updateThresholdAction(
   });
   if (!inv) return { error: "No inventory record for that variant." };
 
-  // Phase 9D-D: Inventory.reorderPoint AND the matching 1P
-  // OfferInventory.reorderPoint move together, atomically.
-  const result = await prisma.$transaction(async (tx) => {
-    const r = await setReorderPoint(variantId, reorderPoint, tx);
-    if (r.ok) await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
-    return r;
-  });
+  // Phase 9D-D + 9E-3D-1: OfferInventory.reorderPoint AND Inventory.reorderPoint
+  // move together, atomically. OfferInventory first (§12 lock-order convention;
+  // neither call takes a `FOR UPDATE` row lock here — a threshold change is not
+  // a quantity change — so the ordering is for consistency, not deadlock).
+  let result: Awaited<ReturnType<typeof setReorderPoint>>;
+  try {
+    result = await prisma.$transaction(async (tx) => {
+      await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
+      const r = await setReorderPoint(variantId, reorderPoint, tx);
+      if (!r.ok) throw new Error(r.error ?? "Could not update the threshold.");
+      return r;
+    });
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : "Could not update the threshold." };
+  }
   if (!result.ok) return { error: result.error ?? "Could not update the threshold." };
   if (result.previous === reorderPoint) return { ok: true, message: "Threshold unchanged." };
 

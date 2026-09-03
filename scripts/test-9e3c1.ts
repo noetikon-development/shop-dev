@@ -316,19 +316,13 @@ async function dbTests() {
 }
 
 function staticChecks() {
-  console.log("\nI. cancellation / returns / webhook still legacy (file inspection)");
-  const orderActions = readFileSync(new URL("../src/lib/admin/order-actions.ts", import.meta.url), "utf8");
-  const returnsActions = readFileSync(new URL("../src/lib/admin/returns-actions.ts", import.meta.url), "utf8");
+  console.log("\nI. schema shape + webhook still legacy (file inspection)");
   const webhook = readFileSync(new URL("../src/lib/payments/webhook.ts", import.meta.url), "utf8");
   const schema = readFileSync(new URL("../prisma/schema.prisma", import.meta.url), "utf8");
   const registry = readFileSync(new URL("../src/lib/admin/settings-registry.ts", import.meta.url), "utf8");
 
-  // The checkout WRITER itself is offer-native as of 9E-3C-2 — that is covered
-  // by test:9e3c2. This suite only guards that the OTHER inventory writers
-  // (cancellation / returns) and the webhook stay legacy until 9E-3D.
-  ok("I  cancelOrderAction untouched (still note-string SALE reversal)", /reason: "SALE", note: `Order \$\{order\.orderNumber\}`/.test(orderActions) || /note: `Order \$\{order\.orderNumber\}`/.test(orderActions));
-  ok("I  order-actions does not touch SellerOrder / OfferInventory", !/sellerOrder|offerInventory/i.test(orderActions));
-  ok("I  returns-actions does not touch SellerOrder / OfferInventory", !/sellerOrder|offerInventory/i.test(returnsActions));
+  // Cancellation + returns are offer-aware as of 9E-3D-1 (covered by test:9e3d1).
+  // The webhook stays legacy until a later phase (SellerOrder fan-out).
   ok("I  webhook does not touch SellerOrder", !/sellerOrder/i.test(webhook));
   ok("I  schema has SellerOrder + Shipment models", /model SellerOrder \{/.test(schema) && /model Shipment \{/.test(schema));
   ok("I  OrderItem marketplace columns are optional (String? / Int?)", /sellerOrderId\s+String\?/.test(schema) && /offerId\s+String\?/.test(schema) && /commissionRate\s+Int\?/.test(schema));

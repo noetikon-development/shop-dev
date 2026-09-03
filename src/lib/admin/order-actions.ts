@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock } from "@/lib/inventory";
+import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import {
@@ -29,10 +30,14 @@ import { sendOrderCancelled, sendOrderProcessing } from "@/lib/email/notificatio
  *   Step 13 fulfilment actions so courier / tracking / timestamps are captured.
  * - Every transition is validated server-side against `canTransition`; the client
  *   cannot post an arbitrary status, and an admin can NEVER set PAID by hand.
- * - Cancellation reverses the order's SALE inventory effect through the existing
- *   row-locked `adjustStock` primitive — it never touches `Variant.stock`
- *   directly and never creates a duplicate adjustment (the atomic status gate
- *   makes the whole operation run at most once).
+ * - Cancellation reverses the order's SALE inventory effect (Phase 9E-3D-1):
+ *   an offer-native order (placed by the 9E-3C-2 writer — detected by the
+ *   presence of a SALE `OfferAdjustment`) restores `OfferInventory` per
+ *   `OrderItem.offerId` AND the legacy `Inventory` (the FIRST_PARTY 1P mirror),
+ *   in ONE transaction, locking OfferInventory before Inventory. A legacy
+ *   (pre-9E-3C-2) order restores `Inventory` only, exactly as before. It never
+ *   touches `Variant.stock` directly and never restocks twice — the atomic
+ *   `Order.status` gate makes the whole reversal run at most once.
  * - Every action records an `OrderEvent` and an `AdminAuditLog` entry.
  */
 
@@ -255,20 +260,70 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
 
   let restockedUnits = 0;
   let restockedLines = 0;
+  let reversalPath: "offer-native" | "legacy" = "legacy";
 
   try {
     await prisma.$transaction(async (tx) => {
       // 1. Atomic cancel — guarded on the cancellable set. 0 rows = someone
       //    else already moved it; abort so we never reverse inventory twice.
+      //    THIS is the idempotency mechanism for the whole reversal below.
       const cancelled = await tx.$executeRaw`
         UPDATE "Order" SET "status" = 'CANCELLED', "updatedAt" = now()
         WHERE "id" = ${orderId}
           AND "status" IN ('PENDING_PAYMENT', 'PENDING', 'PROCESSING')`;
       if (cancelled === 0) throw new StaleOrderError();
 
-      // 2. Reverse exactly what checkout deducted: one CANCELLATION adjustment
-      //    per SALE adjustment this order recorded. Pre-Step-9 / seed orders
-      //    have no SALE rows, so nothing is restocked for them.
+      // 2. Reverse EXACTLY what the SALE deducted — symmetric by construction.
+      //
+      //    An order is "offer-native" (placed by the 9E-3C-2 writer) when it
+      //    recorded at least one SALE `OfferAdjustment`. Such an order also
+      //    recorded SALE `InventoryAdjustment` rows for its FIRST_PARTY lines
+      //    (the 1P mirror). A legacy (pre-9E-3C-2) order recorded only
+      //    `InventoryAdjustment` SALE rows.
+      //
+      //    Offer-native  -> restore OfferInventory per `OrderItem.offerId` (the
+      //                     authoritative marketplace mapping, 9E-3D-1 §3) AND
+      //                     restore Inventory from the SALE `InventoryAdjustment`
+      //                     rows (the 1P mirror — same walk as legacy).
+      //    Legacy        -> restore Inventory only, unchanged.
+      //
+      //    LOCK ORDER (§12): OfferInventory FIRST, then Inventory.
+      const saleOfferAdjustments = await tx.offerAdjustment.count({
+        where: { reason: "SALE", note: `Order ${order.orderNumber}` },
+      });
+      const offerNative = saleOfferAdjustments > 0;
+      reversalPath = offerNative ? "offer-native" : "legacy";
+
+      const soldBackByProduct = new Map<string, number>();
+
+      // 2a. OfferInventory reversal — offer-native only, per OrderItem.offerId.
+      if (offerNative) {
+        const items = await tx.orderItem.findMany({
+          where: { orderId, offerId: { not: null } },
+          select: { id: true, offerId: true, quantity: true, productId: true },
+        });
+        for (const it of items) {
+          if (!it.offerId || it.quantity <= 0) continue;
+          const res = await restoreOfferStock(
+            {
+              offerId: it.offerId,
+              units: it.quantity,
+              reason: "CANCELLATION",
+              note: `Order ${order.orderNumber} cancelled · item ${it.id}`,
+              actorUserId: admin.user.id,
+            },
+            tx,
+          );
+          if (!res.ok) {
+            throw new Error(res.error ?? "Could not restore a line — cancellation aborted.");
+          }
+        }
+      }
+
+      // 2b. Inventory reversal — one CANCELLATION per SALE InventoryAdjustment
+      //     this order recorded. Runs for BOTH paths (for an offer-native order
+      //     these rows are the FIRST_PARTY 1P mirror; for a legacy order they
+      //     are the whole SALE). Locked AFTER OfferInventory.
       const saleAdjustments = await tx.inventoryAdjustment.findMany({
         where: { reason: "SALE", note: `Order ${order.orderNumber}` },
         select: {
@@ -276,9 +331,6 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
           inventory: { select: { variantId: true, variant: { select: { productId: true } } } },
         },
       });
-
-      const soldBackByProduct = new Map<string, number>();
-
       for (const adj of saleAdjustments) {
         const qty = -adj.delta; // SALE delta is negative → qty is positive
         if (qty <= 0) continue;
@@ -299,6 +351,23 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
         restockedLines += 1;
         const pid = adj.inventory.variant.productId;
         soldBackByProduct.set(pid, (soldBackByProduct.get(pid) ?? 0) + qty);
+      }
+
+      // 2c. If an offer-native order has NO SALE InventoryAdjustment rows (a
+      //     purely 3P order — not possible today, single-seller gate), the
+      //     soldCount roll-back still needs the quantities. Derive from the
+      //     OrderItems in that case.
+      if (offerNative && saleAdjustments.length === 0) {
+        const items = await tx.orderItem.findMany({
+          where: { orderId },
+          select: { quantity: true, productId: true },
+        });
+        for (const it of items) {
+          if (it.quantity <= 0) continue;
+          restockedUnits += it.quantity;
+          restockedLines += 1;
+          soldBackByProduct.set(it.productId, (soldBackByProduct.get(it.productId) ?? 0) + it.quantity);
+        }
       }
 
       // 3. Undo the soldCount bump checkout made (never below zero).
@@ -331,12 +400,13 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
     action: "order.cancelled",
     targetType: "order",
     targetId: orderId,
-    summary: `${admin.user.email} cancelled order ${order.orderNumber} (was ${orderStatusLabel(order.status)}); restocked ${restockedUnits} unit(s) across ${restockedLines} line(s)`,
+    summary: `${admin.user.email} cancelled order ${order.orderNumber} (was ${orderStatusLabel(order.status)}); restocked ${restockedUnits} unit(s) across ${restockedLines} line(s) [${reversalPath}]`,
     meta: {
       orderNumber: order.orderNumber,
       previousStatus: order.status,
       restockedUnits,
       restockedLines,
+      reversalPath,
       reason: reason || null,
     },
   });

@@ -3,23 +3,28 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /**
- * OfferInventory checkout writer (Phase 9E-3C-2).
+ * OfferInventory mutation primitives (Phase 9E-3C-2 SALE; Phase 9E-3D-1 reversal).
  *
- * The exact analogue of `adjustStock({ delta: -qty, reason: "SALE" })` in
+ * The exact analogue of `adjustStock({ delta, reason })` in
  * `src/lib/inventory.ts`, operating on `OfferInventory` instead of `Inventory`.
- * A single atomic, row-locked, condition-guarded UPDATE so concurrent checkouts
- * serialise and can never oversell.
+ * Every write is a single atomic, row-locked (`SELECT … FOR UPDATE`),
+ * condition-guarded UPDATE so concurrent callers serialise and can never
+ * oversell or go negative.
  *
- * MVP (9E-3B §11): stock is COMMITTED at order creation — online payment is not
- * active, so there is no reservation hold window. This deducts `quantity`
- * directly and writes an append-only `OfferAdjustment` row (reason "SALE").
- * `reserved` is not touched (nothing is reserved).
+ * SALE (`commitOfferStockForSale`) — 9E-3C-2. MVP (9E-3B §11): stock is
+ * COMMITTED at order creation (online payment dormant, no reservation hold), so
+ * `quantity` is deducted directly. `reserved` is never touched.
  *
- * MUST be called inside the checkout `$transaction`. For an Axiaro FIRST_PARTY
- * offer the caller ALSO applies the same `-qty` delta to the legacy `Inventory`
- * row via `adjustStock` in the SAME transaction — the two writes commit together
- * or roll back together (9E-3C-2 §7, the migration-window guard). This module
- * never touches `Inventory` / `Variant.stock` itself.
+ * REVERSAL (`restoreOfferStock`) — 9E-3D-1. Adds units back on a cancellation
+ * or a return receipt, with an append-only `OfferAdjustment` (reason
+ * "CANCELLATION" / "RETURN").
+ *
+ * LOCK ORDER (9E-3D-1 §12): every dual-store mutation locks **OfferInventory
+ * before Inventory**. Callers that also touch the legacy `Inventory` row for a
+ * FIRST_PARTY offer MUST call the OfferInventory primitive here FIRST, then
+ * `adjustStock`, inside ONE `$transaction` — the two move together or roll back
+ * together (the 9E-3C-2 / 9E-3D-1 migration-window guard). This module never
+ * touches `Inventory` / `Variant.stock` itself.
  */
 
 export type CommitOfferStockResult =
@@ -71,6 +76,65 @@ export async function commitOfferStockForSale(
       delta: -units,
       newQuantity,
       reason: "SALE",
+      note: note?.trim() || null,
+      actorUserId,
+    },
+  });
+
+  return { ok: true, previousQuantity, newQuantity };
+}
+
+/**
+ * Restore units to one Offer's inventory on a cancellation or a return receipt:
+ * `quantity += units`, plus an `OfferAdjustment` history row. Row-locks the
+ * `OfferInventory` row (`FOR UPDATE`) for the rest of the transaction.
+ *
+ * `reason` is "CANCELLATION" or "RETURN" (`OfferAdjustment.reason` is a free
+ * string — the vocabulary matches `InventoryAdjustment`). `note` carries the
+ * human-readable order / return / item reference (there is no `orderId` /
+ * `orderItemId` FK on `OfferAdjustment`; the structural identity is
+ * `offerInventoryId` + `delta`).
+ *
+ * MUST run inside the cancellation / return `$transaction`, and BEFORE the
+ * matching `adjustStock` reversal for a FIRST_PARTY offer (lock order §12).
+ */
+export async function restoreOfferStock(
+  params: {
+    offerId: string;
+    units: number;
+    reason: string; // "CANCELLATION" | "RETURN"
+    note?: string | null;
+    actorUserId?: string | null;
+  },
+  tx: Prisma.TransactionClient,
+): Promise<CommitOfferStockResult> {
+  const { offerId, units, reason, note = null, actorUserId = null } = params;
+  if (!Number.isInteger(units) || units <= 0) {
+    return { ok: false, error: "Restore quantity must be a positive whole number." };
+  }
+
+  const locked = await tx.$queryRaw<{ id: string; quantity: number }[]>`
+    SELECT "id", "quantity"
+    FROM "OfferInventory"
+    WHERE "offerId" = ${offerId}
+    FOR UPDATE`;
+  const inv = locked[0];
+  if (!inv) return { ok: false, error: "No offer inventory to restore." };
+
+  const previousQuantity = inv.quantity;
+  const newQuantity = previousQuantity + units;
+
+  await tx.offerInventory.update({
+    where: { id: inv.id },
+    data: { quantity: newQuantity },
+  });
+  await tx.offerAdjustment.create({
+    data: {
+      offerInventoryId: inv.id,
+      previousQuantity,
+      delta: units,
+      newQuantity,
+      reason,
       note: note?.trim() || null,
       actorUserId,
     },
