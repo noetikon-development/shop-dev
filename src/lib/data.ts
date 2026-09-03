@@ -404,7 +404,12 @@ export type ListingResult = {
   colorFacets: { name: string; hex: string | null; count: number }[];
 };
 
-async function runListProducts(params: ListingParams): Promise<ListingResult> {
+/**
+ * Uncached product-listing core. App code uses the cached `listProducts` export
+ * below; this is exported for the Phase 9D-C parity / pagination scripts, which
+ * need to compare offer-derived results against a reference without the cache.
+ */
+export async function runListProducts(params: ListingParams): Promise<ListingResult> {
   const perPage = params.perPage ?? 24;
   const page = Math.max(1, params.page ?? 1);
 
@@ -442,9 +447,14 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
       ],
     });
   }
-  if (params.minPrice != null) AND.push({ price: { gte: params.minPrice } });
-  if (params.maxPrice != null) AND.push({ price: { lte: params.maxPrice } });
-  if (params.onSale) AND.push({ compareAtPrice: { not: null } });
+  // Phase 9D-C: price-asc/desc sort, min/max price filter and the on-sale filter
+  // now evaluate the DERIVED PRODUCT PRICE = the minimum winning Axiaro
+  // FIRST_PARTY Offer price across the product's ACTIVE variants (identical
+  // semantic to the product card / PDP pre-selection). These are applied in
+  // memory AFTER offer resolution, so they are NOT added to the DB `where`.
+  // Non-price filters (status / category / text / freeShipping / rating /
+  // colours / in-stock) stay at the database. In-stock still reads Variant.stock
+  // (stock migration is a later slice).
   if (params.freeShipping) AND.push({ freeShipping: true });
   if (params.minRating) AND.push({ ratingAvg: { gte: params.minRating } });
   if (params.colors?.length) {
@@ -464,23 +474,27 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
   const where = { AND };
   const sort = params.sort ?? "relevance";
 
-  // A free-text search with the default "relevance" sort is ranked in memory:
-  // the catalogue is small, Prisma can't express a CASE-WHEN ranking, and a
-  // title / title-prefix hit must outrank a mid-word description hit (the "sof"
-  // inside "soft" problem). Any explicit sort (price, newest, …) keeps the
-  // database ordering + pagination unchanged.
   const rankInMemory = Boolean(query) && sort === "relevance";
+  const priceFiltered = params.minPrice != null || params.maxPrice != null;
+  const onSaleFilter = Boolean(params.onSale);
+  const priceSorted = sort === "price-asc" || sort === "price-desc";
+  // Any offer-aware price operation forces the small in-memory pipeline:
+  // resolve → filter → sort → paginate (pagination AFTER the derived sort/filter).
+  const inMemory = rankInMemory || priceFiltered || onSaleFilter || priceSorted;
 
-  const [rawRows, dbTotal, priceAgg, colorGroups] = await Promise.all([
-    rankInMemory
-      ? prisma.product.findMany({
-          where,
-          select: {
-            ...cardSelect,
-            description: true,
-            category: { select: { slug: true, name: true, parent: { select: { name: true } } } },
-          },
-        })
+  const scopeWhere = categoryIds
+    ? { status: "ACTIVE" as const, categoryId: { in: categoryIds } }
+    : { status: "ACTIVE" as const };
+
+  const richSelect = {
+    ...cardSelect,
+    description: true,
+    category: { select: { slug: true, name: true, parent: { select: { name: true } } } },
+  } as const;
+
+  const [rawRows, dbTotal, boundsRows, colorGroups] = await Promise.all([
+    inMemory
+      ? prisma.product.findMany({ where, orderBy: orderBy(sort), select: richSelect })
       : prisma.product.findMany({
           where,
           orderBy: orderBy(sort),
@@ -488,19 +502,35 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
           take: perPage,
           select: cardSelect,
         }),
-    rankInMemory ? Promise.resolve(0) : prisma.product.count({ where }),
-    prisma.product.aggregate({
-      where: categoryIds ? { status: "ACTIVE", categoryId: { in: categoryIds } } : { status: "ACTIVE" },
-      _min: { price: true },
-      _max: { price: true },
+    inMemory ? Promise.resolve(0) : prisma.product.count({ where }),
+    // Price-range facet bounds — over the category scope (unchanged behaviour:
+    // NOT narrowed by the text query or the other active filters), using the
+    // SAME derived product price shown on the cards.
+    prisma.product.findMany({
+      where: scopeWhere,
+      select: {
+        variants: {
+          where: { status: "ACTIVE" },
+          select: {
+            offers: {
+              select: {
+                id: true,
+                status: true,
+                price: true,
+                compareAtPrice: true,
+                createdAt: true,
+                seller: { select: { type: true, status: true } },
+              },
+            },
+          },
+        },
+      },
     }),
     prisma.productOptionValue.findMany({
       where: {
         option: {
           name: "Colour",
-          product: categoryIds
-            ? { status: "ACTIVE", categoryId: { in: categoryIds } }
-            : { status: "ACTIVE" },
+          product: scopeWhere,
         },
       },
       select: { value: true, swatchHex: true },
@@ -514,19 +544,71 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
     else colorMap.set(c.value, { name: c.value, hex: c.swatchHex, count: 1 });
   }
 
+  const derivedMinPrice = (r: CardRow): number | null =>
+    computeCatalogCardPricing(r.variants.map((v) => v.offers.map(toCardOffer))).minPrice;
+  const derivedOnSale = (r: CardRow): boolean =>
+    computeCatalogCardPricing(r.variants.map((v) => v.offers.map(toCardOffer))).onSale;
+
+  const boundsPrices = boundsRows
+    .map((p) => computeCatalogCardPricing(p.variants.map((v) => v.offers.map(toCardOffer))).minPrice)
+    .filter((n): n is number => n != null);
+  const priceBounds = {
+    min: boundsPrices.length ? Math.min(...boundsPrices) : 0,
+    max: boundsPrices.length ? Math.max(...boundsPrices) : 0,
+  };
+
   let pageRows = rawRows as unknown as CardRow[];
   let total = dbTotal;
-  if (rankInMemory) {
-    const ranked = (rawRows as unknown as (CardRow & { description?: string | null })[])
-      .map((r) => ({ r, score: searchRelevance(r, query) }))
-      .sort(
-        (a, b) =>
-          b.score - a.score ||
-          b.r.soldCount - a.r.soldCount ||
-          b.r.ratingAvg - a.r.ratingAvg,
-      );
-    total = ranked.length;
-    pageRows = ranked.slice((page - 1) * perPage, page * perPage).map((x) => x.r);
+
+  if (inMemory) {
+    let rows = rawRows as unknown as (CardRow & { description?: string | null })[];
+
+    // 1. offer-aware price / on-sale filter. Unpriced products (no eligible
+    //    offer) are excluded from a price filter; kept for relevance/default.
+    if (priceFiltered) {
+      rows = rows.filter((r) => {
+        const mp = derivedMinPrice(r);
+        if (mp == null) return false;
+        if (params.minPrice != null && mp < params.minPrice) return false;
+        if (params.maxPrice != null && mp > params.maxPrice) return false;
+        return true;
+      });
+    }
+    if (onSaleFilter) rows = rows.filter(derivedOnSale);
+
+    // 2. sort
+    if (rankInMemory) {
+      // Relevance ranking — UNCHANGED. A price filter narrows the set but never
+      // reorders it.
+      rows = rows
+        .map((r) => ({ r, score: searchRelevance(r, query) }))
+        .sort(
+          (a, b) =>
+            b.score - a.score ||
+            b.r.soldCount - a.r.soldCount ||
+            b.r.ratingAvg - a.r.ratingAvg,
+        )
+        .map((x) => x.r);
+    } else if (priceSorted) {
+      // Sort by the derived product price. The rows arrive in `orderBy(sort)` =
+      // Product.price order, and JS sort is stable, so ties keep the current
+      // database order (identical output while derived price == Product.price).
+      // Unpriced products sink to the end.
+      const dir = sort === "price-asc" ? 1 : -1;
+      rows = [...rows].sort((a, b) => {
+        const pa = derivedMinPrice(a);
+        const pb = derivedMinPrice(b);
+        if (pa == null && pb == null) return 0;
+        if (pa == null) return 1;
+        if (pb == null) return -1;
+        return (pa - pb) * dir;
+      });
+    }
+    // else (newest / rating / bestselling + a price/on-sale filter): the rows
+    // are already in `orderBy(sort)` order from the fetch — keep it.
+
+    total = rows.length;
+    pageRows = rows.slice((page - 1) * perPage, page * perPage) as unknown as CardRow[];
   }
 
   return {
@@ -535,10 +617,7 @@ async function runListProducts(params: ListingParams): Promise<ListingResult> {
     page,
     perPage,
     pageCount: Math.max(1, Math.ceil(total / perPage)),
-    priceBounds: {
-      min: priceAgg._min.price ?? 0,
-      max: priceAgg._max.price ?? 0,
-    },
+    priceBounds,
     colorFacets: [...colorMap.values()].sort((a, b) => b.count - a.count),
   };
 }
@@ -580,10 +659,27 @@ const bestSellersRail = rail(
   { soldCount: "desc" },
 );
 const newArrivalsRail = rail("new-arrivals", { status: "ACTIVE" }, { createdAt: "desc" });
-const onSaleRail = rail(
-  "on-sale",
-  { status: "ACTIVE", compareAtPrice: { not: null } },
-  { soldCount: "desc" },
+
+// Phase 9D-C: "on sale" membership is offer-aware — a product is on sale when at
+// least one display-eligible winning Offer (ACTIVE offer + APPROVED seller)
+// carries a compare-at. The loose predicate is preserved (compareAtPrice != null,
+// NOT compareAtPrice > price). A suspended seller / inactive offer never
+// qualifies a product. For the current 1P catalogue this is identical to the old
+// `Product.compareAtPrice != null` filter.
+const onSaleRail = unstable_cache(
+  async (take: number): Promise<ProductCardView[]> => {
+    const rows = (await prisma.product.findMany({
+      where: { status: "ACTIVE" },
+      orderBy: { soldCount: "desc" },
+      select: cardSelect,
+    })) as unknown as CardRow[];
+    return rows
+      .filter((r) => computeCatalogCardPricing(r.variants.map((v) => v.offers.map(toCardOffer))).onSale)
+      .slice(0, take)
+      .map(toCard);
+  },
+  ["rail-on-sale"],
+  { revalidate: 180, tags: ["products"] },
 );
 
 export const getBestSellers = (take = 8) => bestSellersRail(take);
