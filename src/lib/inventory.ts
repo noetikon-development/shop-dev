@@ -9,17 +9,23 @@ import { prisma } from "@/lib/prisma";
  * constraints (quantity >= 0, reserved >= 0, quantity >= reserved) are the final
  * backstop.
  *
- * Authority note (Phase 9E-3D-2): `OfferInventory` is the operational source of
- * truth for FIRST_PARTY stock. `Inventory` (and `Variant.stock`) are
- * synchronized compatibility mirrors plus the historical `InventoryAdjustment`
- * ledger. `adjustStock` / `setReorderPoint` are the mirror WRITERS — checkout,
- * cancellation, returns and the admin all call them as the `Inventory` leg of a
- * dual-store write, lock order OfferInventory-then-Inventory.
+ * Authority note: `OfferInventory` is the operational source of truth for
+ * FIRST_PARTY stock (9E-3D-2). `Inventory` + `Variant.stock` +
+ * `InventoryAdjustment` are a FROZEN historical archive as of the 9E-3D-5 /
+ * 9E-3D-6 deploys (D-1) — checkout / cancel / return / admin no longer write
+ * `Inventory` for offer-native operations.
  *
- * DEAD / FUTURE UTILITY — unwired, do not delete (9E-3D-3 §9):
- *   `getAvailableStock` (no callers; the storefront reads OfferInventory) and
- *   `reserveStock` / `releaseStock` / `commitStock` (the reservation foundation
- *   for an online-payment hold, still dormant).
+ * Still live:
+ *   `adjustStock` — the `Inventory` leg of the LEGACY cancellation / return
+ *   fallback ONLY (a re-opened pre-retirement order — `order-actions.ts` /
+ *   `returns-actions.ts`). Keeps its row-lock / `InventoryAdjustment` /
+ *   `Variant.stock`-mirror behaviour for that path.
+ *
+ * DEAD / FUTURE UTILITY — unwired, do not delete:
+ *   `setReorderPoint` (0 callers since 9E-3D-6 — the admin threshold write is
+ *   `syncFirstPartyOfferReorderPoint`); `getAvailableStock` (the storefront
+ *   reads OfferInventory); `reserveStock` / `releaseStock` / `commitStock` (the
+ *   reservation foundation for an online-payment hold, still dormant).
  */
 
 type Client = Prisma.TransactionClient | typeof prisma;

@@ -53,35 +53,42 @@ async function run() {
   });
   console.log(`  ${offers.length} FIRST_PARTY NEW offers\n`);
 
-  // Per-store operational-movement flags. Phase 9E-3D-5: offer-native
-  // checkout / cancel / return write ONLY OfferInventory + OfferAdjustment.
-  // The `Inventory` mirror is frozen for operational movement from the
-  // 9E-3D-5 deploy on (admin adjust + variant lifecycle still write it).
-  // So cross-store parity is REQUIRED only while NEITHER store has moved
-  // past its opening balance; once either has, the two legitimately diverge.
-  // An offer's two stores legitimately diverge only when a POST-9E-3D-5
-  // operation touched one but not the other:
-  //   - offer-native SALE / CANCELLATION / RETURN → moves OfferInventory only
-  //     (the offer gains an operational OfferAdjustment)
-  //   - legacy-fallback CANCELLATION / RETURN → moves Inventory only (the
-  //     variant gains a CANCELLATION / RETURN InventoryAdjustment)
-  // Everything else (admin adjust — still dual-write; pre-backfill legacy SALE
-  // — baked into the OfferInventory opening) keeps the two stores equal.
-  const oiMoved = new Set(
+  // Per-store / per-column operational-movement flags. Since the 9E-3D-5 /
+  // 9E-3D-6 deploys, `Inventory` is a FROZEN mirror — checkout / cancel /
+  // return / admin no longer write it for offer-native operations. An offer's
+  // stores legitimately diverge once a POST-retirement op touched one but not
+  // the other:
+  //   - offer-native SALE / CANCELLATION / RETURN → OfferInventory only
+  //     (the offer gains a SALE / CANCELLATION / RETURN OfferAdjustment).
+  //     These paths do NOT touch Variant.stock.
+  //   - admin adjust (9E-3D-6) → OfferInventory only + Variant.stock re-derived
+  //     from OfferInventory (the offer gains an admin-reason OfferAdjustment).
+  //   - legacy-fallback CANCELLATION / RETURN → Inventory only + Variant.stock
+  //     via the old mirror (the variant gains a CANCELLATION / RETURN
+  //     InventoryAdjustment).
+  // Everything else keeps the two stores equal.
+  const OPENING = "MIGRATION_OPENING";
+  const SALE_REASONS = "'SALE','CANCELLATION','RETURN'";
+  const oiSaleMoved = new Set(
+    (await prisma.$queryRawUnsafe(
+      `SELECT DISTINCT "offerInventoryId" AS id FROM "OfferAdjustment" WHERE "reason" IN (${SALE_REASONS})`,
+    ) as { id: string }[]).map((r) => r.id),
+  );
+  const oiAdminMoved = new Set(
     (await prisma.$queryRawUnsafe(
       `SELECT DISTINCT "offerInventoryId" AS id FROM "OfferAdjustment"
-       WHERE "reason" IN ('SALE','CANCELLATION','RETURN')`,
+       WHERE "reason" NOT IN (${SALE_REASONS}, '${OPENING}')`,
     ) as { id: string }[]).map((r) => r.id),
   );
   const invMoved = new Set(
     (await prisma.$queryRawUnsafe(
-      `SELECT DISTINCT "inventoryId" AS id FROM "InventoryAdjustment"
-       WHERE "reason" IN ('CANCELLATION','RETURN')`,
+      `SELECT DISTINCT "inventoryId" AS id FROM "InventoryAdjustment" WHERE "reason" IN ('CANCELLATION','RETURN')`,
     ) as { id: string }[]).map((r) => r.id),
   );
 
   // ── PRE-RETIREMENT: cross-store parity (only for un-moved offers) ──────
-  let qDiff = 0, rDiff = 0, rpDiff = 0, availDiff = 0, mirrorDiff = 0, missingOI = 0, missingInv = 0;
+  let qDiff = 0, rDiff = 0, rpDiff = 0, availDiff = 0, missingOI = 0, missingInv = 0;
+  let mirrorInvDiff = 0, mirrorOfferDiff = 0, mirrorInfo = 0;
   let parityChecked = 0, divergedInfo = 0;
   const qDiffRows: string[] = [];
   const divergedRows: string[] = [];
@@ -90,9 +97,25 @@ async function run() {
     const inv = o.variant.inventory;
     if (!oi) { missingOI++; continue; }
     if (!inv) { missingInv++; continue; }
-    if (o.variant.stock !== Math.max(0, inv.quantity - inv.reserved)) mirrorDiff++;
-    const moved = oiMoved.has(oi.id) || invMoved.has(inv.id);
-    if (moved) {
+    const vs = o.variant.stock;
+    const offerAvail = Math.max(0, oi.quantity - oi.reserved);
+    const invAvail = Math.max(0, inv.quantity - inv.reserved);
+    const oiMoved = oiSaleMoved.has(oi.id) || oiAdminMoved.has(oi.id);
+
+    // Variant.stock — tracks whichever writer last touched it.
+    if (oiAdminMoved.has(oi.id) && !oiSaleMoved.has(oi.id)) {
+      // admin-adjusted, no sale drift → re-derived directly from OfferInventory
+      if (vs !== offerAvail) mirrorOfferDiff++;
+    } else if (oiMoved || invMoved.has(inv.id)) {
+      // sale-moved (Variant.stock not written by that path) or a legacy fallback
+      // touched Inventory — the mirror is a known-transitional lag, informational
+      if (vs !== offerAvail && vs !== invAvail) mirrorInfo++;
+    } else {
+      // un-moved → both stores + Variant.stock agree
+      if (vs !== invAvail) mirrorInvDiff++;
+    }
+
+    if (oiMoved || invMoved.has(inv.id)) {
       if (oi.quantity !== inv.quantity) {
         divergedInfo++;
         divergedRows.push(`offer ${o.id}: OfferInv ${oi.quantity} / frozen Inv ${inv.quantity}`);
@@ -103,7 +126,7 @@ async function run() {
     if (oi.quantity !== inv.quantity) { qDiff++; qDiffRows.push(`offer ${o.id}: OfferInv ${oi.quantity} vs Inv ${inv.quantity}`); }
     if (oi.reserved !== inv.reserved) rDiff++;
     if (oi.reorderPoint !== inv.reorderPoint) rpDiff++;
-    if (Math.max(0, oi.quantity - oi.reserved) !== Math.max(0, inv.quantity - inv.reserved)) availDiff++;
+    if (offerAvail !== invAvail) availDiff++;
   }
   check("every FIRST_PARTY offer has an OfferInventory row", missingOI === 0, `${missingOI} missing`);
   check("every such variant has a legacy Inventory row", missingInv === 0, `${missingInv} missing`);
@@ -111,9 +134,13 @@ async function run() {
   check("OfferInventory.reserved == Inventory.reserved (un-moved offers)", rDiff === 0, `${rDiff} differ`);
   check("OfferInventory.reorderPoint == Inventory.reorderPoint (un-moved offers)", rpDiff === 0, `${rpDiff} differ`);
   check("available parity on both stores (un-moved offers)", availDiff === 0, `${availDiff} differ`);
-  check("Variant.stock == max(0, Inventory.quantity - reserved) — the denorm mirror tracks its writer (Inventory)", mirrorDiff === 0, `${mirrorDiff} differ`);
+  check("Variant.stock == max(0, Inventory.q - r) for un-moved offers (denorm mirror)", mirrorInvDiff === 0, `${mirrorInvDiff} differ`);
+  check("Variant.stock == max(0, OfferInventory.q - r) for admin-adjusted offers (offer-side re-derivation, 9E-3D-6)", mirrorOfferDiff === 0, `${mirrorOfferDiff} differ`);
   if (divergedInfo > 0) {
     console.log(`  [INFO] ${divergedInfo} offer(s) legitimately diverged post-retirement (OfferInventory moved, Inventory frozen): ${divergedRows.slice(0, 5).join(" ; ")}`);
+  }
+  if (mirrorInfo > 0) {
+    console.log(`  [INFO] ${mirrorInfo} offer(s) have a transitional Variant.stock lag (sale moved OfferInventory without re-deriving the mirror — retires with Inventory at S7)`);
   }
 
   const invNoFpOffer = await prisma.$queryRawUnsafe(

@@ -221,10 +221,9 @@ function staticChecks() {
   ok("D  product-performance currentStock reads the FIRST_PARTY offer's inventory", /offers:\s*\{\s*where:\s*\{[\s\S]{0,120}FIRST_PARTY/.test(queries) && !/inventory:\s*\{\s*select:\s*\{\s*quantity:\s*true,\s*reserved:\s*true\s*\}\s*\}\s*,\s*\n\s*\}\s*,\s*\n\s*\}\s*,\s*\n\s*\}\s*\)/.test(queries));
   ok("D  dashboard low-stock tile counts \"OfferInventory\" scoped to FIRST_PARTY", /FROM "OfferInventory" oi/.test(dash) && /s\.type = 'FIRST_PARTY'/.test(dash) && !/COUNT\(\*\)::bigint AS count FROM "Inventory"/.test(dash));
 
-  // E — write path unchanged from 9E-3D-1 (OfferInventory → Inventory)
-  const ia = (s: string, a: RegExp, b: RegExp) => { const x = s.search(a), y = s.search(b); return x >= 0 && y >= 0 && x < y; };
-  ok("E  adjustStockAction still: syncFirstPartyOfferStock before adjustStock", ia(adminActions, /syncFirstPartyOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("E  updateThresholdAction still: syncFirstPartyOfferReorderPoint before setReorderPoint", ia(adminActions, /syncFirstPartyOfferReorderPoint\s*\(/, /setReorderPoint\s*\(/));
+  // E — admin write path is OfferInventory-only since 9E-3D-6
+  ok("E  adjustStockAction: syncFirstPartyOfferStock, NO adjustStock / @/lib/inventory", /syncFirstPartyOfferStock\s*\(/.test(adminActions) && !/adjustStock\s*\(/.test(adminActions) && !/from "@\/lib\/inventory"/.test(adminActions));
+  ok("E  updateThresholdAction: syncFirstPartyOfferReorderPoint, NO setReorderPoint", /syncFirstPartyOfferReorderPoint\s*\(/.test(adminActions) && !/setReorderPoint\s*\(/.test(adminActions));
 
   // F — Variant.stock schema comment reflects mirror role
   ok("F  schema.prisma Variant.stock documented as a compatibility mirror", /compatibility mirror/.test(schema) && /Read by nobody since Phase 9D-D/.test(schema));
@@ -241,9 +240,10 @@ function staticChecks() {
     return /resolveVariantAvailability|resolveWinningOfferView|offers/.test(d) && !/prisma\.inventory\.findMany/.test(d);
   })());
 
-  // H — history stays on InventoryAdjustment
-  ok("H  listInventoryHistory / historyReasons still read prisma.inventoryAdjustment", /prisma\.inventoryAdjustment\.findMany/.test(adminInv) && /prisma\.inventoryAdjustment\.findMany\(\{\s*\n\s*distinct/.test(adminInv.replace(/count[\s\S]*?\n/, "")) || /distinct: \["reason"\]/.test(adminInv));
-  ok("H  history NOT switched to OfferAdjustment", !/prisma\.offerAdjustment\.findMany/.test(adminInv));
+  // H — history: legacy InventoryAdjustment archive still read; unioned with
+  //     the current OfferAdjustment ledger since 9E-3D-6 (D-1 two split ledgers)
+  ok("H  listInventoryHistory still reads the legacy InventoryAdjustment archive", /prisma\.inventoryAdjustment\.findMany/.test(adminInv));
+  ok("H  listInventoryHistory unions the current OfferAdjustment ledger (FIRST_PARTY, non-opening)", /prisma\.offerAdjustment\.findMany/.test(adminInv) && /MIGRATION_OPENING/.test(adminInv));
 }
 
 async function gateCheck() {

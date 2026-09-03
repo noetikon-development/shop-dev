@@ -179,8 +179,48 @@ export async function getInventoryDetail(variantId: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Adjustment history
+// Adjustment history — UNION of the two ledgers (Phase 9E-3D-6, D-1)
+//
+//   ledger "legacy"  — `InventoryAdjustment`, the FROZEN pre-retirement archive
+//                      (SALE / CANCELLATION / RETURN before 9E-3D-5, admin
+//                      adjustments before 9E-3D-6). Carries the `actor` relation.
+//   ledger "current" — `OfferAdjustment` for FIRST_PARTY offers, excluding the
+//                      `MIGRATION_OPENING` backfill rows. The operational ledger
+//                      since the retirement boundary (SALE 9E-3C-2, CANCELLATION
+//                      / RETURN 9E-3D-1, admin 9E-3D-6). Actor resolved by id.
+//
+// Old rows are never rewritten; the two histories keep separate semantics. The
+// merge is in-memory — both ledgers are small (2 legacy rows + a handful of
+// operational rows for this catalogue), same pattern as `listInventory`.
 // ---------------------------------------------------------------------------
+
+const OPENING_REASON = "MIGRATION_OPENING";
+
+export type HistoryRow = {
+  id: string;
+  ledger: "legacy" | "current";
+  createdAt: Date;
+  productId: string;
+  productName: string;
+  optionLabel: string;
+  sku: string;
+  previousQuantity: number;
+  delta: number;
+  newQuantity: number;
+  reason: string;
+  note: string | null;
+  actor: string;
+};
+
+function optionLabelOf(
+  optionValues: { optionValue: { value: string; option: { name: string } } }[],
+): string {
+  return (
+    optionValues
+      .map((ov) => `${ov.optionValue.option.name}: ${ov.optionValue.value}`)
+      .join(" · ") || "Default"
+  );
+}
 
 export async function listInventoryHistory(filters: {
   q?: string;
@@ -188,26 +228,50 @@ export async function listInventoryHistory(filters: {
   page?: number;
 }) {
   const page = Math.max(1, filters.page ?? 1);
-  const where: Record<string, unknown> = {};
-  const AND: Record<string, unknown>[] = [];
-  if (filters.q) {
-    const q = filters.q.trim();
-    AND.push({
+  const q = filters.q?.trim();
+  const reason = filters.reason;
+
+  // --- legacy ledger: InventoryAdjustment ---------------------------------
+  const legacyWhere: Record<string, unknown> = {};
+  const legacyAND: Record<string, unknown>[] = [];
+  if (q) {
+    legacyAND.push({
       OR: [
         { inventory: { sku: { contains: q, mode: "insensitive" } } },
         { inventory: { variant: { product: { name: { contains: q, mode: "insensitive" } } } } },
       ],
     });
   }
-  if (filters.reason) AND.push({ reason: filters.reason });
-  if (AND.length) where.AND = AND;
+  if (reason) legacyAND.push({ reason });
+  if (legacyAND.length) legacyWhere.AND = legacyAND;
 
-  const [rows, total] = await Promise.all([
+  // --- current ledger: OfferAdjustment (FIRST_PARTY, non-opening) ---------
+  const currentWhere: Record<string, unknown> = {
+    reason: reason ?? { not: OPENING_REASON },
+    offerInventory: { offer: { ...FIRST_PARTY_OFFER_FILTER } },
+  };
+  if (reason === OPENING_REASON) {
+    // never surface backfill rows, even if explicitly filtered
+    currentWhere.id = "__never__";
+  }
+  if (q) {
+    currentWhere.offerInventory = {
+      offer: {
+        ...FIRST_PARTY_OFFER_FILTER,
+        variant: {
+          OR: [
+            { sku: { contains: q, mode: "insensitive" } },
+            { product: { name: { contains: q, mode: "insensitive" } } },
+          ],
+        },
+      },
+    };
+  }
+
+  const [legacyRows, currentRows] = await Promise.all([
     prisma.inventoryAdjustment.findMany({
-      where,
+      where: legacyWhere,
       orderBy: { createdAt: "desc" },
-      skip: (page - 1) * HISTORY_PAGE_SIZE,
-      take: HISTORY_PAGE_SIZE,
       select: {
         id: true,
         previousQuantity: true,
@@ -232,19 +296,60 @@ export async function listInventoryHistory(filters: {
         },
       },
     }),
-    prisma.inventoryAdjustment.count({ where }),
+    prisma.offerAdjustment.findMany({
+      where: currentWhere,
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true,
+        previousQuantity: true,
+        delta: true,
+        newQuantity: true,
+        reason: true,
+        note: true,
+        createdAt: true,
+        actorUserId: true,
+        offerInventory: {
+          select: {
+            offer: {
+              select: {
+                variant: {
+                  select: {
+                    sku: true,
+                    product: { select: { id: true, name: true } },
+                    optionValues: {
+                      select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    }),
   ]);
 
-  return {
-    rows: rows.map((r) => ({
+  // resolve OfferAdjustment actor names in one query
+  const actorIds = [...new Set(currentRows.map((r) => r.actorUserId).filter((v): v is string => !!v))];
+  const actors = actorIds.length
+    ? new Map(
+        (
+          await prisma.user.findMany({
+            where: { id: { in: actorIds } },
+            select: { id: true, name: true, email: true },
+          })
+        ).map((u) => [u.id, u.name ?? u.email]),
+      )
+    : new Map<string, string>();
+
+  const merged: HistoryRow[] = [
+    ...legacyRows.map((r) => ({
       id: r.id,
+      ledger: "legacy" as const,
       createdAt: r.createdAt,
       productId: r.inventory.variant.product.id,
       productName: r.inventory.variant.product.name,
-      optionLabel:
-        r.inventory.variant.optionValues
-          .map((ov) => `${ov.optionValue.option.name}: ${ov.optionValue.value}`)
-          .join(" · ") || "Default",
+      optionLabel: optionLabelOf(r.inventory.variant.optionValues),
       sku: r.inventory.sku,
       previousQuantity: r.previousQuantity,
       delta: r.delta,
@@ -253,18 +358,45 @@ export async function listInventoryHistory(filters: {
       note: r.note,
       actor: r.actor?.name ?? r.actor?.email ?? "system",
     })),
+    ...currentRows.map((r) => {
+      const v = r.offerInventory.offer.variant;
+      return {
+        id: r.id,
+        ledger: "current" as const,
+        createdAt: r.createdAt,
+        productId: v.product.id,
+        productName: v.product.name,
+        optionLabel: optionLabelOf(v.optionValues),
+        sku: v.sku,
+        previousQuantity: r.previousQuantity,
+        delta: r.delta,
+        newQuantity: r.newQuantity,
+        reason: r.reason,
+        note: r.note,
+        actor: (r.actorUserId && actors.get(r.actorUserId)) ?? "system",
+      };
+    }),
+  ].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+
+  const total = merged.length;
+  const start = (page - 1) * HISTORY_PAGE_SIZE;
+  return {
+    rows: merged.slice(start, start + HISTORY_PAGE_SIZE),
     total,
     page,
     pageCount: Math.max(1, Math.ceil(total / HISTORY_PAGE_SIZE)),
   };
 }
 
-/** Distinct reasons present in the history — for the filter dropdown. */
+/** Distinct reasons across both ledgers — for the filter dropdown. */
 export async function historyReasons(): Promise<string[]> {
-  const rows = await prisma.inventoryAdjustment.findMany({
-    distinct: ["reason"],
-    select: { reason: true },
-    orderBy: { reason: "asc" },
-  });
-  return rows.map((r) => r.reason);
+  const [legacy, current] = await Promise.all([
+    prisma.inventoryAdjustment.findMany({ distinct: ["reason"], select: { reason: true } }),
+    prisma.offerAdjustment.findMany({
+      where: { reason: { not: OPENING_REASON }, offerInventory: { offer: { ...FIRST_PARTY_OFFER_FILTER } } },
+      distinct: ["reason"],
+      select: { reason: true },
+    }),
+  ]);
+  return [...new Set([...legacy, ...current].map((r) => r.reason))].sort();
 }

@@ -67,9 +67,11 @@ async function adminAdjustCore(
       throw new AdjustError("Couldn’t adjust stock — the stored figures need a refresh. Reload the page and try again.");
     }
     if (opts.adjustFails) throw new AdjustError(opts.adjustFails);
-    const li = await tx.$queryRawUnsafe<{ id: string; quantity: number }[]>(
-      `SELECT "id","quantity" FROM "Inventory" WHERE "variantId" = $1 FOR UPDATE`, variantId);
-    if (li[0]) await tx.inventory.update({ where: { id: li[0].id }, data: { quantity: li[0].quantity + delta } });
+    // 9E-3D-6: OfferInventory-only. Re-derive Variant.stock from the offer;
+    // NO Inventory write.
+    await tx.$executeRawUnsafe(
+      `UPDATE "Variant" SET "stock" = GREATEST(0, COALESCE((SELECT oi."quantity" - oi."reserved" FROM "OfferInventory" oi JOIN "Offer" o ON o.id = oi."offerId" WHERE o."variantId" = $1 AND o.condition = 'NEW'), 0)) WHERE "id" = $1`,
+      variantId);
     return { ok: true };
   } catch (err) {
     if (err instanceof AdjustError) return { error: err.message };
@@ -132,7 +134,9 @@ async function dbTests() {
       const success = await adminAdjustCore(tx, fb3.variantId, 2);
       const oiAfter = await tx.offerInventory.findFirstOrThrow({ where: { offerId: fb3.offerId }, select: { quantity: true } });
       const invAfter = await tx.inventory.findUniqueOrThrow({ where: { variantId: fb3.variantId }, select: { quantity: true } });
-      ok("B/E  a clean adjust still moves BOTH stores (+2 → 7 / 7)", "ok" in success && oiAfter.quantity === 7 && invAfter.quantity === 7);
+      const vsAfter = await tx.variant.findUniqueOrThrow({ where: { id: fb3.variantId }, select: { stock: true } });
+      ok("B/E  9E-3D-6: a clean adjust moves OfferInventory (+2 → 7) + Variant.stock (7); frozen Inventory unchanged (5)",
+        "ok" in success && oiAfter.quantity === 7 && vsAfter.stock === 7 && invAfter.quantity === 5);
 
       throw new Rollback();
     }, { timeout: 60000 });
@@ -162,14 +166,14 @@ function staticChecks() {
   ok("B  inventory-actions.ts defines a typed AdjustError for safe messages", /class AdjustError extends Error/.test(invActionsCode));
   ok("B  inventory-actions.ts catch uses toActionError (no raw err.message passthrough)", /catch \(err\) \{\s*return toActionError\(/.test(invActionsCode) && !/return \{ error: err instanceof Error \? err\.message/.test(invActionsCode));
   ok("B  syncFirstPartyOfferStock call is wrapped and re-thrown as AdjustError", ordered(invActionsCode, /syncFirstPartyOfferStock\s*\(/, /throw new AdjustError/));
-  ok("B  the raw sync error is logged server-side (console.error)", /console\.error\(\s*"\[adjustStockAction\] OfferInventory sync failed/.test(invActionsCode));
+  ok("B  the raw sync error is logged server-side (console.error)", /console\.error\(\s*"\[adjustStockAction\] OfferInventory adjust failed/.test(invActionsCode));
   ok("B  toActionError logs unexpected errors and returns a generic message", /console\.error\(`\[\$\{context\}\] unexpected error`/.test(invActionsCode));
 
-  // E / G — write path + lock order unchanged
-  ok("E/G  adjustStockAction still: syncFirstPartyOfferStock before adjustStock", ordered(invActionsCode, /syncFirstPartyOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("E/G  updateThresholdAction still: syncFirstPartyOfferReorderPoint before setReorderPoint", ordered(invActionsCode, /syncFirstPartyOfferReorderPoint\s*\(/, /setReorderPoint\s*\(/));
-  ok("G  cancelOrderAction: restoreOfferStock before adjustStock", ordered(cancel, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("G  receiveReturnAction: restoreOfferStock before adjustStock", ordered(returnsAct, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
+  // E / G — admin write is OfferInventory-only (9E-3D-6); cancel/return keep the offer-native branch first
+  ok("E/G  adjustStockAction: syncFirstPartyOfferStock, NO adjustStock / @/lib/inventory", /syncFirstPartyOfferStock\s*\(/.test(invActionsCode) && !/adjustStock\s*\(/.test(invActionsCode) && !/from "@\/lib\/inventory"/.test(invActionsCode));
+  ok("E/G  updateThresholdAction: syncFirstPartyOfferReorderPoint, NO setReorderPoint", /syncFirstPartyOfferReorderPoint\s*\(/.test(invActionsCode) && !/setReorderPoint\s*\(/.test(invActionsCode));
+  ok("G  cancelOrderAction: restoreOfferStock (offer-native) before adjustStock (legacy)", ordered(cancel, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
+  ok("G  receiveReturnAction: restoreOfferStock (offer-native) before adjustStock (legacy)", ordered(returnsAct, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
 
   // I — no operational current-state Inventory read remains
   ok("I  inventory-actions.ts has no prisma.inventory read (preload → getFirstPartyStock)", !/prisma\.inventory\.find/.test(invActionsCode) && /getFirstPartyStock/.test(invActionsCode));
@@ -183,10 +187,11 @@ function staticChecks() {
   // H — customer availability offer-driven
   ok("H  data.ts storefront stock = winning offer available, never Variant.stock", /stock: off\.available/.test(data) && /never reads `Variant\.stock`/.test(data));
 
-  // J — historical ledger intact
-  ok("J  admin/inventory.ts history still reads prisma.inventoryAdjustment", /prisma\.inventoryAdjustment\.findMany/.test(invRead) && /distinct: \["reason"\]/.test(invRead));
-  ok("J  inventory.ts still writes InventoryAdjustment rows (adjustStock)", /tx\.inventoryAdjustment\.create/.test(invPrim));
-  ok("J  history NOT switched to OfferAdjustment", !/prisma\.offerAdjustment\.findMany/.test(invRead));
+  // J — historical ledger intact (legacy archive still read; unioned with the
+  //     current OfferAdjustment ledger since 9E-3D-6)
+  ok("J  admin/inventory.ts history still reads the legacy InventoryAdjustment archive", /prisma\.inventoryAdjustment\.findMany/.test(invRead) && /distinct: \["reason"\]/.test(invRead));
+  ok("J  inventory.ts still writes InventoryAdjustment rows for the LEGACY cancel/return fallback (adjustStock)", /tx\.inventoryAdjustment\.create/.test(invPrim));
+  ok("J  history unions the current OfferAdjustment ledger, excluding MIGRATION_OPENING", /prisma\.offerAdjustment\.findMany/.test(invRead) && /MIGRATION_OPENING/.test(invRead));
 
   // §9 — dead code documented, not deleted
   ok("§9  reserveStock / releaseStock / commitStock still present (DEAD / FUTURE UTILITY, not deleted)",

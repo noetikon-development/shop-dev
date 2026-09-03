@@ -64,7 +64,21 @@ export default async function InventoryHistoryPage({
     {
       key: "reason",
       header: "Reason",
-      cell: (r) => <StatusBadge tone="neutral">{ADJUSTMENT_REASON_LABEL[r.reason] ?? r.reason}</StatusBadge>,
+      cell: (r) => (
+        <span className="inline-flex items-center gap-1.5">
+          <StatusBadge tone="neutral">{ADJUSTMENT_REASON_LABEL[r.reason] ?? r.reason}</StatusBadge>
+          <span
+            className="text-[10px] uppercase tracking-wide text-ink-faint"
+            title={
+              r.ledger === "current"
+                ? "Current OfferInventory adjustment"
+                : "Pre-retirement InventoryAdjustment archive"
+            }
+          >
+            {r.ledger === "current" ? "offer" : "archived"}
+          </span>
+        </span>
+      ),
     },
     { key: "actor", header: "Admin", cell: (r) => r.actor },
     { key: "note", header: "Note", cell: (r) => <span className="text-ink-faint">{r.note ?? "—"}</span> },

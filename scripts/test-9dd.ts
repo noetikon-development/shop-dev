@@ -146,9 +146,16 @@ async function writeThroughTests(prisma: PrismaClient) {
       const oi0 = await tx.offerInventory.findFirst({ where: { offer: { variantId: v.id, sellerId: axiaro.id } } });
       ok("setup  OfferInventory seeded from Inventory (qty 10, reserved 2)", oi0?.quantity === 10 && oi0?.reserved === 2);
 
+      // Historical 9D-D pattern (dual-write) — post-9E-3D-6 the two primitives
+      // are used INDEPENDENTLY (adjustStock = legacy cancel/return only;
+      // syncFirstPartyOfferStock = admin). Here we still exercise both to prove
+      // they move by the same delta.
       const bundle = async (delta: number, reason: string) => {
         const r = await adjustStock({ variantId: v.id, delta, reason, actorUserId: actor?.id ?? null }, tx);
-        if (r.ok) await syncFirstPartyOfferStock(v.id, delta, reason, null, actor?.id ?? null, tx);
+        if (r.ok) {
+          const or = await syncFirstPartyOfferStock(v.id, delta, reason, null, actor?.id ?? null, tx);
+          if (!or.ok) throw new Error(or.error);
+        }
         return r;
       };
 
@@ -226,16 +233,18 @@ async function atomicityTests(prisma: PrismaClient) {
       const oi = await tx.offerInventory.findFirst({ where: { offer: { variantId: v.id, sellerId: axiaro.id } } });
       await tx.offerInventory.update({ where: { id: oi!.id }, data: { quantity: 1 } });
 
-      const r = await adjustStock({ variantId: v.id, delta: -5, reason: "DAMAGE" }, tx);
-      if (r.ok) await syncFirstPartyOfferStock(v.id, -5, "DAMAGE", null, null, tx); // 1 + (−5) = −4 → throws
+      // Post-9E-3D-6: syncFirstPartyOfferStock RETURNS { ok:false } on an
+      // invariant violation; the caller (the admin action) throws to roll back.
+      const or = await syncFirstPartyOfferStock(v.id, -5, "DAMAGE", null, null, tx); // 1 + (−5) = −4 → { ok:false }
+      if (!or.ok) throw new Error(or.error);
     });
   } catch {
     threw = true;
   }
   // Nothing should have persisted — the variant itself was rolled back.
   const v = await prisma.variant.findFirst({ where: { sku: `Z-${suffix}` }, select: { id: true } });
-  ok("C  sync invariant violation throws", threw);
-  ok("C  whole transaction rolled back (no variant, no Inventory move, no OfferInventory move)", v === null,
+  ok("C  syncFirstPartyOfferStock returns { ok:false } on an invariant violation → caller throws", threw);
+  ok("C  whole transaction rolled back (no variant, no OfferInventory move)", v === null,
     `variant ${v ? "leaked" : "gone"}`);
 }
 
@@ -263,7 +272,10 @@ async function thirdPartyIsolationTest(prisma: PrismaClient) {
 
       // Axiaro admin decreases stock by 3.
       const r = await adjustStock({ variantId: v.id, delta: -3, reason: "DAMAGE" }, tx);
-      if (r.ok) await syncFirstPartyOfferStock(v.id, -3, "DAMAGE", null, null, tx);
+      if (r.ok) {
+        const or = await syncFirstPartyOfferStock(v.id, -3, "DAMAGE", null, null, tx);
+        if (!or.ok) throw new Error(or.error);
+      }
 
       const axiaroOi = await tx.offerInventory.findFirst({ where: { offer: { variantId: v.id, sellerId: axiaro.id } } });
       const bOi = await tx.offerInventory.findFirst({ where: { offerId: offerB.id } });

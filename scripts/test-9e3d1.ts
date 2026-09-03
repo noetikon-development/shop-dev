@@ -266,26 +266,24 @@ async function dbTests() {
       const ordH = await tx.order.findUniqueOrThrow({ where: { id: o6.orderId }, select: { status: true } });
       ok("H  a failing OfferInventory restore rolls back the whole cancel (OfferInv stays 8, order not CANCELLED)", rolledBack && oiH1 === oiH0 && oiH1 === 8 && ordH.status !== "CANCELLED");
 
-      // ---- K — sequential SALE → admin adjust (dual-write) → cancel (OfferInv only) ----
+      // ---- K — sequential SALE → admin adjust (OfferInv only, 9E-3D-6) → cancel (OfferInv only) ----
       const f7 = await mkFixture(tx, axiaro.id, product.id, `v7-${sfx}`, 20);
       const o7 = await mkOrder(tx, axiaro.id, product.id, f7.variantId, f7.offerId, 4, sfx);
-      await commitOfferSale(tx, f7.offerId, 4, `Order ${o7.orderNumber}`);           // OfferInv 16, Inv 20
-      // admin adjust +10 — still DUAL-WRITE until 9E-3D-6: OfferInventory first, then Inventory (§12)
-      await restoreOffer(tx, f7.offerId, 10, "RESTOCK", `admin`);
-      await adjInv(tx, f7.variantId, 10, "RESTOCK", `admin`);                          // OfferInv 26, Inv 30
-      await cancelReversal(tx, o7.orderId, o7.orderNumber);                            // +4 OfferInv only → OfferInv 30, Inv 30
+      await commitOfferSale(tx, f7.offerId, 4, `Order ${o7.orderNumber}`);           // OfferInv 16, Inv 20 (frozen)
+      // admin adjust +10 — OfferInventory ONLY since 9E-3D-6 (no Inventory write)
+      await restoreOffer(tx, f7.offerId, 10, "RESTOCK", `admin`);                     // OfferInv 26, Inv 20
+      await cancelReversal(tx, o7.orderId, o7.orderNumber);                           // +4 OfferInv only → OfferInv 30, Inv 20
       p = await parity(tx, f7.variantId, f7.offerId);
-      ok("K  SALE → admin RESTOCK (dual) → cancel (OfferInv only): OfferInv 30, Inv 30, no negative", p.oiQ === 30 && p.invQ === 30 && p.mirror);
+      ok("K  SALE → admin RESTOCK (OfferInv only) → cancel (OfferInv only): OfferInv 30, frozen Inv 20, no negative", p.oiQ === 30 && p.invQ === 20);
 
-      // ---- L — sequential SALE → cancel → admin adjust ----
+      // ---- L — sequential SALE → cancel → admin adjust (OfferInv only) ----
       const f8 = await mkFixture(tx, axiaro.id, product.id, `v8-${sfx}`, 20);
       const o8 = await mkOrder(tx, axiaro.id, product.id, f8.variantId, f8.offerId, 6, sfx);
       await commitOfferSale(tx, f8.offerId, 6, `Order ${o8.orderNumber}`);            // OfferInv 14, Inv 20
       await cancelReversal(tx, o8.orderId, o8.orderNumber);                           // OfferInv 20, Inv 20
-      await restoreOffer(tx, f8.offerId, 3, "RESTOCK", `admin`);
-      await adjInv(tx, f8.variantId, 3, "RESTOCK", `admin`);                          // OfferInv 23, Inv 23
+      await restoreOffer(tx, f8.offerId, 3, "RESTOCK", `admin`);                      // OfferInv 23, Inv 20
       p = await parity(tx, f8.variantId, f8.offerId);
-      ok("L  SALE → cancel → admin RESTOCK (dual): OfferInv 23, Inv 23", p.oiQ === 23 && p.invQ === 23);
+      ok("L  SALE → cancel → admin RESTOCK (OfferInv only): OfferInv 23, frozen Inv 20", p.oiQ === 23 && p.invQ === 20);
 
       throw new Rollback();
     }, { timeout: 60000 });
@@ -315,8 +313,8 @@ function staticChecks() {
   };
   ok("M  cancelOrderAction: offer-native restoreOfferStock branch precedes the legacy adjustStock branch", before(cancelCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
   ok("M  receiveReturnAction: offer-native restoreOfferStock branch precedes the legacy adjustStock branch", before(returnsCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("M  adjustStockAction: syncFirstPartyOfferStock before adjustStock (admin still dual-write until 9E-3D-6)", before(adminCode, /syncFirstPartyOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("M  updateThresholdAction: syncFirstPartyOfferReorderPoint before setReorderPoint", before(adminCode, /syncFirstPartyOfferReorderPoint\s*\(/, /setReorderPoint\s*\(/));
+  ok("M  adjustStockAction: OfferInventory only since 9E-3D-6 — syncFirstPartyOfferStock, NO adjustStock", /syncFirstPartyOfferStock\s*\(/.test(adminCode) && !/adjustStock\s*\(/.test(adminCode) && !/from "@\/lib\/inventory"/.test(adminInv));
+  ok("M  updateThresholdAction: OfferInventory only — syncFirstPartyOfferReorderPoint, NO setReorderPoint", /syncFirstPartyOfferReorderPoint\s*\(/.test(adminCode) && !/setReorderPoint\s*\(/.test(adminCode));
   ok("M  restoreOfferStock / commitOfferStockForSale use FOR UPDATE on OfferInventory", /FROM "OfferInventory"[\s\S]{0,120}FOR UPDATE/.test(offerInv));
   ok("M  offer-inventory.ts never touches Inventory / Variant.stock", !/tx\.inventory\.|prisma\.inventory\.|(FROM|UPDATE|INTO)\s+"Inventory"|"Variant"\s+SET/i.test(offerInv.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "")));
   ok("M  cancel + return keep the legacy Inventory-only fallback (offerNative gate)", /offerNative\s*=/.test(cancelCode) && /offerNative\s*=/.test(returnsCode));

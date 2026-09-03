@@ -5,12 +5,20 @@ import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
-import { adjustStock, setReorderPoint } from "@/lib/inventory";
 import { getFirstPartyStock } from "@/lib/admin/first-party-inventory";
 import {
   syncFirstPartyOfferStock,
   syncFirstPartyOfferReorderPoint,
 } from "@/lib/admin/offer-sync";
+
+/**
+ * Phase 9E-3D-6: the admin stock-adjustment and threshold write paths are
+ * `OfferInventory`-ONLY. `syncFirstPartyOfferStock` / `syncFirstPartyOfferReorderPoint`
+ * (offer-sync.ts) row-lock the FIRST_PARTY `OfferInventory`, mutate it, record
+ * an `OfferAdjustment` (stock only), and re-derive `Variant.stock` directly.
+ * No `Inventory` row is read, locked or written; no new `InventoryAdjustment`.
+ * `InventoryAdjustment` is a frozen historical archive (D-1).
+ */
 
 export type InventoryActionState = {
   error?: string;
@@ -21,11 +29,11 @@ export type InventoryActionState = {
 
 /**
  * Carries a message that is SAFE to show an admin verbatim — the user-facing
- * copy from `adjustStock` / `setReorderPoint`, or a curated fallback. Anything
+ * copy returned by `syncFirstPartyOffer*`, or a curated fallback. Anything
  * thrown inside the transaction that is NOT an `AdjustError` (a raw Prisma
- * error, the internal `syncFirstPartyOfferStock` invariant message, …) is
- * logged server-side and replaced with a generic message — no SQL, schema,
- * internal identifiers or stack traces reach the UI (Phase 9E-3D-3 §4).
+ * error, …) is logged server-side and replaced with a generic message — no
+ * SQL, schema, internal identifiers or stack traces reach the UI (Phase
+ * 9E-3D-3 §4).
  */
 class AdjustError extends Error {}
 
@@ -92,39 +100,32 @@ export async function adjustStockAction(
   }
 
   const effectiveReason = mode === "set" ? "CORRECTION" : reason;
-  // Phase 9D-D + 9E-3D-1: the 1P `OfferInventory` sync AND the legacy `Inventory`
-  // mutation run in ONE transaction — both move by the same delta or neither
-  // does. LOCK ORDER (9E-3D-1 §12/§14): OfferInventory is locked FIRST (via
-  // `syncFirstPartyOfferStock`'s `FOR UPDATE OF oi`), then `Inventory` (via
-  // `adjustStock`), matching checkout / cancel / return. `adjustStock` keeps
-  // its own row-lock / InventoryAdjustment / Variant.stock-mirror behaviour.
-  let result: Awaited<ReturnType<typeof adjustStock>>;
+  // Phase 9E-3D-6: OfferInventory-ONLY. One transaction: row-lock the FIRST_PARTY
+  // OfferInventory, apply the delta, record an OfferAdjustment, re-derive
+  // Variant.stock from the offer. No Inventory row is touched (§3/§10/§11).
+  let result: Extract<Awaited<ReturnType<typeof syncFirstPartyOfferStock>>, { ok: true }>;
   try {
     result = await prisma.$transaction(async (tx) => {
+      let r: Awaited<ReturnType<typeof syncFirstPartyOfferStock>>;
       try {
-        await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
+        r = await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
       } catch (syncErr) {
-        // Internal invariant / DB error from the offer mirror sync — log the
-        // detail server-side, surface a sanitized message (§4).
-        console.error("[adjustStockAction] OfferInventory sync failed for variant", variantId, syncErr);
+        // Unexpected DB failure — log the detail server-side, surface a
+        // sanitized message (§4 / §9).
+        console.error("[adjustStockAction] OfferInventory adjust failed for variant", variantId, syncErr);
         throw new AdjustError(
           "Couldn’t adjust stock — the stored figures need a refresh. Reload the page and try again.",
         );
       }
-      const r = await adjustStock(
-        { variantId, delta, reason: effectiveReason, note: note || null, actorUserId: admin.user.id },
-        tx,
-      );
-      // `adjustStock` returns { ok: false } (user-facing copy) without throwing
-      // on an invariant violation — re-throw it as an AdjustError so the
-      // OfferInventory write above rolls back too and the message passes through.
-      if (!r.ok) throw new AdjustError(r.error ?? "Adjustment failed.");
+      // A rejected change (below zero / below reserved / no record) returns a
+      // user-safe message — re-throw it as an AdjustError so the whole
+      // transaction rolls back and the message passes through unchanged.
+      if (!r.ok) throw new AdjustError(r.error);
       return r;
     });
   } catch (err) {
     return toActionError(err, "adjustStockAction", "Couldn’t adjust stock right now. Please try again.");
   }
-  if (!result.ok) return { error: result.error ?? "Adjustment failed." };
 
   await writeAudit({
     actorUserId: admin.user.id,
@@ -172,27 +173,25 @@ export async function updateThresholdAction(
   const inv = await getFirstPartyStock(variantId);
   if (!inv) return { error: "No inventory record for that variant." };
 
-  // Phase 9D-D + 9E-3D-1: OfferInventory.reorderPoint AND Inventory.reorderPoint
-  // move together, atomically. OfferInventory first (§12 lock-order convention;
-  // neither call takes a `FOR UPDATE` row lock here — a threshold change is not
-  // a quantity change — so the ordering is for consistency, not deadlock).
-  let result: Awaited<ReturnType<typeof setReorderPoint>>;
+  // Phase 9E-3D-6: OfferInventory-ONLY. Row-lock the FIRST_PARTY OfferInventory
+  // and set its reorderPoint. No Inventory.reorderPoint update, no OfferAdjustment
+  // (a threshold change is not a quantity change), no Variant.stock change.
+  let result: { ok: true; previous: number };
   try {
     result = await prisma.$transaction(async (tx) => {
+      let r: Awaited<ReturnType<typeof syncFirstPartyOfferReorderPoint>>;
       try {
-        await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
+        r = await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
       } catch (syncErr) {
-        console.error("[updateThresholdAction] OfferInventory reorder-point sync failed for variant", variantId, syncErr);
+        console.error("[updateThresholdAction] OfferInventory reorder-point update failed for variant", variantId, syncErr);
         throw new AdjustError("Couldn’t update the threshold — please reload the page and try again.");
       }
-      const r = await setReorderPoint(variantId, reorderPoint, tx);
-      if (!r.ok) throw new AdjustError(r.error ?? "Could not update the threshold.");
+      if (!r.ok) throw new AdjustError(r.error);
       return r;
     });
   } catch (err) {
     return toActionError(err, "updateThresholdAction", "Couldn’t update the threshold right now. Please try again.");
   }
-  if (!result.ok) return { error: result.error ?? "Could not update the threshold." };
   if (result.previous === reorderPoint) return { ok: true, message: "Threshold unchanged." };
 
   await writeAudit({
