@@ -40,8 +40,16 @@ export type ProductCardView = {
   name: string;
   brand: string;
   shortDescription: string;
+  /**
+   * The product-card selling price. Phase 9D-A: the minimum winning Axiaro
+   * FIRST_PARTY `Offer.price` across the product's ACTIVE variants (was
+   * `Product.price`). Kept non-null — a card whose price cannot be resolved is a
+   * write-through gap and fails the parity gate.
+   */
   price: number;
   compareAtPrice: number | null;
+  /** true → render "From ₱X" (eligible variants resolve to more than one winning price) */
+  priceFrom: boolean;
   ratingAvg: number;
   ratingCount: number;
   soldCount: number;

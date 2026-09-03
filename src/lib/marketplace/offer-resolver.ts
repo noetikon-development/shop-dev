@@ -4,9 +4,12 @@ import {
   isEligibleCandidate,
   pickWinningOffer,
   rankOffers,
+  computeCatalogCardPricing,
 } from "@/lib/marketplace/buy-box-rule";
 import type {
   OfferCandidate,
+  CardOffer,
+  CatalogCardPricing,
   ResolvedOffer,
   CatalogPriceRange,
   VariantAvailability,
@@ -16,18 +19,25 @@ import type {
 } from "@/lib/marketplace/types";
 
 // Re-export the pure rule so callers have one import surface.
-export { isEligibleCandidate, pickWinningOffer, rankOffers } from "@/lib/marketplace/buy-box-rule";
+export {
+  isEligibleCandidate,
+  isEligibleForDisplayPrice,
+  pickWinningOffer,
+  rankOffers,
+  computeCatalogCardPricing,
+} from "@/lib/marketplace/buy-box-rule";
 
 /**
- * Buy-box compatibility resolver (Phase 9C).
+ * Buy-box compatibility resolver.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * NOT WIRED. As of Phase 9C nothing in the storefront, cart, checkout, search,
- * PLP, PDP, rails or admin calls any function in this module. Every existing
- * price / stock reader still uses Product.price / Variant.price / Variant.stock
- * / Inventory exactly as before. This module exists so that a later,
- * separately-approved phase can migrate readers one surface at a time behind a
- * stable signature.
+ * Phase 9D-A wires ONLY the product-card selling-price path
+ * (`resolveCatalogCard` / `computeCatalogCardPricing`, consumed by
+ * `src/lib/data.ts` `toCard()` and `src/lib/wishlist.ts`). Everything else in
+ * this module — `getWinningOffer`, `getVariantAvailability`, `getCatalogPriceRange`,
+ * `listOtherOffers`, `resolveWinningOffers` — remains UNWIRED and is reserved for
+ * the PDP / search / cart slices. Stock, cart, checkout and PDP all still read
+ * Product.price / Variant.price / Variant.stock / Inventory exactly as before.
  * ─────────────────────────────────────────────────────────────────────────────
  *
  * This module is READ-ONLY. It never reserves, deducts or mutates inventory,
@@ -131,6 +141,159 @@ export async function getWinningOffer(
 /** Alias kept for the Phase 9B naming. Identical behaviour to `getWinningOffer`. */
 export function getSellableOffer(variantId: string): Promise<ResolvedOffer | null> {
   return getWinningOffer(variantId);
+}
+
+function toCandidateFields(row: {
+  id: string;
+  status: string;
+  price: number;
+  createdAt: Date;
+  seller: { type: string; status: string };
+  inventory: { quantity: number; reserved: number } | null;
+}): OfferCandidate {
+  return {
+    offerId: row.id,
+    sellerId: "",
+    sellerType: row.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: row.seller.status as OfferCandidate["sellerStatus"],
+    offerStatus: row.status as OfferCandidate["offerStatus"],
+    available: Math.max(0, (row.inventory?.quantity ?? 0) - (row.inventory?.reserved ?? 0)),
+    price: row.price,
+    createdAt: row.createdAt,
+  };
+}
+
+/**
+ * Pure helper: group a flat list of offer rows by `variantId` and return one
+ * `CardOffer[]` per variant id (variants with no offers get an empty array).
+ * Used by the batch card resolvers below and callable directly by
+ * `src/lib/data.ts` on rows it already loaded via a nested include (so the PLP
+ * pays no extra query).
+ */
+export function groupCardOffers<
+  R extends {
+    id: string;
+    variantId: string;
+    status: string;
+    price: number;
+    compareAtPrice: number | null;
+    createdAt: Date;
+    seller: { type: string; status: string };
+    inventory: { quantity: number; reserved: number } | null;
+  },
+>(rows: R[], variantIds: string[]): Map<string, CardOffer[]> {
+  const byVariant = new Map<string, CardOffer[]>();
+  for (const id of variantIds) byVariant.set(id, []);
+  for (const r of rows) {
+    const arr = byVariant.get(r.variantId);
+    if (!arr) continue;
+    arr.push({ ...toCandidateFields(r), compareAtPrice: r.compareAtPrice });
+  }
+  return byVariant;
+}
+
+// ---------------------------------------------------------------------------
+// Batch primitives (Phase 9D-A) — one query, then the shared pure rule.
+// `resolveWinningOffers` uses the FULL buy-box rule (stock-aware) and is
+// reserved for the PDP/search slices. `resolveCatalogCard(s)` use the
+// stock-blind card-price rule and ARE wired (via the pure core) in Slice 1.
+// ---------------------------------------------------------------------------
+
+/**
+ * The winning offer for many Variants in ONE database read. Returns a map keyed
+ * by variant id; a variant with no eligible offer maps to `null`.
+ *
+ * NOT WIRED in Phase 9D-A — reserved for the PDP / search slices so they never
+ * call `getWinningOffer` in a loop.
+ */
+export async function resolveWinningOffers(
+  variantIds: string[],
+): Promise<Map<string, ResolvedOffer | null>> {
+  const ids = [...new Set(variantIds)];
+  const out = new Map<string, ResolvedOffer | null>(ids.map((id) => [id, null]));
+  if (ids.length === 0) return out;
+
+  const rows = (await prisma.offer.findMany({
+    where: { variantId: { in: ids } },
+    select: OFFER_SELECT,
+  })) as OfferRow[];
+
+  const byVariant = new Map<string, OfferRow[]>();
+  for (const r of rows) {
+    const arr = byVariant.get(r.variantId) ?? [];
+    arr.push(r);
+    byVariant.set(r.variantId, arr);
+  }
+  for (const [variantId, group] of byVariant) {
+    const winner = pickWinningOffer(group.map(toCandidate));
+    out.set(variantId, winner ? toResolved(group.find((r) => r.id === winner.offerId)!) : null);
+  }
+  return out;
+}
+
+/**
+ * Composite card pricing for many Products in ONE database read — the
+ * batch-safe form used to avoid N+1 on the PLP / rails.
+ */
+export async function resolveCatalogCards(
+  productIds: string[],
+): Promise<Map<string, CatalogCardPricing>> {
+  const ids = [...new Set(productIds)];
+  const out = new Map<string, CatalogCardPricing>();
+  if (ids.length === 0) return out;
+
+  const variants = await prisma.variant.findMany({
+    where: { productId: { in: ids }, status: "ACTIVE" },
+    select: {
+      id: true,
+      productId: true,
+      offers: {
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          compareAtPrice: true,
+          createdAt: true,
+          seller: { select: { type: true, status: true } },
+        },
+      },
+    },
+  });
+
+  const groupsByProduct = new Map<string, CardOffer[][]>();
+  for (const id of ids) groupsByProduct.set(id, []);
+  for (const v of variants) {
+    const group: CardOffer[] = v.offers.map((o) => ({
+      offerId: o.id,
+      sellerId: "",
+      sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+      sellerStatus: o.seller.status as CardOffer["sellerStatus"],
+      offerStatus: o.status as CardOffer["offerStatus"],
+      available: 0, // stock-blind — the card-price rule ignores this
+      price: o.price,
+      createdAt: o.createdAt,
+      compareAtPrice: o.compareAtPrice,
+    }));
+    groupsByProduct.get(v.productId)?.push(group);
+  }
+  for (const [productId, groups] of groupsByProduct) {
+    out.set(productId, computeCatalogCardPricing(groups));
+  }
+  return out;
+}
+
+/** Single-product convenience wrapper around `resolveCatalogCards`. */
+export async function resolveCatalogCard(productId: string): Promise<CatalogCardPricing> {
+  const map = await resolveCatalogCards([productId]);
+  return (
+    map.get(productId) ?? {
+      minPrice: null,
+      minCompareAtPrice: null,
+      isFrom: false,
+      onSale: false,
+      eligibleVariantCount: 0,
+    }
+  );
 }
 
 /** Every buy-box-eligible offer for a Variant EXCEPT the winner, in rank order. */

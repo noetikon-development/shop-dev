@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { generateVariantSku } from "@/lib/admin/catalog";
+import { ensureFirstPartyOffer } from "@/lib/admin/offer-sync";
 
 /**
  * Keeps a product's Variant rows in sync with its ProductOption / value
@@ -22,8 +23,10 @@ export async function regenerateVariants(productId: string): Promise<void> {
     select: {
       id: true,
       slug: true,
+      status: true,
       price: true,
       compareAtPrice: true,
+      costPrice: true,
       options: {
         orderBy: { sortOrder: "asc" },
         select: { id: true, values: { orderBy: { sortOrder: "asc" }, select: { id: true } } },
@@ -102,6 +105,12 @@ export async function regenerateVariants(productId: string): Promise<void> {
         update: {},
         create: { variantId: variant.id, sku, quantity: 0, reserved: 0, reorderPoint: 3 },
       });
+      // Phase 9D-A: a regenerated variant needs its Axiaro FIRST_PARTY offer so
+      // the storefront card price resolves.
+      await ensureFirstPartyOffer(
+        { id: variant.id, sku, price: product.price, compareAtPrice: product.compareAtPrice },
+        { productStatus: product.status, costPrice: product.costPrice },
+      );
     }
   }
 
@@ -128,6 +137,10 @@ export async function regenerateVariants(productId: string): Promise<void> {
     await prisma.inventory.create({
       data: { variantId: variant.id, sku, quantity: 0, reserved: 0, reorderPoint: 3 },
     });
+    await ensureFirstPartyOffer(
+      { id: variant.id, sku, price: product.price, compareAtPrice: product.compareAtPrice },
+      { productStatus: product.status, costPrice: product.costPrice },
+    );
   }
 }
 

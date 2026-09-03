@@ -65,7 +65,10 @@ export function WishlistView({ initialItems }: { initialItems: WishlistCard[] })
               <div className="mt-3.5 flex flex-1 flex-col">
                 <p className="eyebrow mb-1">{p.categoryName}</p>
                 <h3 className="text-body font-medium leading-snug text-ink-soft">{p.name}</h3>
-                <p className="mt-2 text-meta tabular-nums text-ink-faint">{formatPrice(p.price)}</p>
+                <p className="mt-2 text-meta tabular-nums text-ink-faint">
+                  {p.priceFrom ? "From " : ""}
+                  {formatPrice(p.price)}
+                </p>
                 <p className="mt-1 text-micro text-ink-faint">
                   This piece has been retired from the catalogue.
                 </p>

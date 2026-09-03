@@ -21,6 +21,7 @@ import {
   parseCareText,
 } from "@/lib/admin/catalog-schemas";
 import { cleanUserText } from "@/lib/ugc";
+import { ensureFirstPartyOffer, syncFirstPartyOfferPrice } from "@/lib/admin/offer-sync";
 import {
   generateProductSlug,
   generateCategorySlug,
@@ -153,6 +154,12 @@ export async function createProduct(
     await prisma.inventory.create({
       data: { variantId: variant.id, sku: data.sku, quantity: 0, reserved: 0, reorderPoint: 3 },
     });
+    // Phase 9D-A: the storefront card price now reads the Axiaro FIRST_PARTY
+    // Offer — create it in step so the new product is priced on the storefront.
+    await ensureFirstPartyOffer(
+      { id: variant.id, sku: data.sku, price: data.price, compareAtPrice: data.compareAtPrice ?? null },
+      { productStatus: data.status, costPrice: null },
+    );
   } catch (err) {
     console.error("[createProduct]", err);
     return { error: "Could not create the product. The slug or SKU may already be taken." };
@@ -228,6 +235,13 @@ export async function updateProduct(
       await prisma.variant.update({
         where: { id: existing.variants[0].id },
         data: { price: data.price, compareAtPrice: data.compareAtPrice ?? null },
+      });
+      // Phase 9D-A: the changed variant's Axiaro FIRST_PARTY offer follows.
+      // Multi-variant products change only Product.price here (no Variant.price
+      // changes), so no offer is affected — do not touch them.
+      await syncFirstPartyOfferPrice(existing.variants[0].id, {
+        price: data.price,
+        compareAtPrice: data.compareAtPrice ?? null,
       });
     }
   } catch (err) {
@@ -940,6 +954,11 @@ export async function updateVariant(
       },
     });
     await prisma.inventory.updateMany({ where: { variantId: id }, data: { sku: data.sku } });
+    // Phase 9D-A: keep this variant's Axiaro FIRST_PARTY offer price in step.
+    await syncFirstPartyOfferPrice(id, {
+      price: data.price,
+      compareAtPrice: data.compareAtPrice ?? null,
+    });
   } catch (err) {
     console.error("[updateVariant]", err);
     return { error: "Could not save the variant." };
@@ -1007,8 +1026,10 @@ export async function addVariant(
       id: true,
       name: true,
       slug: true,
+      status: true,
       price: true,
       compareAtPrice: true,
+      costPrice: true,
       options: { select: { id: true, values: { select: { id: true, value: true } } } },
     },
   });
@@ -1058,6 +1079,11 @@ export async function addVariant(
   await prisma.inventory.create({
     data: { variantId: variant.id, sku, quantity: 0, reserved: 0, reorderPoint: 3 },
   });
+  // Phase 9D-A: the storefront card price reads the Axiaro FIRST_PARTY Offer.
+  await ensureFirstPartyOffer(
+    { id: variant.id, sku, price, compareAtPrice: product.compareAtPrice },
+    { productStatus: product.status, costPrice: product.costPrice },
+  );
 
   await writeAudit({
     actorUserId: admin.user.id,

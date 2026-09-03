@@ -56,11 +56,14 @@ export function Stars({
 export function PriceTag({
   price,
   compareAt,
+  from = false,
   size = "md",
   className,
 }: {
   price: number;
   compareAt?: number | null;
+  /** Prefix the price with "From " (product spans more than one winning price). */
+  from?: boolean;
   size?: "sm" | "md" | "lg";
   className?: string;
 }) {
@@ -73,6 +76,7 @@ export function PriceTag({
   return (
     <span className={cn("inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5", className)}>
       <span className={cn("font-medium tabular-nums text-ink", sizes[size])}>
+        {from && <span className="mr-1 font-normal text-ink-faint">From</span>}
         {formatPrice(price)}
       </span>
       {pct > 0 && (

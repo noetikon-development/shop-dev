@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
+import { computeCatalogCardPricing } from "@/lib/marketplace/buy-box-rule";
+import type { CardOffer } from "@/lib/marketplace/types";
 import type { ProductCardView } from "@/lib/types";
 
 /**
@@ -60,11 +62,50 @@ const wishlistSelect = {
       },
       variants: {
         where: { status: "ACTIVE" },
-        select: { id: true, stock: true, inventory: { select: { reorderPoint: true } } },
+        select: {
+          id: true,
+          stock: true,
+          inventory: { select: { reorderPoint: true } },
+          // Phase 9D-A: card selling price from the winning Axiaro FIRST_PARTY
+          // Offer (stock stays on Variant.stock). Nested — one query per load.
+          offers: {
+            select: {
+              id: true,
+              status: true,
+              price: true,
+              compareAtPrice: true,
+              createdAt: true,
+              seller: { select: { type: true, status: true } },
+            },
+          },
+        },
       },
     },
   },
 } satisfies Prisma.WishlistItemSelect;
+
+type WishlistOfferRow = {
+  id: string;
+  status: string;
+  price: number;
+  compareAtPrice: number | null;
+  createdAt: Date;
+  seller: { type: string; status: string };
+};
+
+function toWishlistCardOffer(o: WishlistOfferRow): CardOffer {
+  return {
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as CardOffer["sellerStatus"],
+    offerStatus: o.status as CardOffer["offerStatus"],
+    available: 0,
+    price: o.price,
+    createdAt: o.createdAt,
+    compareAtPrice: o.compareAtPrice,
+  };
+}
 
 function safeParse<T>(value: string, fallback: T): T {
   try {
@@ -96,14 +137,22 @@ export async function loadWishlist(userId: string): Promise<WishlistCard[]> {
     const stockStatus = rollupStatus(
       p.variants.map((v) => stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0)),
     );
+    // Card selling price from the winning 1P offers. A retired product (no ACTIVE
+    // variant / no offer) legitimately falls back to its last-known
+    // `Product.price` — that is the historical price for an item you can no
+    // longer buy, not a migrated live card hiding a broken offer.
+    const pricing = computeCatalogCardPricing(
+      p.variants.map((v) => v.offers.map(toWishlistCardOffer)),
+    );
     return {
       id: p.id,
       slug: p.slug,
       name: p.name,
       brand: p.brand,
       shortDescription: p.shortDescription,
-      price: p.price,
-      compareAtPrice: p.compareAtPrice,
+      price: pricing.minPrice ?? p.price,
+      compareAtPrice: pricing.minPrice != null ? pricing.minCompareAtPrice : p.compareAtPrice,
+      priceFrom: pricing.isFrom,
       ratingAvg: p.ratingAvg,
       ratingCount: p.ratingCount,
       soldCount: p.soldCount,

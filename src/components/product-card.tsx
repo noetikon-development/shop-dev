@@ -117,7 +117,12 @@ export function ProductCard({
         </div>
 
         <div className="mt-2 flex items-end justify-between gap-2">
-          <PriceTag price={product.price} compareAt={product.compareAtPrice} size="sm" />
+          <PriceTag
+            price={product.price}
+            compareAt={product.compareAtPrice}
+            from={product.priceFrom}
+            size="sm"
+          />
           {product.colorSwatches.length > 0 && (
             <div className="flex items-center gap-1">
               {product.colorSwatches.slice(0, 4).map((hex, i) => (

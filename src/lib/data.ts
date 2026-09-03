@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import { getStoreBrand } from "@/lib/site-settings";
+import { computeCatalogCardPricing } from "@/lib/marketplace/buy-box-rule";
+import type { CardOffer } from "@/lib/marketplace/types";
 import type {
   CategoryNode,
   ProductCardView,
@@ -108,9 +110,36 @@ const cardSelect = {
   },
   variants: {
     where: { status: "ACTIVE" },
-    select: { id: true, stock: true, inventory: { select: { reorderPoint: true } } },
+    select: {
+      id: true,
+      stock: true,
+      inventory: { select: { reorderPoint: true } },
+      // Phase 9D-A: the card SELLING PRICE is derived from the winning Axiaro
+      // FIRST_PARTY Offer per variant (stock stays on Variant.stock). Nested
+      // here so a listing pays NO extra query — Prisma loads this relation once
+      // per page via `WHERE variantId IN (...)`, not once per card.
+      offers: {
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          compareAtPrice: true,
+          createdAt: true,
+          seller: { select: { type: true, status: true } },
+        },
+      },
+    },
   },
 } satisfies Prisma.ProductSelect;
+
+type CardOfferRow = {
+  id: string;
+  status: string;
+  price: number;
+  compareAtPrice: number | null;
+  createdAt: Date;
+  seller: { type: string; status: string };
+};
 
 type CardRow = {
   id: string;
@@ -129,8 +158,45 @@ type CardRow = {
   category: { slug: string; name: string };
   images: { url: string; alt: string }[];
   options: { values: { swatchHex: string | null }[] }[];
-  variants: { id: string; stock: number; inventory: { reorderPoint: number } | null }[];
+  variants: {
+    id: string;
+    stock: number;
+    inventory: { reorderPoint: number } | null;
+    offers: CardOfferRow[];
+  }[];
 };
+
+/** Map a nested offer row onto the pure card-pricing input shape. */
+function toCardOffer(o: CardOfferRow): CardOffer {
+  return {
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as CardOffer["sellerStatus"],
+    offerStatus: o.status as CardOffer["offerStatus"],
+    available: 0, // stock-blind — the card-price rule ignores this in Slice 1
+    price: o.price,
+    createdAt: o.createdAt,
+    compareAtPrice: o.compareAtPrice,
+  };
+}
+
+/**
+ * Resolve the card selling price from the product's per-variant offers.
+ * `Product.price` is used ONLY as a production liveness guard when no offer
+ * resolves (a write-through gap) — this throws in dev and the parity gate has
+ * zero tolerance for it, so it never fires in a healthy catalogue.
+ */
+function cardPricing(p: CardRow): { price: number; compareAtPrice: number | null; priceFrom: boolean } {
+  const pricing = computeCatalogCardPricing(p.variants.map((v) => v.offers.map(toCardOffer)));
+  if (pricing.minPrice == null) {
+    const msg = `[toCard] no resolvable Axiaro offer price for product ${p.slug} — 1P write-through gap`;
+    if (process.env.NODE_ENV !== "production") throw new Error(msg);
+    console.error(msg);
+    return { price: p.price, compareAtPrice: p.compareAtPrice, priceFrom: false };
+  }
+  return { price: pricing.minPrice, compareAtPrice: pricing.minCompareAtPrice, priceFrom: pricing.isFrom };
+}
 
 function toCard(p: CardRow): ProductCardView {
   const img = p.images[0] ?? { url: "art:accessory:" + p.slug, alt: p.name };
@@ -140,14 +206,16 @@ function toCard(p: CardRow): ProductCardView {
   const stockStatus = rollupStatus(
     p.variants.map((v) => stockStatusFromAvailable(v.stock, v.inventory?.reorderPoint ?? 0)),
   );
+  const { price, compareAtPrice, priceFrom } = cardPricing(p);
   return {
     id: p.id,
     slug: p.slug,
     name: p.name,
     brand: p.brand,
     shortDescription: p.shortDescription,
-    price: p.price,
-    compareAtPrice: p.compareAtPrice,
+    price,
+    compareAtPrice,
+    priceFrom,
     ratingAvg: p.ratingAvg,
     ratingCount: p.ratingCount,
     soldCount: p.soldCount,
@@ -584,8 +652,11 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     brand: p.brand,
     shortDescription: p.shortDescription,
     description: p.description,
+    // PDP price stays on Product.price / Variant.price in Slice 1 (PDP migration
+    // is Slice 2). `priceFrom` is a type-completeness field the PDP does not use.
     price: p.price,
     compareAtPrice: p.compareAtPrice,
+    priceFrom: false,
     ratingAvg: p.ratingAvg,
     ratingCount: p.ratingCount,
     soldCount: p.soldCount,

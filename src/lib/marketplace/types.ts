@@ -32,6 +32,32 @@ export type OfferCandidate = {
   createdAt: Date;
 };
 
+/**
+ * A candidate enriched with the winner's compare-at price — the shape the
+ * catalog-card price computation needs (it must report the compare-at of the
+ * offer that produced the minimum displayed price).
+ */
+export type CardOffer = OfferCandidate & { compareAtPrice: number | null };
+
+/**
+ * Product-card pricing derived from the winning offers across a product's ACTIVE
+ * variants (Phase 9D-A). `minPrice` is `null` only when NO variant has a
+ * display-eligible offer — the card then shows no price and the existing
+ * out-of-stock / unavailable presentation stands.
+ */
+export type CatalogCardPricing = {
+  /** lowest winning-offer price across the product's ACTIVE variants (centavos) */
+  minPrice: number | null;
+  /** compare-at of the offer that produced `minPrice`, only when it exceeds it */
+  minCompareAtPrice: number | null;
+  /** true when eligible variants resolve to more than one distinct winning price → render "From ₱X" */
+  isFrom: boolean;
+  /** true when any display-eligible offer on the product carries a compare-at (loose, matches today's on-sale predicate) */
+  onSale: boolean;
+  /** number of variants that contributed a winning offer */
+  eligibleVariantCount: number;
+};
+
 /** The public-facing result of buy-box resolution. Contains no cost / private data. */
 export type ResolvedOffer = {
   offerId: string;

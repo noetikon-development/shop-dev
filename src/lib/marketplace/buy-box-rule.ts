@@ -18,11 +18,29 @@
  * price competitiveness, buy-box rotation, Axiaro-1P platform preference.
  */
 
-import type { OfferCandidate } from "@/lib/marketplace/types";
+import type { OfferCandidate, CardOffer, CatalogCardPricing } from "@/lib/marketplace/types";
 
 /** True when a candidate is allowed into the buy box at all. */
 export function isEligibleCandidate(c: OfferCandidate): boolean {
   return c.offerStatus === "ACTIVE" && c.sellerStatus === "APPROVED" && c.available > 0;
+}
+
+/**
+ * Eligibility for the DISPLAYED PRODUCT-CARD PRICE only (Phase 9D-A).
+ *
+ * Deliberately STOCK-BLIND: the card price is "what the item costs", shown even
+ * when out of stock, exactly as today's card shows `Product.price` under an
+ * "Out of stock" overlay. Slice 1 does NOT migrate stock — availability stays on
+ * `Variant.stock` / `Inventory` — so the card price must not depend on
+ * `OfferInventory` (a frozen 9C copy that admin stock adjustments do not yet
+ * touch). The ranking comparator (`compareCandidates`) is unchanged and shared;
+ * only the eligibility filter differs from `isEligibleCandidate`.
+ *
+ * A later, separately-approved stock slice switches card pricing over to
+ * `isEligibleCandidate` (which adds `available > 0`).
+ */
+export function isEligibleForDisplayPrice(c: OfferCandidate): boolean {
+  return c.offerStatus === "ACTIVE" && c.sellerStatus === "APPROVED";
 }
 
 /** Ordering used for both the winner and the runner-up ("other offers") list. */
@@ -51,4 +69,60 @@ export function pickWinningOffer(candidates: OfferCandidate[]): OfferCandidate |
 /** Every eligible candidate in rank order (winner first). */
 export function rankOffers(candidates: OfferCandidate[]): OfferCandidate[] {
   return candidates.filter(isEligibleCandidate).sort(compareCandidates);
+}
+
+// ---------------------------------------------------------------------------
+// Product-card price (Phase 9D-A) — pure, stock-blind
+// ---------------------------------------------------------------------------
+
+/** The display-price winner for one variant's offers, or null. */
+function pickDisplayWinner(offers: CardOffer[]): CardOffer | null {
+  const eligible = offers.filter(isEligibleForDisplayPrice);
+  if (eligible.length === 0) return null;
+  return [...eligible].sort(compareCandidates)[0];
+}
+
+/**
+ * Derive a Product's card pricing from its ACTIVE variants' offers.
+ *
+ * `variantOfferGroups` is one array of offers per ACTIVE variant. Rule (approved
+ * Phase 9D / 9D-A):
+ *   1. per variant, pick the display-price winner (`isEligibleForDisplayPrice`
+ *      + the shared `compareCandidates` ranking)
+ *   2. ignore variants with no winner
+ *   3. `minPrice` = lowest winning price across the remaining variants
+ *   4. `minCompareAtPrice` = the winner-at-minPrice's compareAt, only if it
+ *      exceeds minPrice; never borrowed from another variant
+ *   5. `isFrom` = the winning prices are not all identical
+ *   6. no winner anywhere → all-null / not on sale
+ */
+export function computeCatalogCardPricing(variantOfferGroups: CardOffer[][]): CatalogCardPricing {
+  const winners: { price: number; compareAtPrice: number | null }[] = [];
+  let onSale = false;
+
+  for (const group of variantOfferGroups) {
+    const w = pickDisplayWinner(group);
+    if (!w) continue;
+    winners.push({ price: w.price, compareAtPrice: w.compareAtPrice });
+    for (const o of group) {
+      if (isEligibleForDisplayPrice(o) && o.compareAtPrice != null) onSale = true;
+    }
+  }
+
+  if (winners.length === 0) {
+    return { minPrice: null, minCompareAtPrice: null, isFrom: false, onSale: false, eligibleVariantCount: 0 };
+  }
+
+  const minPrice = Math.min(...winners.map((w) => w.price));
+  const minWinner = winners.find((w) => w.price === minPrice)!;
+  const minCompareAtPrice =
+    minWinner.compareAtPrice != null && minWinner.compareAtPrice > minPrice ? minWinner.compareAtPrice : null;
+
+  return {
+    minPrice,
+    minCompareAtPrice,
+    isFrom: new Set(winners.map((w) => w.price)).size > 1,
+    onSale,
+    eligibleVariantCount: winners.length,
+  };
 }
