@@ -295,7 +295,12 @@ export async function getProductPerformance(
           status: true,
           variants: {
             select: {
-              inventory: { select: { quantity: true, reserved: true } },
+              // Phase 9E-3D-2: current stock from the operational authority —
+              // the Axiaro FIRST_PARTY OfferInventory, not the legacy mirror.
+              offers: {
+                where: { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" },
+                select: { inventory: { select: { quantity: true, reserved: true } } },
+              },
             },
           },
         },
@@ -308,9 +313,10 @@ export async function getProductPerformance(
     let currentStock = 0;
     let available = 0;
     for (const v of p?.variants ?? []) {
-      if (!v.inventory) continue;
-      currentStock += v.inventory.quantity;
-      available += Math.max(0, v.inventory.quantity - v.inventory.reserved);
+      const oi = v.offers[0]?.inventory;
+      if (!oi) continue;
+      currentStock += oi.quantity;
+      available += Math.max(0, oi.quantity - oi.reserved);
     }
     const units = num(g.units);
     const valueCentavos = num(g.value);
@@ -513,34 +519,45 @@ export type InventoryInsights = {
 };
 
 export async function getInventoryInsights(): Promise<InventoryInsights> {
+  // Phase 9E-3D-2: current-state stock is read from the operational authority —
+  // the Axiaro FIRST_PARTY OfferInventory (1:1 mirror of Inventory, so the
+  // figures are unchanged for current data). Selling price / cost price stay on
+  // the catalog columns (Variant.price / Product.costPrice), kept in step by
+  // the 1P offer price write-through — value reporting is not an inventory
+  // concern and is out of scope for this phase.
+  const FP = Prisma.sql`
+    JOIN "Offer" o  ON o.id = oi."offerId"
+    JOIN "Seller" s ON s.id = o."sellerId"
+    JOIN "Variant" v ON v.id = o."variantId"
+    WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND v.status = 'ACTIVE'`;
   const [activeVariants, totalVariants, statusRow, reorderRow, valueRow] = await Promise.all([
     prisma.variant.count({ where: { status: "ACTIVE" } }),
     prisma.variant.count(),
     prisma.$queryRaw<{ out: number; low: number }[]>(Prisma.sql`
       SELECT
-        COUNT(*) FILTER (WHERE i.quantity - i.reserved <= 0)::int AS out,
-        COUNT(*) FILTER (WHERE i.quantity - i.reserved > 0
-                           AND i.quantity - i.reserved <= i."reorderPoint")::int AS low
-      FROM "Inventory" i
-      JOIN "Variant" v ON v.id = i."variantId"
-      WHERE v.status = 'ACTIVE'
+        COUNT(*) FILTER (WHERE oi.quantity - oi.reserved <= 0)::int AS out,
+        COUNT(*) FILTER (WHERE oi.quantity - oi.reserved > 0
+                           AND oi.quantity - oi.reserved <= oi."reorderPoint")::int AS low
+      FROM "OfferInventory" oi
+      ${FP}
     `),
     prisma.$queryRaw<{ n: number }[]>(Prisma.sql`
       SELECT COUNT(DISTINCT v."productId")::int AS n
-      FROM "Inventory" i
-      JOIN "Variant" v ON v.id = i."variantId"
-      WHERE v.status = 'ACTIVE' AND i.quantity - i.reserved <= i."reorderPoint"
+      FROM "OfferInventory" oi
+      ${FP} AND oi.quantity - oi.reserved <= oi."reorderPoint"
     `),
     prisma.$queryRaw<{ retail: string; cost: string | null; withcost: number; total: number }[]>(Prisma.sql`
       SELECT
-        COALESCE(SUM(i.quantity * v.price), 0)::text AS retail,
-        SUM(i.quantity * p."costPrice")::text        AS cost,
+        COALESCE(SUM(oi.quantity * v.price), 0)::text AS retail,
+        SUM(oi.quantity * p."costPrice")::text        AS cost,
         COUNT(*) FILTER (WHERE p."costPrice" IS NOT NULL)::int AS withcost,
-        COUNT(*)::int                                AS total
-      FROM "Inventory" i
-      JOIN "Variant" v ON v.id = i."variantId"
+        COUNT(*)::int                                 AS total
+      FROM "OfferInventory" oi
+      JOIN "Offer" o   ON o.id = oi."offerId"
+      JOIN "Seller" s  ON s.id = o."sellerId"
+      JOIN "Variant" v ON v.id = o."variantId"
       JOIN "Product" p ON p.id = v."productId"
-      WHERE v.status = 'ACTIVE'
+      WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND v.status = 'ACTIVE'
     `),
   ]);
 
@@ -582,19 +599,26 @@ export async function getLowStockReport(
 
   // Catalog is a few hundred variants — load ACTIVE ones, filter the derived
   // "available ≤ reorderPoint" condition in memory (same pattern as
-  // src/lib/admin/inventory.ts). No stock is touched.
-  const all = await prisma.inventory.findMany({
-    where: { variant: { status: "ACTIVE" } },
+  // src/lib/admin/inventory.ts). Source of truth = the Axiaro FIRST_PARTY
+  // OfferInventory (9E-3D-2). SKU from Variant.sku. No stock is touched.
+  const all = await prisma.offerInventory.findMany({
+    where: {
+      offer: { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW", variant: { status: "ACTIVE" } },
+    },
     select: {
-      sku: true,
       quantity: true,
       reserved: true,
       reorderPoint: true,
-      variant: {
+      offer: {
         select: {
-          product: { select: { id: true, name: true, slug: true } },
-          optionValues: {
-            select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
+          variant: {
+            select: {
+              sku: true,
+              product: { select: { id: true, name: true, slug: true } },
+              optionValues: {
+                select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
+              },
+            },
           },
         },
       },
@@ -602,22 +626,23 @@ export async function getLowStockReport(
   });
 
   const flagged: LowStockRow[] = [];
-  for (const inv of all) {
-    const status = stockStatus(inv.quantity, inv.reserved, inv.reorderPoint);
+  for (const oi of all) {
+    const variant = oi.offer.variant;
+    const status = stockStatus(oi.quantity, oi.reserved, oi.reorderPoint);
     if (status !== "LOW_STOCK" && status !== "OUT_OF_STOCK") continue;
     flagged.push({
-      productId: inv.variant.product.id,
-      productName: inv.variant.product.name,
-      productSlug: inv.variant.product.slug,
+      productId: variant.product.id,
+      productName: variant.product.name,
+      productSlug: variant.product.slug,
       optionLabel:
-        inv.variant.optionValues
+        variant.optionValues
           .map((ov) => `${ov.optionValue.option.name}: ${ov.optionValue.value}`)
           .join(" · ") || "Default",
-      sku: inv.sku,
-      onHand: inv.quantity,
-      reserved: inv.reserved,
-      available: Math.max(0, inv.quantity - inv.reserved),
-      reorderPoint: inv.reorderPoint,
+      sku: variant.sku,
+      onHand: oi.quantity,
+      reserved: oi.reserved,
+      available: Math.max(0, oi.quantity - oi.reserved),
+      reorderPoint: oi.reorderPoint,
       status,
     });
   }

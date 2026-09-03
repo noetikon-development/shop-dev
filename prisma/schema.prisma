@@ -349,9 +349,11 @@ model Variant {
   price          Int // absolute price for this variant, in centavos
   compareAtPrice Int?
   status         String  @default("ACTIVE") // ACTIVE | ARCHIVED (archived = not purchasable)
-  // Denormalised AVAILABLE stock (Inventory.quantity - Inventory.reserved). The
-  // storefront reads this; every inventory mutation in src/lib/inventory.ts
-  // keeps it in sync. Inventory is the source of truth.
+  // Denormalised AVAILABLE stock (quantity - reserved), a compatibility mirror.
+  // Read by nobody since Phase 9D-D (the storefront reads OfferInventory); every
+  // inventory mutation in src/lib/inventory.ts still keeps it in sync. Since
+  // Phase 9E-3D-2 the operational source of truth for FIRST_PARTY stock is the
+  // Axiaro OfferInventory; Inventory + this column are synchronized mirrors.
   stock          Int     @default(0)
   imageUrl       String?
 

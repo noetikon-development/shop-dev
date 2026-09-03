@@ -34,9 +34,17 @@ export default async function AdminDashboard() {
       can("view_customers") ? prisma.user.count({ where: { role: "CUSTOMER" } }) : Promise.resolve(null),
       can("view_orders") ? prisma.order.count() : Promise.resolve(null),
       can("view_inventory")
-        ? prisma.$queryRaw<{ count: bigint }[]>`
-            SELECT COUNT(*)::bigint AS count FROM "Inventory"
-            WHERE "quantity" - "reserved" <= "reorderPoint"`.then((r) => Number(r[0]?.count ?? 0))
+        ? // Phase 9E-3D-2: low-stock is measured against the operational
+          // authority — the Axiaro FIRST_PARTY OfferInventory. Semantically
+          // identical to the old Inventory count (1:1 mirror), threshold
+          // compared against available (quantity − reserved).
+          prisma.$queryRaw<{ count: bigint }[]>`
+            SELECT COUNT(*)::bigint AS count
+            FROM "OfferInventory" oi
+            JOIN "Offer" o ON o.id = oi."offerId"
+            JOIN "Seller" s ON s.id = o."sellerId"
+            WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+              AND oi."quantity" - oi."reserved" <= oi."reorderPoint"`.then((r) => Number(r[0]?.count ?? 0))
         : Promise.resolve(null),
     ]);
 

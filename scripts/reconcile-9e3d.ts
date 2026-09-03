@@ -2,7 +2,8 @@
  * Phase 9E-3D — inventory authority reconciliation. READ-ONLY.
  *
  * Proves, for every Axiaro FIRST_PARTY offer (condition NEW, 1:1 with a
- * Variant / Inventory row), that the two inventory stores agree — and flags
+ * Variant / Inventory row), that OfferInventory (the operational authority as
+ * of 9E-3D-2) and the Inventory / Variant.stock mirrors agree — and flags
  * every class of drift the 9E-3D-0 audit identified.
  *
  * Parity (must all hold):
@@ -77,6 +78,46 @@ async function run() {
   check("OfferInventory.reorderPoint == Inventory.reorderPoint", rpDiff === 0, `${rpDiff} differ`);
   check("available parity: max(0,q-r) equal on both stores", availDiff === 0, `${availDiff} differ`);
   check("Variant.stock == max(0, Inventory.quantity - reserved) (denorm mirror)", mirrorDiff === 0, `${mirrorDiff} differ`);
+
+  // ── operational authority (9E-3D-2) ──────────────────────────────────
+  // OfferInventory is the operational read authority for FIRST_PARTY stock;
+  // Inventory + Variant.stock are synchronized mirrors. Prove full coverage
+  // in BOTH directions and that the mirrors track the authority exactly.
+  let mirrorVsAuthority = 0, statusDiff = 0;
+  for (const o of offers) {
+    const oi = o.inventory;
+    if (!oi) continue;
+    const oiAvail = Math.max(0, oi.quantity - oi.reserved);
+    if (o.variant.stock !== oiAvail) mirrorVsAuthority++;
+    const inv = o.variant.inventory;
+    if (inv) {
+      const st = (q: number, r: number, rp: number) =>
+        q - r <= 0 ? "OUT" : q - r <= rp ? "LOW" : "IN";
+      if (st(oi.quantity, oi.reserved, oi.reorderPoint) !== st(inv.quantity, inv.reserved, inv.reorderPoint)) {
+        statusDiff++;
+      }
+    }
+  }
+  check("Variant.stock == max(0, OfferInventory.q - r) (mirror tracks the authority)", mirrorVsAuthority === 0, `${mirrorVsAuthority} differ`);
+  check("derived stock status identical from OfferInventory and Inventory", statusDiff === 0, `${statusDiff} differ`);
+
+  const invNoFpOffer = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int AS n FROM "Inventory" i
+     WHERE NOT EXISTS (
+       SELECT 1 FROM "Offer" o JOIN "Seller" s ON s.id = o."sellerId"
+       WHERE o."variantId" = i."variantId" AND s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+     )`,
+  ) as { n: number }[];
+  check("every Inventory row has a FIRST_PARTY NEW offer (reverse coverage)", invNoFpOffer[0].n === 0, `${invNoFpOffer[0].n} uncovered`);
+
+  const multiFpOffer = await prisma.$queryRawUnsafe(
+    `SELECT COUNT(*)::int AS n FROM (
+       SELECT o."variantId" FROM "Offer" o JOIN "Seller" s ON s.id = o."sellerId"
+       WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+       GROUP BY o."variantId" HAVING COUNT(*) > 1
+     ) d`,
+  ) as { n: number }[];
+  check("at most one FIRST_PARTY NEW offer per variant", multiFpOffer[0].n === 0, `${multiFpOffer[0].n} variants with >1`);
 
   // ── negative stock ────────────────────────────────────────────────────
   const negOI = await prisma.$queryRawUnsafe(
@@ -181,7 +222,7 @@ async function run() {
 
   console.log(`\n  ${pass} passed, ${fail} failed.`);
   if (fail > 0) { console.error("\nRECONCILIATION FAILED."); process.exitCode = 1; }
-  else console.log("\nRECONCILIATION PASSED — OfferInventory and Inventory are in parity for every FIRST_PARTY offer.");
+  else console.log("\nRECONCILIATION PASSED — OfferInventory is the operational authority; Inventory + Variant.stock are synchronized mirrors, in parity for every FIRST_PARTY offer.");
 }
 
 run().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());

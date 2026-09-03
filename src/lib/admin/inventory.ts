@@ -1,9 +1,18 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import { stockStatus, type StockStatus } from "@/lib/inventory-status";
+import { FIRST_PARTY_OFFER_FILTER } from "@/lib/admin/first-party-inventory";
 
 /**
  * Admin read layer for inventory. Uncached — admins see live numbers.
+ *
+ * Phase 9E-3D-2: current stock state (list + detail) is sourced from the
+ * Axiaro FIRST_PARTY `OfferInventory` — the operational authority. `Inventory`
+ * remains a synchronized mirror. The adjustment HISTORY below deliberately
+ * stays on `InventoryAdjustment`: every 1P mutation still writes a mirror row
+ * (checkout / cancel / return / admin), so that history is complete, and it
+ * carries the `actor` relation `OfferAdjustment` lacks. Switching it would be
+ * a semantic change, not an authority change — out of scope for this phase.
  */
 
 export const INVENTORY_PAGE_SIZE = 25;
@@ -30,77 +39,106 @@ export type InventoryRow = {
   updatedAt: Date;
 };
 
-function toRow(inv: {
+/**
+ * One Axiaro FIRST_PARTY `OfferInventory` row joined to its variant. `sku` is
+ * read from `Variant.sku` (the catalog identifier) rather than either mirror's
+ * copy. `inventoryId` carries the OfferInventory row id — it is only a stable
+ * React key downstream; every mutation is addressed by `variantId`.
+ */
+type OfferInventoryRow = {
   id: string;
-  sku: string;
   quantity: number;
   reserved: number;
   reorderPoint: number;
   updatedAt: Date;
-  variant: {
-    id: string;
-    status: string;
-    product: { id: string; name: string; status: string };
-    optionValues: { optionValue: { value: string; option: { name: string } } }[];
+  offer: {
+    variant: {
+      id: string;
+      sku: string;
+      status: string;
+      product: { id: string; name: string; status: string };
+      optionValues: { optionValue: { value: string; option: { name: string } } }[];
+    };
   };
-}): InventoryRow {
-  const available = Math.max(0, inv.quantity - inv.reserved);
+};
+
+function offerInventorySelect(withSlug: boolean) {
   return {
-    inventoryId: inv.id,
-    variantId: inv.variant.id,
-    sku: inv.sku,
-    productId: inv.variant.product.id,
-    productName: inv.variant.product.name,
-    productStatus: inv.variant.product.status,
-    variantStatus: inv.variant.status,
+    id: true,
+    quantity: true,
+    reserved: true,
+    reorderPoint: true,
+    updatedAt: true,
+    offer: {
+      select: {
+        variant: {
+          select: {
+            id: true,
+            sku: true,
+            status: true,
+            product: {
+              select: withSlug
+                ? { id: true, name: true, slug: true, status: true }
+                : { id: true, name: true, status: true },
+            },
+            optionValues: {
+              select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
+            },
+          },
+        },
+      },
+    },
+  } as const;
+}
+
+function toRow(oi: OfferInventoryRow): InventoryRow {
+  const v = oi.offer.variant;
+  const available = Math.max(0, oi.quantity - oi.reserved);
+  return {
+    inventoryId: oi.id,
+    variantId: v.id,
+    sku: v.sku,
+    productId: v.product.id,
+    productName: v.product.name,
+    productStatus: v.product.status,
+    variantStatus: v.status,
     optionLabel:
-      inv.variant.optionValues
+      v.optionValues
         .map((ov) => `${ov.optionValue.option.name}: ${ov.optionValue.value}`)
         .join(" · ") || "Default",
-    quantity: inv.quantity,
-    reserved: inv.reserved,
+    quantity: oi.quantity,
+    reserved: oi.reserved,
     available,
-    reorderPoint: inv.reorderPoint,
-    status: stockStatus(inv.quantity, inv.reserved, inv.reorderPoint),
-    updatedAt: inv.updatedAt,
+    reorderPoint: oi.reorderPoint,
+    status: stockStatus(oi.quantity, oi.reserved, oi.reorderPoint),
+    updatedAt: oi.updatedAt,
   };
 }
 
 export async function listInventory(filters: { q?: string; status?: string; page?: number }) {
   const page = Math.max(1, filters.page ?? 1);
-  const where: Record<string, unknown> = {};
-  if (filters.q) {
-    const q = filters.q.trim();
-    where.OR = [
-      { sku: { contains: q, mode: "insensitive" } },
-      { variant: { product: { name: { contains: q, mode: "insensitive" } } } },
-    ];
-  }
 
-  // Status is derived, so it can't be a SQL WHERE clause. The catalog is small
-  // (a few hundred variants); load the (search-)filtered set and filter/paginate
-  // the status in memory.
-  const all = await prisma.inventory.findMany({
-    where,
-    orderBy: [{ variant: { product: { name: "asc" } } }, { sku: "asc" }],
-    select: {
-      id: true,
-      sku: true,
-      quantity: true,
-      reserved: true,
-      reorderPoint: true,
-      updatedAt: true,
-      variant: {
-        select: {
-          id: true,
-          status: true,
-          product: { select: { id: true, name: true, status: true } },
-          optionValues: {
-            select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
-          },
-        },
-      },
-    },
+  // Source of truth = the Axiaro FIRST_PARTY OfferInventory. Status is derived,
+  // so it can't be a SQL WHERE clause — the catalog is a few hundred variants,
+  // so load the (search-)filtered set and filter/paginate the status in memory.
+  const offerWhere: Record<string, unknown> = { ...FIRST_PARTY_OFFER_FILTER };
+  if (filters.q?.trim()) {
+    // Text search targets Variant.sku (the catalog identifier) and product name.
+    const q = filters.q.trim();
+    offerWhere.variant = {
+      OR: [
+        { sku: { contains: q, mode: "insensitive" } },
+        { product: { name: { contains: q, mode: "insensitive" } } },
+      ],
+    };
+  }
+  const all = await prisma.offerInventory.findMany({
+    where: { offer: offerWhere },
+    orderBy: [
+      { offer: { variant: { product: { name: "asc" } } } },
+      { offer: { variant: { sku: "asc" } } },
+    ],
+    select: offerInventorySelect(false),
   });
 
   const mapped = all.map(toRow);
@@ -131,29 +169,13 @@ export async function listInventory(filters: { q?: string; status?: string; page
 }
 
 export async function getInventoryDetail(variantId: string) {
-  const inv = await prisma.inventory.findUnique({
-    where: { variantId },
-    select: {
-      id: true,
-      sku: true,
-      quantity: true,
-      reserved: true,
-      reorderPoint: true,
-      updatedAt: true,
-      variant: {
-        select: {
-          id: true,
-          status: true,
-          product: { select: { id: true, name: true, slug: true, status: true } },
-          optionValues: {
-            select: { optionValue: { select: { value: true, option: { select: { name: true } } } } },
-          },
-        },
-      },
-    },
+  const oi = await prisma.offerInventory.findFirst({
+    where: { offer: { variantId, ...FIRST_PARTY_OFFER_FILTER } },
+    select: offerInventorySelect(true),
   });
-  if (!inv) return null;
-  return { ...toRow(inv), productSlug: inv.variant.product.slug };
+  if (!oi) return null;
+  const product = oi.offer.variant.product as { slug: string };
+  return { ...toRow(oi), productSlug: product.slug };
 }
 
 // ---------------------------------------------------------------------------
