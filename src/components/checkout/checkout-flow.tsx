@@ -156,7 +156,12 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
     setSubmitting(false);
     setConfirming(false);
     setError(res.error);
-    if (res.code === "STOCK" || res.code === "EMPTY" || res.code === "CART_GONE") {
+    if (
+      res.code === "STOCK" ||
+      res.code === "EMPTY" ||
+      res.code === "CART_GONE" ||
+      res.code === "SELLER"
+    ) {
       setBackToBag(true);
     }
     if (res.code === "SHIPPING" || res.code === "COUPON") {

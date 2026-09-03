@@ -378,12 +378,14 @@ function staticChecks() {
   ok("L  cart mutation identity is cartItemId (schemas + core)", /cartItemId: z\.string/.test(actions) && /updateCartItemCore\(input: \{\s*cartItemId: string/.test(cart) && !/updateSchema[\s\S]{0,120}variantId/.test(actions));
   ok("L  add-to-cart INSERT conflict target is (cartId, offerId)", /ON CONFLICT \("cartId", "offerId"\)/.test(cart) && !/ON CONFLICT \("cartId", "variantId"\)/.test(cart));
   ok("L  schema: @@unique([cartId, offerId]) + offerId required + no [cartId, variantId]", /@@unique\(\[cartId, offerId\]\)/.test(schema) && /\n\s*offerId\s+String\s*\n/.test(schema) && !/@@unique\(\[cartId, variantId\]\)/.test(schema));
-  ok("L  checkout.ts has no cart-schema coupling (no cartId_variantId / cartId_offerId / offerId)", !/cartId_variantId|cartId_offerId|offerId/.test(checkout));
-  ok("L  checkout order line still built from v.price (unchanged)", /unitPrice: v\.price/.test(checkout));
-  // 9E-3C-1 adds the SellerOrder / Shipment models (additive foundation); the
-  // checkout WRITER is still single-seller (asserted above via `unitPrice: v.price`
-  // + the 9E-3C-1 runner). Assert the checkout file itself gained no coupling.
-  ok("L  checkout.ts does not reference SellerOrder", !/sellerOrder/i.test(checkout));
+  // The cart-line uniqueness KEY (cartId_variantId / cartId_offerId composite
+  // accessors) must not leak into checkout — `offerId` alone is legitimate
+  // there since 9E-3C-2 (the bound-offer checkout writer).
+  ok("L  checkout.ts has no cart-uniqueness-key coupling", !/cartId_variantId|cartId_offerId/.test(checkout));
+  // 9E-3C-2: the checkout writer is offer-native and single-seller — it prices
+  // from the bound Offer and creates exactly one SellerOrder.
+  ok("L  checkout writer prices from the bound Offer (o.price), not v.price", /unitPrice:\s*o\.price/.test(checkout) && !/unitPrice:\s*v\.price/.test(checkout));
+  ok("L  checkout writer is single-seller (sellerIds.size !== 1 gate)", /sellerIds\.size !== 1/.test(checkout));
   ok("L  coupon stays order-wide (Cart.couponCode, one CouponRedemption per order)", /couponCode\s+String\?/.test(schema) && /orderId\s+String\s+@unique/.test(schema));
 }
 

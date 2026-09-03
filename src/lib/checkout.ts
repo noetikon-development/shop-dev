@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { adjustStock } from "@/lib/inventory";
+import { commitOfferStockForSale } from "@/lib/marketplace/offer-inventory";
 import { loadCart, activeRedemptionCount } from "@/lib/cart";
 import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
@@ -22,17 +23,47 @@ import {
 } from "@/lib/shipping";
 
 /**
- * Checkout + order creation (Step 9, shipping added in Step 11).
+ * Checkout + order creation (Step 9, shipping added in Step 11; offer-native
+ * writer in Phase 9E-3C-2).
  *
  * The order is created ONLY here, server-side. The browser never sends items,
  * prices, shipping amounts or totals — `createOrderFromCart` re-reads the
  * customer's ACTIVE cart, re-validates every line against the live product /
- * variant / inventory / price, LOADS the chosen shipping method and its rate
- * from the database, recalculates the total, and does the whole thing
- * (cart -> CONVERTED, inventory SALE deduction, Order + OrderItems) inside one
- * transaction. Payment is a later step: orders are created PENDING_PAYMENT and
- * are never marked paid here.
+ * variant / OFFER / OfferInventory / price, LOADS the chosen shipping method
+ * and its rate from the database, recalculates the total, and does the whole
+ * thing (cart -> CONVERTED, OfferInventory SALE commit + 1P Inventory mirror,
+ * Parent Order + one SellerOrder + OrderItems) inside one transaction. Payment
+ * is a later step: orders are created PENDING_PAYMENT and are never marked paid
+ * here.
+ *
+ * Phase 9E-3C-2 — marketplace-native, still single-seller:
+ *   - the checkout PRICE is the bound `CartItem.offer.price` (9E-2). It is
+ *     NEVER re-picked with `resolveWinningOfferView`; `CartItem.offerId` is
+ *     authoritative for this checkout attempt. `Variant.price` is no longer
+ *     read for checkout pricing and there is no fallback to it.
+ *   - availability is `OfferInventory` (quantity - reserved), never
+ *     `Variant.stock`.
+ *   - a cart must resolve to exactly ONE distinct Seller. Two sellers ->
+ *     the whole checkout aborts before any write (multi-seller checkout is
+ *     Phase 9E-3E/F, gated by `marketplace.multiSellerCheckout` = false).
+ *   - stock commit is at order creation (no reservation hold — online payment
+ *     is dormant). For the Axiaro FIRST_PARTY path the `OfferInventory` commit
+ *     and the legacy `Inventory` SALE deduction run in the SAME transaction:
+ *     both succeed or both roll back (the 9E-3B migration-window guard).
+ *   - every new order gets exactly one `SellerOrder`; every `OrderItem` is
+ *     linked to it and snapshots `offerId` / `sellerId` / `commissionRate`.
+ *
+ * Legacy `Inventory` writers NOT migrated in this phase (they belong to
+ * Phase 9E-3D): `cancelOrderAction` (order-actions.ts) and the returns restock
+ * (`admin/returns-actions.ts`). The admin manual stock edit
+ * (`admin/inventory-actions.ts`) stays Inventory-first with its existing 9D-D
+ * write-through to OfferInventory.
  */
+
+/** 9E-3B §15 — round to the nearest centavo, halves away from zero. */
+function roundHalfUp(x: number): number {
+  return Math.sign(x) * Math.round(Math.abs(x));
+}
 
 // ---------------------------------------------------------------------------
 // Checkout data for the page (server-calculated — the client only displays it)
@@ -239,6 +270,7 @@ export type PlaceOrderCode =
   | "SHIPPING"
   | "COUPON"
   | "STOCK"
+  | "SELLER" // cart resolves to != 1 distinct seller, or a bound offer/seller is no longer eligible
   | "ALREADY_ORDERED";
 
 export type PlaceOrderResult =
@@ -300,12 +332,34 @@ const cartForOrder = {
   items: {
     orderBy: { createdAt: "asc" },
     include: {
+      // Phase 9E-3C-2: the BOUND offer (never re-picked) — the checkout price,
+      // its seller and its OfferInventory. Nested so a whole cart costs one
+      // offer + one seller + one offer-inventory query, never one per line.
+      offer: {
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          compareAtPrice: true,
+          variantId: true,
+          seller: {
+            select: {
+              id: true,
+              displayName: true,
+              type: true,
+              status: true,
+              supportEmail: true,
+              commissionRate: true,
+            },
+          },
+          inventory: { select: { quantity: true, reserved: true } },
+        },
+      },
       variant: {
         select: {
           id: true,
           sku: true,
           status: true,
-          price: true,
           imageUrl: true,
           productId: true,
           product: {
@@ -322,7 +376,6 @@ const cartForOrder = {
               },
             },
           },
-          inventory: { select: { quantity: true, reserved: true } },
           optionValues: {
             select: {
               optionValue: {
@@ -406,11 +459,30 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     };
   }
 
-  // 3. Re-validate every line against authoritative data; build order lines.
+  // 3. Re-validate every line against authoritative data — the BOUND Offer
+  //    (`CartItem.offerId`, 9E-2), its Seller and its OfferInventory. The Offer
+  //    is NEVER re-picked; `resolveWinningOfferView` is not called here. Build
+  //    order lines at the bound Offer's price.
+  const GENERIC_SELLER_ERROR =
+    "We couldn’t complete your order. Please review your cart and try again.";
+
   const problems: string[] = [];
+  const sellerIds = new Set<string>();
+  let seller:
+    | {
+        id: string;
+        displayName: string;
+        type: string;
+        status: string;
+        supportEmail: string;
+        commissionRate: number;
+      }
+    | null = null;
   const lines: {
     productId: string;
     variantId: string;
+    offerId: string;
+    sellerId: string;
     name: string;
     variantLabel: string | null;
     sku: string;
@@ -423,18 +495,35 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   for (const item of cart.items) {
     const v = item.variant;
     const p = v.product;
-    const available = Math.max(0, (v.inventory?.quantity ?? 0) - (v.inventory?.reserved ?? 0));
+    const o = item.offer; // the BOUND offer — authoritative for this checkout attempt
 
-    if (p.status !== "ACTIVE" || v.status !== "ACTIVE" || !v.inventory) {
+    // Bound-offer integrity. `CartItem.offerId` is NOT NULL (9E-2); the FK
+    // guarantees the row exists unless the Offer was deleted mid-checkout.
+    if (!o || !item.offerId || o.variantId !== item.variantId) {
       problems.push(`“${p.name}” is no longer available.`);
       continue;
     }
-    if (available < item.quantity) {
+
+    const catalogEligible = p.status === "ACTIVE" && v.status === "ACTIVE";
+    const offerLive = o.status === "ACTIVE" && o.seller.status === "APPROVED";
+    if (!catalogEligible || !offerLive) {
+      problems.push(`“${p.name}” is no longer available.`);
+      continue;
+    }
+
+    // Availability from OfferInventory (quantity - reserved) — NEVER Variant.stock.
+    const available = o.inventory
+      ? Math.max(0, o.inventory.quantity - o.inventory.reserved)
+      : 0;
+    if (!o.inventory || available < item.quantity) {
       problems.push(
         `“${p.name}” — only ${available} left, but your cart has ${item.quantity}.`,
       );
       continue;
     }
+
+    sellerIds.add(o.seller.id);
+    seller = o.seller;
 
     const optionSummary = v.optionValues
       .slice()
@@ -445,6 +534,8 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     lines.push({
       productId: p.id,
       variantId: v.id,
+      offerId: o.id,
+      sellerId: o.seller.id,
       name: p.name,
       variantLabel: optionSummary || null,
       sku: v.sku,
@@ -454,9 +545,9 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         variantImageUrl: v.imageUrl,
         slug: p.slug,
       }),
-      unitPrice: v.price,
+      unitPrice: o.price, // the BOUND Offer price — the authoritative checkout price
       quantity: item.quantity,
-      lineTotal: v.price * item.quantity,
+      lineTotal: o.price * item.quantity,
     });
   }
 
@@ -467,16 +558,31 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       error: `${problems.join(" ")} Update your cart and try again.`,
     };
   }
-  if (lines.length === 0) {
+  if (lines.length === 0 || !seller) {
     return { ok: false, code: "EMPTY", error: "Your cart has nothing available to order." };
   }
 
-  // 4. Server-authoritative totals. The shipping fee is the ACTIVE method's
-  //    current DB rate (after the store-wide free-shipping rule) — never a
-  //    browser value.
+  // 3b. Single-seller gate (9E-3C-2). Multi-seller checkout is Phase 9E-3E/F,
+  //     gated by `marketplace.multiSellerCheckout` (false). Until then a cart
+  //     MUST resolve to exactly one distinct Seller — abort before any write.
+  //     The customer-facing message is deliberately generic.
+  if (sellerIds.size !== 1) {
+    return { ok: false, code: "SELLER", error: GENERIC_SELLER_ERROR };
+  }
+  // `seller` is non-null here (set for every line; `lines` is non-empty). A
+  // `const` alias so the closure below keeps the narrowing.
+  const soSeller = seller;
+
+  // 4. Server-authoritative totals. `subtotal` is Σ (bound Offer.price × qty).
+  //    The shipping fee is the ACTIVE method's current DB rate (after the
+  //    store-wide free-shipping rule) — never a browser value.
   const subtotal = lines.reduce((n, l) => n + l.lineTotal, 0);
   const freeThreshold = await getFreeShippingThreshold();
   const shippingFee = effectiveShippingFee(method.rate, subtotal, freeThreshold);
+  // The per-seller free-shipping result for the SellerOrder snapshot (9E-3B):
+  // true only when the store threshold actually zeroed a non-zero method rate.
+  const freeShippingApplied =
+    freeThreshold > 0 && subtotal >= freeThreshold && method.rate > 0;
 
   // 4b. Coupon — re-read the code stored on the cart, re-validate against the
   //     recalculated subtotal and the server clock. The browser never sends a
@@ -531,6 +637,12 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
 
   const grandTotal = Math.max(0, subtotal + shippingFee - discountTotal);
 
+  // SellerOrder money (9E-3B). One seller this phase, so it carries the whole
+  // order: merchandise = subtotal, discountAllocated = the full discount,
+  // shippingFee = the whole order's shipping. total must equal grandTotal.
+  const sellerCommissionAmount = roundHalfUp((subtotal * soSeller.commissionRate) / 10000);
+  const sellerOrderTotal = subtotal - discountTotal + shippingFee;
+
   const orderNumber = await nextOrderNumber();
   const sameAddress = input.shippingAddressId === input.billingAddressId;
   const shippingJson = JSON.stringify(addressSnapshot(shipAddr));
@@ -567,30 +679,47 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         }
       }
 
-      // 4b. Deduct inventory through the Step 6 primitive: records a SALE
-      //     InventoryAdjustment, keeps the Variant.stock mirror in sync, and is
-      //     row-locked so it can't oversell. Any failure rolls the whole
-      //     transaction back (including the cart conversion).
+      // 4b. Commit stock. MVP (9E-3B §11): committed at order creation — online
+      //     payment is dormant, so there is no reservation hold. For each line:
+      //       1. `OfferInventory` SALE commit (the marketplace inventory writer)
+      //       2. for a FIRST_PARTY offer, the legacy `Inventory` SALE deduction
+      //          in the SAME transaction — the two move together or roll back
+      //          together (9E-3B migration-window guard). A 3P offer has no
+      //          legacy Inventory row, so it is skipped (can't occur this phase).
+      //     Any failure rolls the whole transaction back (incl. cart conversion).
       for (const l of lines) {
-        const res = await adjustStock(
-          {
-            variantId: l.variantId,
-            delta: -l.quantity,
-            reason: "SALE",
-            note: `Order ${orderNumber}`,
-            actorUserId: user.id,
-          },
+        const offerRes = await commitOfferStockForSale(
+          { offerId: l.offerId, units: l.quantity, note: `Order ${orderNumber}`, actorUserId: user.id },
           tx,
         );
-        if (!res.ok) {
+        if (!offerRes.ok) {
           throw new CheckoutError(
             "STOCK",
             `“${l.name}” just sold out. Your order was not placed.`,
           );
         }
+        if (soSeller.type === "FIRST_PARTY") {
+          const invRes = await adjustStock(
+            {
+              variantId: l.variantId,
+              delta: -l.quantity,
+              reason: "SALE",
+              note: `Order ${orderNumber}`,
+              actorUserId: user.id,
+            },
+            tx,
+          );
+          if (!invRes.ok) {
+            throw new CheckoutError(
+              "STOCK",
+              `“${l.name}” just sold out. Your order was not placed.`,
+            );
+          }
+        }
       }
 
-      // 4c. The order itself.
+      // 4c. The Parent Order — the customer / payment / billing / coupon /
+      //     grand-total record. Unchanged from the customer's point of view.
       const order = await tx.order.create({
         data: {
           orderNumber,
@@ -620,7 +749,6 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           shippingAddress: shippingJson,
           billingAddress: billingJson,
           note: note || null,
-          items: { create: lines },
           events: {
             create: [
               {
@@ -633,6 +761,65 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         },
         select: { id: true, orderNumber: true },
       });
+
+      // 4c-ii. Exactly ONE SellerOrder (9E-3C-2). Its money comes from THIS
+      //     checkout's calculated values — never a recomputation of history.
+      const sellerOrder = await tx.sellerOrder.create({
+        data: {
+          orderId: order.id,
+          sellerId: soSeller.id,
+          sellerName: soSeller.displayName,
+          sellerType: soSeller.type,
+          supportEmail: soSeller.supportEmail,
+          commissionRate: soSeller.commissionRate,
+          shippingMethodCode: method.code,
+          shippingMethodName: method.name,
+          shippingFee,
+          platformShippingSubsidy: 0,
+          freeShippingApplied,
+          merchandiseSubtotal: subtotal,
+          discountAllocated: discountTotal,
+          discountFundedBy: "PLATFORM",
+          commissionAmount: sellerCommissionAmount,
+          total: sellerOrderTotal,
+          status: "PENDING_PAYMENT",
+          settlementStatus: "PENDING_CAPTURE",
+        },
+        select: { id: true },
+      });
+
+      // 4c-iii. OrderItems — linked to BOTH the Order and its one SellerOrder,
+      //     snapshotting the bound Offer / Seller / commission rate. `unitPrice`
+      //     is the bound Offer price (set when `lines` was built).
+      await tx.orderItem.createMany({
+        data: lines.map((l) => ({
+          orderId: order.id,
+          sellerOrderId: sellerOrder.id,
+          productId: l.productId,
+          variantId: l.variantId,
+          offerId: l.offerId,
+          sellerId: l.sellerId,
+          commissionRate: soSeller.commissionRate,
+          name: l.name,
+          variantLabel: l.variantLabel,
+          sku: l.sku,
+          imageUrl: l.imageUrl,
+          unitPrice: l.unitPrice,
+          quantity: l.quantity,
+          lineTotal: l.lineTotal,
+        })),
+      });
+
+      // 4c-iv. One-seller safety (9E-3C-2 §20). Belt-and-braces: we created
+      //     exactly one SellerOrder above; assert it and that every line links
+      //     to it before the transaction commits.
+      const soCount = await tx.sellerOrder.count({ where: { orderId: order.id } });
+      const linkedItems = await tx.orderItem.count({
+        where: { orderId: order.id, sellerOrderId: sellerOrder.id, sellerId: soSeller.id },
+      });
+      if (soCount !== 1 || linkedItems !== lines.length) {
+        throw new CheckoutError("VALIDATION", "We couldn’t complete your order. Please try again.");
+      }
 
       // 4d. Record the coupon redemption (authoritative for usage limits) and
       //     bump the loose display mirror. The row is written inside the same
