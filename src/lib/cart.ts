@@ -55,6 +55,13 @@ export type CartLineDTO = {
   slug: string;
   name: string;
   variantId: string;
+  /**
+   * The Offer this line is bound to (Phase 9E-1) — server data, not rendered.
+   * `null` when the line predates the backfill or its bound Offer was deleted.
+   * The 9E-1 read path does NOT re-pick this on load (no silent seller switch);
+   * price / availability display still resolve the winning offer live (9D-E).
+   */
+  boundOfferId: string | null;
   sku: string;
   variantLabel: string;
   optionSummary: string;
@@ -241,6 +248,7 @@ function lineDTO(item: CartItemRow): CartLineDTO {
     slug: p.slug,
     name: p.name,
     variantId: v.id,
+    boundOfferId: item.offerId,
     sku: v.sku,
     variantLabel: optionSummary,
     optionSummary,
@@ -434,6 +442,15 @@ function clearGuestCookie(store: Awaited<ReturnType<typeof cookies>>) {
 
 type ValidatedVariant = {
   id: string;
+  /**
+   * The winning Offer for this variant (Phase 9E-1). The add-to-cart / merge
+   * write paths bind it onto `CartItem.offerId`. `null` only when there is a
+   * display-eligible offer but none is in stock (the caller returns
+   * OUT_OF_STOCK before writing, so a real line is never stored with a null
+   * `offerId` via this path — a null there comes from the backfill or a later
+   * offer deletion).
+   */
+  offerId: string | null;
   price: number;
   productId: string;
   productName: string;
@@ -499,6 +516,7 @@ async function validateVariant(
     ok: true,
     variant: {
       id: v.id,
+      offerId: win?.offerId ?? null,
       price: win?.price ?? 0,
       productId: v.productId,
       productName: v.product.name,
@@ -566,11 +584,15 @@ export async function addToCartCore(input: {
 
   // Atomic upsert with the cap applied inside the statement, so two concurrent
   // adds of the same variant can't push quantity past what's available.
+  // Phase 9E-1: `offerId` is the SERVER-resolved winning Offer for this variant
+  // (`check.variant.offerId`); it is set on insert and refreshed on conflict.
+  const boundOfferId = check.variant.offerId;
   const rows = await prisma.$queryRaw<{ quantity: number }[]>`
-    INSERT INTO "CartItem" ("id", "cartId", "variantId", "quantity", "priceSnapshot", "createdAt", "updatedAt")
-    VALUES (gen_random_uuid()::text, ${cartId}, ${variantId}, LEAST(${addQty}, ${cap}), ${check.variant.price}, now(), now())
+    INSERT INTO "CartItem" ("id", "cartId", "variantId", "offerId", "quantity", "priceSnapshot", "createdAt", "updatedAt")
+    VALUES (gen_random_uuid()::text, ${cartId}, ${variantId}, ${boundOfferId}, LEAST(${addQty}, ${cap}), ${check.variant.price}, now(), now())
     ON CONFLICT ("cartId", "variantId") DO UPDATE
       SET "quantity" = LEAST("CartItem"."quantity" + ${addQty}, ${cap}),
+          "offerId" = ${boundOfferId},
           "priceSnapshot" = ${check.variant.price},
           "updatedAt" = now()
     RETURNING "quantity"`;
@@ -610,6 +632,9 @@ export async function updateCartItemCore(input: {
   }
 
   const finalQty = Math.min(quantity, check.variant.available, MAX_QTY_PER_LINE);
+  // Phase 9E-1 note: a quantity change does NOT re-bind `offerId` (offer binding
+  // is an add-to-cart / merge concern — spec §7/§15). `priceSnapshot` keeps its
+  // existing refresh-on-write behaviour.
   const updated = await prisma.cartItem.updateMany({
     where: { cartId: cart.id, variantId: input.variantId },
     data: { quantity: finalQty, priceSnapshot: check.variant.price, updatedAt: new Date() },
@@ -784,13 +809,20 @@ export async function mergeGuestCartCore(): Promise<MergeResult> {
 
       await tx.cartItem.upsert({
         where: { cartId_variantId: { cartId: targetId, variantId: gi.variantId } },
+        // Phase 9E-1: newly-created and refreshed merged lines carry the
+        // server-resolved winning Offer.
         create: {
           cartId: targetId,
           variantId: gi.variantId,
+          offerId: check.variant.offerId,
           quantity: finalQty,
           priceSnapshot: check.variant.price,
         },
-        update: { quantity: finalQty, priceSnapshot: check.variant.price },
+        update: {
+          quantity: finalQty,
+          offerId: check.variant.offerId,
+          priceSnapshot: check.variant.price,
+        },
       });
 
       if (finalQty < requested) {

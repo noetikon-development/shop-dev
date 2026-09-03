@@ -543,6 +543,15 @@ model CartItem {
   id            String   @id @default(cuid())
   cartId        String
   variantId     String
+  // Marketplace offer binding (Phase 9E-1). The specific Seller Offer this line
+  // is bound to — resolved SERVER-SIDE at add-to-cart with the buy-box rule and
+  // refreshed on every add-to-cart write. Nullable: `null` = no eligible Offer
+  // at bind time (or the bound Offer was later deleted — FK is onDelete SetNull).
+  // NOT yet the authoritative billing record — that stays an Order-time concern.
+  // `variantId` is retained permanently as the catalog anchor. The
+  // `@@unique([cartId, variantId])` constraint is unchanged in 9E-1; the
+  // multi-seller uniqueness change is Phase 9E-2.
+  offerId       String?
   quantity      Int
   // Display cache only — the authoritative price is always Variant.price, read
   // live on every getCart / mutation. Refreshed whenever the item is written.
@@ -552,10 +561,12 @@ model CartItem {
 
   cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
   variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)
 
   @@unique([cartId, variantId])
   @@index([cartId])
   @@index([variantId])
+  @@index([offerId])
 }
 
 // ----------------------------------------------------------------------------
@@ -1215,6 +1226,9 @@ model Offer {
   seller    Seller          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   variant   Variant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
   inventory OfferInventory?
+  // Back-relation only — the FK column lives on CartItem (Phase 9E-1). A deleted
+  // Offer nulls the binding (onDelete: SetNull on CartItem.offerId).
+  cartItems CartItem[]
 
   // One offer per (seller, variant, condition).
   @@unique([sellerId, variantId, condition])

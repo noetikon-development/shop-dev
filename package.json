@@ -35,6 +35,10 @@
     "test:9dd": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9dd.ts",
     "parity:9de": "node --env-file=.env --conditions=react-server --import tsx scripts/parity-cart-9de.ts",
     "test:9de": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9de.ts",
+    "db:migrate:9e1": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260903130000_cartitem_offer_binding.sql",
+    "db:backfill:cart-offers": "node --env-file=.env --import tsx scripts/backfill-cartitem-offer-9e1.ts",
+    "reconcile:9e1": "node --env-file=.env --import tsx scripts/reconcile-cartitem-offer-9e1.ts",
+    "test:9e1": "node --env-file=.env --import tsx scripts/test-9e1.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"
   },
