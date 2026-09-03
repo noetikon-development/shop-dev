@@ -46,6 +46,27 @@ export type CardOffer = OfferCandidate & { compareAtPrice: number | null };
 export type StockOfferCandidate = OfferCandidate & { reorderPoint: number };
 
 /**
+ * A candidate carrying everything the "one winning offer supplies price AND
+ * availability" computation needs (Phase 9D-E cart, reused by the PDP): the
+ * compare-at price and the OfferInventory reorder point on top of `OfferCandidate`.
+ */
+export type FullOfferCandidate = CardOffer & { reorderPoint: number };
+
+/**
+ * The winning offer for one variant, reduced to what a storefront line needs.
+ * `price` / `compareAtPrice` and `available` / `reorderPoint` ALWAYS come from
+ * the SAME offer (Phase 9D-E §9). `null` from the resolver = no eligible
+ * in-stock offer → the caller shows unavailable, never a stale `Variant` value.
+ */
+export type WinningOfferView = {
+  offerId: string;
+  price: number;
+  compareAtPrice: number | null;
+  available: number;
+  reorderPoint: number;
+};
+
+/**
  * Product-card pricing derived from the winning offers across a product's ACTIVE
  * variants (Phase 9D-A). `minPrice` is `null` only when NO variant has a
  * display-eligible offer — the card then shows no price and the existing

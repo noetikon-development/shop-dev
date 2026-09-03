@@ -23,6 +23,8 @@ import type {
   CardOffer,
   CatalogCardPricing,
   StockOfferCandidate,
+  FullOfferCandidate,
+  WinningOfferView,
 } from "@/lib/marketplace/types";
 
 /** True when a candidate is allowed into the buy box at all. */
@@ -148,8 +150,34 @@ export function resolveVariantAvailability(offers: StockOfferCandidate[]): {
   available: number;
   reorderPoint: number;
 } {
+  const view = resolveWinningOfferView(offers.map((o) => ({ ...o, compareAtPrice: null })));
+  return view
+    ? { available: view.available, reorderPoint: view.reorderPoint }
+    : { available: 0, reorderPoint: 0 };
+}
+
+// ---------------------------------------------------------------------------
+// Winning-offer view (Phase 9D-E) — pure, STOCK-AWARE, single source
+// ---------------------------------------------------------------------------
+
+/**
+ * The one winning offer for a variant, reduced to `{ price, compareAtPrice,
+ * available, reorderPoint }` — all four from the SAME offer (`pickWinningOffer`).
+ * `null` when no offer is ACTIVE + APPROVED-seller + in stock. Callers must NOT
+ * fall back to `Variant.price` / `Inventory` on `null` — the line is unavailable.
+ *
+ * This is the shared core behind the cart line DTO / cart validation (9D-E) and
+ * the PDP per-variant price + stock (9D-B / 9D-D), so the two can never diverge.
+ */
+export function resolveWinningOfferView(offers: FullOfferCandidate[]): WinningOfferView | null {
   const winner = pickWinningOffer(offers);
-  if (!winner) return { available: 0, reorderPoint: 0 };
+  if (!winner) return null;
   const row = offers.find((o) => o.offerId === winner.offerId)!;
-  return { available: winner.available, reorderPoint: row.reorderPoint };
+  return {
+    offerId: winner.offerId,
+    price: row.price,
+    compareAtPrice: row.compareAtPrice,
+    available: winner.available,
+    reorderPoint: row.reorderPoint,
+  };
 }

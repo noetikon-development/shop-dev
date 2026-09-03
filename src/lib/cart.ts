@@ -11,6 +11,11 @@ import {
   type EvaluableCoupon,
 } from "@/lib/coupons";
 import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
+import {
+  isEligibleForDisplayPrice,
+  resolveWinningOfferView,
+} from "@/lib/marketplace/buy-box-rule";
+import type { FullOfferCandidate } from "@/lib/marketplace/types";
 
 /**
  * Server-authoritative shopping cart.
@@ -21,9 +26,19 @@ import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
  *                              httpOnly `axiaro_cart` cookie
  * The browser never sends a cart id / item id / price — it can only name a
  * variant and a quantity. Every mutation re-validates the variant, the product
- * and variant status, the live price and the available inventory
- * (quantity - reserved). A cart is NOT a stock reservation: nothing here ever
- * touches Inventory.reserved.
+ * and variant status, and the live commercial terms.
+ *
+ * Phase 9D-E: the live line price, compare-at and availability come from the
+ * winning `Offer` + `OfferInventory` for the line's `Variant` (the SAME offer
+ * for all three — `resolveWinningOfferView`), NOT `Variant.price` /
+ * `Inventory`. `CartItem` is still keyed by `variantId` only — the winning
+ * offer is resolved dynamically on every read/mutation; there is no
+ * `CartItem.offerId`. When no offer is eligible the line is explicitly
+ * unavailable — it never falls back to a stale `Variant` value.
+ *
+ * A cart is NOT a stock reservation: nothing here ever touches inventory
+ * reserved counts. Checkout keeps its own independent `Inventory` row-locked
+ * reservation authority (unchanged).
  */
 
 export const GUEST_COOKIE = "axiaro_cart";
@@ -44,12 +59,12 @@ export type CartLineDTO = {
   variantLabel: string;
   optionSummary: string;
   imageUrl: string;
-  unitPrice: number; // authoritative live price (centavos)
-  compareAtPrice: number | null;
+  unitPrice: number; // authoritative live price — winning Offer.price (centavos)
+  compareAtPrice: number | null; // winning Offer.compareAtPrice (same offer)
   priceSnapshot: number; // stored display cache — may be stale
   priceChanged: boolean; // snapshot !== live price
   quantity: number;
-  available: number; // max(0, Inventory.quantity - Inventory.reserved)
+  available: number; // max(0, OfferInventory.quantity - OfferInventory.reserved) of the winning offer
   maxStock: number; // alias of `available` (storefront compatibility)
   lineTotal: number; // unitPrice * min(quantity, available); 0 when unavailable
   freeShipping: boolean;
@@ -114,8 +129,6 @@ const cartInclude = {
           id: true,
           sku: true,
           status: true,
-          price: true,
-          compareAtPrice: true,
           imageUrl: true,
           productId: true,
           product: {
@@ -133,7 +146,20 @@ const cartInclude = {
               },
             },
           },
-          inventory: { select: { quantity: true, reserved: true } },
+          // Phase 9D-E: the winning Offer supplies price / compare-at /
+          // availability. Nested here so a whole cart costs ONE offers query
+          // (Prisma loads it via `WHERE variantId IN (...)`), not one per line.
+          offers: {
+            select: {
+              id: true,
+              status: true,
+              price: true,
+              compareAtPrice: true,
+              createdAt: true,
+              seller: { select: { type: true, status: true } },
+              inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
+            },
+          },
           optionValues: {
             select: {
               optionValue: {
@@ -158,16 +184,43 @@ type CartItemRow = CartWithItems["items"][number];
 // DTO mapping
 // ---------------------------------------------------------------------------
 
+type OfferRowForCart = {
+  id: string;
+  status: string;
+  price: number;
+  compareAtPrice: number | null;
+  createdAt: Date;
+  seller: { type: string; status: string };
+  inventory: { quantity: number; reserved: number; reorderPoint: number } | null;
+};
+
+/** Map a nested cart offer row onto the pure winning-offer input shape. */
+function toOfferCandidate(o: OfferRowForCart): FullOfferCandidate {
+  return {
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as FullOfferCandidate["sellerStatus"],
+    offerStatus: o.status as FullOfferCandidate["offerStatus"],
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
+    price: o.price,
+    compareAtPrice: o.compareAtPrice,
+    createdAt: o.createdAt,
+  };
+}
+
 function lineDTO(item: CartItemRow): CartLineDTO {
   const v = item.variant;
   const p = v.product;
-  const available = Math.max(
-    0,
-    (v.inventory?.quantity ?? 0) - (v.inventory?.reserved ?? 0),
-  );
-  const purchasable =
-    p.status === "ACTIVE" && v.status === "ACTIVE" && Boolean(v.inventory);
-  const unavailable = !purchasable || available <= 0;
+
+  // Phase 9D-E: price / compare-at / availability all come from ONE winning
+  // offer. `null` → no eligible in-stock offer → the line is unavailable; we
+  // never read `Variant.price` / `Inventory` here.
+  const win = resolveWinningOfferView(v.offers.map(toOfferCandidate));
+  const catalogEligible = p.status === "ACTIVE" && v.status === "ACTIVE";
+  const available = win?.available ?? 0;
+  const unavailable = !catalogEligible || win === null || available <= 0;
 
   const optionSummary = v.optionValues
     .slice()
@@ -175,7 +228,11 @@ function lineDTO(item: CartItemRow): CartLineDTO {
     .map((ov) => ov.optionValue.value)
     .join(" · ");
 
-  const unitPrice = v.price;
+  // Struck / displayed price. Live winning-offer price when there is one;
+  // otherwise the cart-local `priceSnapshot` (never `Variant.price`) so an
+  // already-unavailable line never renders ₱0.
+  const unitPrice = win?.price ?? item.priceSnapshot;
+  const compareAtPrice = win?.compareAtPrice ?? null;
   const buyable = Math.min(item.quantity, available);
 
   return {
@@ -194,9 +251,9 @@ function lineDTO(item: CartItemRow): CartLineDTO {
       slug: p.slug,
     }),
     unitPrice,
-    compareAtPrice: v.compareAtPrice,
+    compareAtPrice,
     priceSnapshot: item.priceSnapshot,
-    priceChanged: item.priceSnapshot !== unitPrice,
+    priceChanged: win !== null && item.priceSnapshot !== unitPrice,
     quantity: item.quantity,
     available,
     maxStock: available,
@@ -398,10 +455,21 @@ async function validateVariant(
     select: {
       id: true,
       status: true,
-      price: true,
       productId: true,
       product: { select: { id: true, name: true, slug: true, status: true } },
-      inventory: { select: { quantity: true, reserved: true } },
+      // Phase 9D-E: eligibility + price + availability from the winning Offer,
+      // not `Variant.price` / `Inventory`.
+      offers: {
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          compareAtPrice: true,
+          createdAt: true,
+          seller: { select: { type: true, status: true } },
+          inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
+        },
+      },
     },
   });
 
@@ -415,20 +483,27 @@ async function validateVariant(
   if (v.status !== "ACTIVE") {
     return { ok: false, code: "INACTIVE_VARIANT", message: "That option isn’t available right now." };
   }
-  if (!v.inventory) {
-    return { ok: false, code: "NO_INVENTORY", message: "That item isn’t available right now." };
+
+  const candidates = v.offers.map(toOfferCandidate);
+  // No ACTIVE offer from an APPROVED seller — structurally not for sale. Mirrors
+  // the old "no Inventory row" branch (same customer-facing wording).
+  if (!candidates.some(isEligibleForDisplayPrice)) {
+    return { ok: false, code: "NO_OFFER", message: "That item isn’t available right now." };
   }
 
-  const available = Math.max(0, v.inventory.quantity - v.inventory.reserved);
+  // A sellable offer exists; `available` is 0 when every such offer is out of
+  // stock → the caller returns the existing OUT_OF_STOCK message, exactly as the
+  // pre-9D-E `available <= 0` path did.
+  const win = resolveWinningOfferView(candidates);
   return {
     ok: true,
     variant: {
       id: v.id,
-      price: v.price,
+      price: win?.price ?? 0,
       productId: v.productId,
       productName: v.product.name,
       productSlug: v.product.slug,
-      available,
+      available: win?.available ?? 0,
     },
   };
 }

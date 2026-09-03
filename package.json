@@ -33,6 +33,8 @@
     "test:9dc": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9dc.ts",
     "parity:9dd": "node --env-file=.env --conditions=react-server --import tsx scripts/parity-stock-9dd.ts",
     "test:9dd": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9dd.ts",
+    "parity:9de": "node --env-file=.env --conditions=react-server --import tsx scripts/parity-cart-9de.ts",
+    "test:9de": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9de.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"
   },

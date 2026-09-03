@@ -7,10 +7,15 @@ import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import { getStoreBrand } from "@/lib/site-settings";
 import {
   computeCatalogCardPricing,
-  pickWinningOffer,
   resolveVariantAvailability,
+  resolveWinningOfferView,
 } from "@/lib/marketplace/buy-box-rule";
-import type { CardOffer, OfferCandidate, StockOfferCandidate } from "@/lib/marketplace/types";
+import type {
+  CardOffer,
+  FullOfferCandidate,
+  OfferCandidate,
+  StockOfferCandidate,
+} from "@/lib/marketplace/types";
 import type {
   CategoryNode,
   ProductCardView,
@@ -791,10 +796,12 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
 
   type PdpOfferRow = (typeof activeVariants)[number]["offers"][number];
 
-  // Per-variant winning offer — the FULL stock-aware buy-box rule. The SAME
-  // winning offer supplies price + compare-at (Phase 9D-B) AND available units +
-  // reorder point (Phase 9D-D). Stock no longer reads `Variant.stock`.
-  const stockCandidate = (o: PdpOfferRow): StockOfferCandidate => ({
+  // Per-variant winning offer — the FULL stock-aware buy-box rule via the shared
+  // `resolveWinningOfferView` (also the cart's source — Phase 9D-E — so PDP and
+  // cart price/availability can never diverge). The SAME winning offer supplies
+  // price + compare-at (9D-B) AND available units + reorder point (9D-D). Stock
+  // never reads `Variant.stock`.
+  const fullCandidate = (o: PdpOfferRow): FullOfferCandidate => ({
     offerId: o.id,
     sellerId: "",
     sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
@@ -803,6 +810,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
     reorderPoint: o.inventory?.reorderPoint ?? 0,
     price: o.price,
+    compareAtPrice: o.compareAtPrice,
     createdAt: o.createdAt,
   });
   const variantOffer = (
@@ -813,12 +821,13 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     available: number;
     reorderPoint: number;
   } => {
-    const candidates = offers.map(stockCandidate);
-    const winner = pickWinningOffer(candidates);
-    const { available, reorderPoint } = resolveVariantAvailability(candidates);
-    if (!winner) return { price: null, compareAtPrice: null, available, reorderPoint };
-    const row = offers.find((o) => o.id === winner.offerId)!;
-    return { price: row.price, compareAtPrice: row.compareAtPrice, available, reorderPoint };
+    const win = resolveWinningOfferView(offers.map(fullCandidate));
+    return {
+      price: win?.price ?? null,
+      compareAtPrice: win?.compareAtPrice ?? null,
+      available: win?.available ?? 0,
+      reorderPoint: win?.reorderPoint ?? 0,
+    };
   };
 
   // One resolution per ACTIVE variant, reused for totalStock, the rollup status
@@ -833,7 +842,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
   // card shows (Phase 9D-A), so the PDP and the card agree before any variant is
   // chosen. `Product.price` is only a production liveness guard.
   const rangePricing = computeCatalogCardPricing(
-    activeVariants.map((v) => v.offers.map((o): CardOffer => ({ ...stockCandidate(o), compareAtPrice: o.compareAtPrice }))),
+    activeVariants.map((v) => v.offers.map(fullCandidate)),
   );
   if (rangePricing.minPrice == null) {
     const msg = `[loadProductBySlug] no resolvable Axiaro offer price for ${p.slug} — 1P write-through gap`;
