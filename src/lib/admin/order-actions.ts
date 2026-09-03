@@ -30,14 +30,16 @@ import { sendOrderCancelled, sendOrderProcessing } from "@/lib/email/notificatio
  *   Step 13 fulfilment actions so courier / tracking / timestamps are captured.
  * - Every transition is validated server-side against `canTransition`; the client
  *   cannot post an arbitrary status, and an admin can NEVER set PAID by hand.
- * - Cancellation reverses the order's SALE inventory effect (Phase 9E-3D-1):
- *   an offer-native order (placed by the 9E-3C-2 writer — detected by the
- *   presence of a SALE `OfferAdjustment`) restores `OfferInventory` per
- *   `OrderItem.offerId` AND the legacy `Inventory` (the FIRST_PARTY 1P mirror),
- *   in ONE transaction, locking OfferInventory before Inventory. A legacy
- *   (pre-9E-3C-2) order restores `Inventory` only, exactly as before. It never
- *   touches `Variant.stock` directly and never restocks twice — the atomic
- *   `Order.status` gate makes the whole reversal run at most once.
+ * - Cancellation reverses the order's SALE inventory effect. An offer-native
+ *   order (detected by the presence of a SALE `OfferAdjustment`) restores
+ *   `OfferInventory` per `OrderItem.offerId` and creates an
+ *   `OfferAdjustment(CANCELLATION)` — that is the WHOLE reversal since Phase
+ *   9E-3D-5; the legacy `Inventory` mirror is not touched. A legacy
+ *   (pre-retirement) order restores `Inventory` from its SALE
+ *   `InventoryAdjustment` rows, exactly as before (the historical fallback,
+ *   retained). It never touches `Variant.stock` directly and never restocks
+ *   twice — the atomic `Order.status` gate makes the whole reversal run at
+ *   most once.
  * - Every action records an `OrderEvent` and an `AdminAuditLog` entry.
  */
 
@@ -275,19 +277,17 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
 
       // 2. Reverse EXACTLY what the SALE deducted — symmetric by construction.
       //
-      //    An order is "offer-native" (placed by the 9E-3C-2 writer) when it
-      //    recorded at least one SALE `OfferAdjustment`. Such an order also
-      //    recorded SALE `InventoryAdjustment` rows for its FIRST_PARTY lines
-      //    (the 1P mirror). A legacy (pre-9E-3C-2) order recorded only
-      //    `InventoryAdjustment` SALE rows.
+      //    An order is "offer-native" when it recorded at least one SALE
+      //    `OfferAdjustment` (`note = "Order <num>"`). Since Phase 9E-3D-5 an
+      //    offer-native order records ONLY `OfferAdjustment` for its stock
+      //    movements — no `InventoryAdjustment`, no `Inventory` write. A legacy
+      //    (pre-retirement) order recorded only `InventoryAdjustment` SALE rows.
       //
       //    Offer-native  -> restore OfferInventory per `OrderItem.offerId` (the
-      //                     authoritative marketplace mapping, 9E-3D-1 §3) AND
-      //                     restore Inventory from the SALE `InventoryAdjustment`
-      //                     rows (the 1P mirror — same walk as legacy).
-      //    Legacy        -> restore Inventory only, unchanged.
-      //
-      //    LOCK ORDER (§12): OfferInventory FIRST, then Inventory.
+      //                     authoritative marketplace mapping, 9E-3D-1 §3). The
+      //                     `Inventory` mirror is NOT touched (9E-3D-5 §4/§12).
+      //    Legacy        -> restore Inventory from the SALE `InventoryAdjustment`
+      //                     rows, unchanged (9E-3D-5 §5 — the historical fallback).
       const saleOfferAdjustments = await tx.offerAdjustment.count({
         where: { reason: "SALE", note: `Order ${order.orderNumber}` },
       });
@@ -296,77 +296,70 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
 
       const soldBackByProduct = new Map<string, number>();
 
-      // 2a. OfferInventory reversal — offer-native only, per OrderItem.offerId.
       if (offerNative) {
+        // 2a. OfferInventory reversal — the WHOLE reversal, per OrderItem.offerId.
+        //     No Inventory row is read or locked (§12/§13).
         const items = await tx.orderItem.findMany({
-          where: { orderId, offerId: { not: null } },
+          where: { orderId },
           select: { id: true, offerId: true, quantity: true, productId: true },
         });
         for (const it of items) {
-          if (!it.offerId || it.quantity <= 0) continue;
-          const res = await restoreOfferStock(
+          if (it.quantity <= 0) continue;
+          if (it.offerId) {
+            const res = await restoreOfferStock(
+              {
+                offerId: it.offerId,
+                units: it.quantity,
+                reason: "CANCELLATION",
+                note: `Order ${order.orderNumber} cancelled · item ${it.id}`,
+                actorUserId: admin.user.id,
+              },
+              tx,
+            );
+            if (!res.ok) {
+              throw new Error(res.error ?? "Could not restore a line — cancellation aborted.");
+            }
+          }
+          // Restock tallies + soldCount roll-back come straight from the
+          // OrderItems (the SALE OfferAdjustment recorded the same quantity).
+          restockedUnits += it.quantity;
+          restockedLines += 1;
+          soldBackByProduct.set(
+            it.productId,
+            (soldBackByProduct.get(it.productId) ?? 0) + it.quantity,
+          );
+        }
+      } else {
+        // 2b. LEGACY fallback — one CANCELLATION per SALE InventoryAdjustment
+        //     this order recorded. Retained for a re-opened pre-retirement order
+        //     (§5 — do NOT delete this branch).
+        const saleAdjustments = await tx.inventoryAdjustment.findMany({
+          where: { reason: "SALE", note: `Order ${order.orderNumber}` },
+          select: {
+            delta: true,
+            inventory: { select: { variantId: true, variant: { select: { productId: true } } } },
+          },
+        });
+        for (const adj of saleAdjustments) {
+          const qty = -adj.delta; // SALE delta is negative → qty is positive
+          if (qty <= 0) continue;
+          const res = await adjustStock(
             {
-              offerId: it.offerId,
-              units: it.quantity,
+              variantId: adj.inventory.variantId,
+              delta: qty,
               reason: "CANCELLATION",
-              note: `Order ${order.orderNumber} cancelled · item ${it.id}`,
+              note: `Order ${order.orderNumber} cancelled`,
               actorUserId: admin.user.id,
             },
             tx,
           );
           if (!res.ok) {
-            throw new Error(res.error ?? "Could not restore a line — cancellation aborted.");
+            throw new Error(res.error ?? "Could not restock a line — cancellation aborted.");
           }
-        }
-      }
-
-      // 2b. Inventory reversal — one CANCELLATION per SALE InventoryAdjustment
-      //     this order recorded. Runs for BOTH paths (for an offer-native order
-      //     these rows are the FIRST_PARTY 1P mirror; for a legacy order they
-      //     are the whole SALE). Locked AFTER OfferInventory.
-      const saleAdjustments = await tx.inventoryAdjustment.findMany({
-        where: { reason: "SALE", note: `Order ${order.orderNumber}` },
-        select: {
-          delta: true,
-          inventory: { select: { variantId: true, variant: { select: { productId: true } } } },
-        },
-      });
-      for (const adj of saleAdjustments) {
-        const qty = -adj.delta; // SALE delta is negative → qty is positive
-        if (qty <= 0) continue;
-        const res = await adjustStock(
-          {
-            variantId: adj.inventory.variantId,
-            delta: qty,
-            reason: "CANCELLATION",
-            note: `Order ${order.orderNumber} cancelled`,
-            actorUserId: admin.user.id,
-          },
-          tx,
-        );
-        if (!res.ok) {
-          throw new Error(res.error ?? "Could not restock a line — cancellation aborted.");
-        }
-        restockedUnits += qty;
-        restockedLines += 1;
-        const pid = adj.inventory.variant.productId;
-        soldBackByProduct.set(pid, (soldBackByProduct.get(pid) ?? 0) + qty);
-      }
-
-      // 2c. If an offer-native order has NO SALE InventoryAdjustment rows (a
-      //     purely 3P order — not possible today, single-seller gate), the
-      //     soldCount roll-back still needs the quantities. Derive from the
-      //     OrderItems in that case.
-      if (offerNative && saleAdjustments.length === 0) {
-        const items = await tx.orderItem.findMany({
-          where: { orderId },
-          select: { quantity: true, productId: true },
-        });
-        for (const it of items) {
-          if (it.quantity <= 0) continue;
-          restockedUnits += it.quantity;
+          restockedUnits += qty;
           restockedLines += 1;
-          soldBackByProduct.set(it.productId, (soldBackByProduct.get(it.productId) ?? 0) + it.quantity);
+          const pid = adj.inventory.variant.productId;
+          soldBackByProduct.set(pid, (soldBackByProduct.get(pid) ?? 0) + qty);
         }
       }
 

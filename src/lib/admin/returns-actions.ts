@@ -39,11 +39,12 @@ import { hasPermission } from "@/lib/admin/rbac";
  * - Every transition is validated server-side against `canTransitionReturn` and
  *   applied with an atomic status-guarded `updateMany` (0 rows ⇒ concurrent
  *   change ⇒ abort). The client can never post an arbitrary status.
- * - `Order` / `OrderItem` are never mutated. Restock (Phase 9E-3D-1): an
- *   offer-native order (SALE `OfferAdjustment` present) restocks `OfferInventory`
- *   per `ReturnItem → OrderItem.offerId` AND the legacy `Inventory` (the 1P
- *   mirror) in one transaction, OfferInventory locked first; a legacy order
- *   restocks `Inventory` only. Idempotent via `ReturnRequest.restockedAt`.
+ * - `Order` / `OrderItem` are never mutated. Restock: an offer-native order
+ *   (SALE `OfferAdjustment` present) restocks `OfferInventory` per
+ *   `ReturnItem → OrderItem.offerId` and creates `OfferAdjustment(RETURN)` —
+ *   that is the WHOLE restock since Phase 9E-3D-5, the `Inventory` mirror is not
+ *   touched. A legacy (pre-retirement) order restocks `Inventory` only (the
+ *   retained fallback). Idempotent via `ReturnRequest.restockedAt`.
  * - Refunds are BOOKKEEPING ONLY — `Order.paymentStatus` is not touched, no
  *   Payment / gateway record is created.
  * - Every action writes an `AdminAuditLog` entry and schedules the matching
@@ -272,11 +273,11 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
       });
       if (res.count === 0) throw new StaleReturnError();
 
-      // Phase 9E-3D-1: an offer-native order (placed by the 9E-3C-2 writer —
-      // detected by a SALE `OfferAdjustment`) restocks `OfferInventory` per
-      // `ReturnItem → OrderItem.offerId` AND the legacy `Inventory` (the 1P
-      // mirror), in this transaction, OfferInventory locked first (§12). A
-      // legacy order restocks `Inventory` only, exactly as before.
+      // An offer-native order (detected by a SALE `OfferAdjustment`) restocks
+      // `OfferInventory` per `ReturnItem → OrderItem.offerId` and creates
+      // `OfferAdjustment(RETURN)` — the whole restock since Phase 9E-3D-5, no
+      // `Inventory` write / lock. A legacy (pre-retirement) order restocks
+      // `Inventory` only (the retained fallback, §7).
       const saleOfferAdjustments = await tx.offerAdjustment.count({
         where: { reason: "SALE", note: `Order ${ret.order.orderNumber}` },
       });
@@ -309,7 +310,8 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
         const bound = l.item.orderItemId ? offerByOrderItem.get(l.item.orderItemId) : undefined;
         const useOfferPath = offerNative && bound?.offerId;
 
-        // 1. OfferInventory restock — offer-native only. Locked FIRST.
+        // OFFER-NATIVE line — restore OfferInventory ONLY + OfferAdjustment(RETURN).
+        // No Inventory read / lock / write since Phase 9E-3D-5 (§6/§12/§13).
         if (useOfferPath) {
           const oRes = await restoreOfferStock(
             {
@@ -322,15 +324,16 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
             tx,
           );
           if (!oRes.ok) throw new Error(oRes.error ?? "Could not restock a line — receipt aborted.");
+          restocked.push({ name: l.item.name, qty: l.restockQuantity });
+          continue;
         }
 
-        // 2. Legacy Inventory restock. For an offer-native FIRST_PARTY line this
-        //    is the 1P mirror; for a legacy order it is the whole restock.
-        //    Skipped only for a (future) 3P line, which has no Inventory row.
+        // LEGACY line — restore the Inventory mirror (the whole restock for a
+        // pre-retirement order). Retained fallback (§7 — do NOT invent an Offer
+        // mapping). A (future) 3P line with no Inventory row is skipped.
         const isThirdParty = bound?.sellerType === "THIRD_PARTY";
         if (!l.item.variantId || isThirdParty) {
-          if (!useOfferPath) skippedRestock.push(l.item.name);
-          if (useOfferPath) restocked.push({ name: l.item.name, qty: l.restockQuantity });
+          skippedRestock.push(l.item.name);
           continue;
         }
         const inv = await tx.inventory.findUnique({
@@ -338,8 +341,7 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           select: { id: true },
         });
         if (!inv) {
-          if (!useOfferPath) skippedRestock.push(l.item.name);
-          if (useOfferPath) restocked.push({ name: l.item.name, qty: l.restockQuantity });
+          skippedRestock.push(l.item.name);
           continue;
         }
         const adj = await adjustStock(

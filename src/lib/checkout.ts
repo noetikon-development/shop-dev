@@ -3,7 +3,6 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
-import { adjustStock } from "@/lib/inventory";
 import { commitOfferStockForSale } from "@/lib/marketplace/offer-inventory";
 import { loadCart, activeRedemptionCount } from "@/lib/cart";
 import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
@@ -31,10 +30,9 @@ import {
  * customer's ACTIVE cart, re-validates every line against the live product /
  * variant / OFFER / OfferInventory / price, LOADS the chosen shipping method
  * and its rate from the database, recalculates the total, and does the whole
- * thing (cart -> CONVERTED, OfferInventory SALE commit + 1P Inventory mirror,
- * Parent Order + one SellerOrder + OrderItems) inside one transaction. Payment
- * is a later step: orders are created PENDING_PAYMENT and are never marked paid
- * here.
+ * thing (cart -> CONVERTED, OfferInventory SALE commit, Parent Order + one
+ * SellerOrder + OrderItems) inside one transaction. Payment is a later step:
+ * orders are created PENDING_PAYMENT and are never marked paid here.
  *
  * Phase 9E-3C-2 — marketplace-native, still single-seller:
  *   - the checkout PRICE is the bound `CartItem.offer.price` (9E-2). It is
@@ -46,18 +44,16 @@ import {
  *   - a cart must resolve to exactly ONE distinct Seller. Two sellers ->
  *     the whole checkout aborts before any write (multi-seller checkout is
  *     Phase 9E-3E/F, gated by `marketplace.multiSellerCheckout` = false).
- *   - stock commit is at order creation (no reservation hold — online payment
- *     is dormant). For the Axiaro FIRST_PARTY path the `OfferInventory` commit
- *     and the legacy `Inventory` SALE deduction run in the SAME transaction:
- *     both succeed or both roll back (the 9E-3B migration-window guard).
  *   - every new order gets exactly one `SellerOrder`; every `OrderItem` is
  *     linked to it and snapshots `offerId` / `sellerId` / `commissionRate`.
  *
- * Legacy `Inventory` writers NOT migrated in this phase (they belong to
- * Phase 9E-3D): `cancelOrderAction` (order-actions.ts) and the returns restock
- * (`admin/returns-actions.ts`). The admin manual stock edit
- * (`admin/inventory-actions.ts`) stays Inventory-first with its existing 9D-D
- * write-through to OfferInventory.
+ * Phase 9E-3D-5 — offer-chain inventory: the SALE stock commit is
+ * `OfferInventory` ONLY (`commitOfferStockForSale` + `OfferAdjustment(SALE)`).
+ * The legacy `Inventory` SALE mirror and its `InventoryAdjustment` row are no
+ * longer written. `InventoryAdjustment` is a FROZEN historical ledger from the
+ * 9E-3D-5 deploy onward — new SALE / CANCELLATION / RETURN movements live only
+ * in `OfferAdjustment`. The admin manual stock edit (`inventory-actions.ts`)
+ * stays dual-store until Phase 9E-3D-6.
  */
 
 /** 9E-3B §15 — round to the nearest centavo, halves away from zero. */
@@ -680,12 +676,16 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       }
 
       // 4b. Commit stock. MVP (9E-3B §11): committed at order creation — online
-      //     payment is dormant, so there is no reservation hold. For each line:
-      //       1. `OfferInventory` SALE commit (the marketplace inventory writer)
-      //       2. for a FIRST_PARTY offer, the legacy `Inventory` SALE deduction
-      //          in the SAME transaction — the two move together or roll back
-      //          together (9E-3B migration-window guard). A 3P offer has no
-      //          legacy Inventory row, so it is skipped (can't occur this phase).
+      //     payment is dormant, so there is no reservation hold.
+      //
+      //     Phase 9E-3D-5: `OfferInventory` is the ONLY inventory mutation for a
+      //     new offer-native order — the row-locked `commitOfferStockForSale`
+      //     (guards quantity < 0 / < reserved) plus its `OfferAdjustment(SALE)`.
+      //     The legacy `Inventory` SALE mirror + its `InventoryAdjustment` row
+      //     are NOT written any more. `InventoryAdjustment` is a frozen archive
+      //     of pre-retirement operations from the 9E-3D-5 deploy onward; new
+      //     SALEs live only in `OfferAdjustment`.
+      //
       //     Any failure rolls the whole transaction back (incl. cart conversion).
       for (const l of lines) {
         const offerRes = await commitOfferStockForSale(
@@ -697,24 +697,6 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
             "STOCK",
             `“${l.name}” just sold out. Your order was not placed.`,
           );
-        }
-        if (soSeller.type === "FIRST_PARTY") {
-          const invRes = await adjustStock(
-            {
-              variantId: l.variantId,
-              delta: -l.quantity,
-              reason: "SALE",
-              note: `Order ${orderNumber}`,
-              actorUserId: user.id,
-            },
-            tx,
-          );
-          if (!invRes.ok) {
-            throw new CheckoutError(
-              "STOCK",
-              `“${l.name}” just sold out. Your order was not placed.`,
-            );
-          }
         }
       }
 

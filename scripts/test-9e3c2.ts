@@ -25,8 +25,8 @@
  *   M  commissionRate == 0 for Axiaro
  *   N  CouponRedemption written once, discount allocated to the SellerOrder
  *   O  Cart converts only on success (abort leaves it ACTIVE)
- *   P  OfferInventory deduction == legacy Inventory deduction (Axiaro)
- *   Q  a failing Inventory mirror rolls back the OfferInventory commit too
+ *   P  9E-3D-5: OfferInventory deducted; legacy Inventory UNCHANGED; zero SALE InventoryAdjustment
+ *   Q  9E-3D-5: OfferInventory is the sole checkout gate (frozen Inventory ignored)
  *   R  reconciliation: grandTotal == SellerOrder.total == merch - disc + ship
  *   S  static: no Variant.price in the checkout price path; no resolveWinningOfferView;
  *      feature gate false; no seller/offer-count auto-enable
@@ -119,20 +119,14 @@ async function runCheckoutCore(
   if (converted === 0) return { ok: false, code: "ALREADY_ORDERED" };
 
   for (const l of lines) {
-    // OfferInventory SALE commit (keep in sync with offer-inventory.ts)
+    // Phase 9E-3D-5: OfferInventory SALE commit ONLY — no Inventory mirror, no
+    // InventoryAdjustment, no Variant.stock write. (keep in sync with
+    // src/lib/checkout.ts + src/lib/marketplace/offer-inventory.ts)
     const locked = await tx.$queryRawUnsafe<{ id: string; quantity: number; reserved: number }[]>(`SELECT "id","quantity","reserved" FROM "OfferInventory" WHERE "offerId"=$1 FOR UPDATE`, l.offerId);
     const oi = locked[0];
     if (!oi || oi.quantity - l.quantity < 0 || oi.quantity - l.quantity < oi.reserved) throw new Rollback(); // -> STOCK
     await tx.offerInventory.update({ where: { id: oi.id }, data: { quantity: oi.quantity - l.quantity } });
     await tx.offerAdjustment.create({ data: { offerInventoryId: oi.id, previousQuantity: oi.quantity, delta: -l.quantity, newQuantity: oi.quantity - l.quantity, reason: "SALE", note: `Order ${orderNumber}` } });
-    // 1P Inventory mirror
-    if (soSeller.type === "FIRST_PARTY") {
-      const inv = await tx.inventory.findUnique({ where: { variantId: l.variantId }, select: { id: true, quantity: true, reserved: true } });
-      if (!inv || inv.quantity - l.quantity < 0 || inv.quantity - l.quantity < inv.reserved) throw new Rollback();
-      await tx.inventory.update({ where: { id: inv.id }, data: { quantity: inv.quantity - l.quantity } });
-      await tx.inventoryAdjustment.create({ data: { inventoryId: inv.id, previousQuantity: inv.quantity, delta: -l.quantity, newQuantity: inv.quantity - l.quantity, reason: "SALE", note: `Order ${orderNumber}` } });
-      await tx.$executeRawUnsafe(`UPDATE "Variant" SET "stock"=GREATEST(0, COALESCE((SELECT "quantity"-"reserved" FROM "Inventory" WHERE "variantId"=$1),0)) WHERE "id"=$1`, l.variantId);
-    }
   }
 
   const order = await tx.order.create({
@@ -237,10 +231,10 @@ async function dbTests() {
 
       const invAfter1 = (await tx.inventory.findUnique({ where: { variantId: v1 }, select: { quantity: true } }))!.quantity;
       const oiAfter1 = (await tx.offerInventory.findFirst({ where: { offerId: o1 }, select: { quantity: true } }))!.quantity;
-      ok("P  OfferInventory deduction == legacy Inventory deduction (2 each) for v1", oiBefore1 - oiAfter1 === 2 && invBefore1 - invAfter1 === 2);
+      ok("P  9E-3D-5: OfferInventory deducted by 2 for v1; legacy Inventory UNCHANGED", oiBefore1 - oiAfter1 === 2 && invBefore1 - invAfter1 === 0);
       const oiAdj = await tx.offerAdjustment.count({ where: { reason: "SALE", note: `Order ${order1.orderNumber}` } });
       const invAdj = await tx.inventoryAdjustment.count({ where: { reason: "SALE", note: `Order ${order1.orderNumber}` } });
-      ok("P  one SALE OfferAdjustment + one SALE InventoryAdjustment per line", oiAdj === 2 && invAdj === 2);
+      ok("P  one SALE OfferAdjustment per line; ZERO SALE InventoryAdjustment", oiAdj === 2 && invAdj === 0);
 
       // O — cart converted only on success
       const c1after = await tx.cart.findUniqueOrThrow({ where: { id: c1.id }, select: { status: true } });
@@ -307,16 +301,19 @@ async function dbTests() {
         ok("N  SellerOrder.total == merch - disc + ship == grandTotal", oN.sellerOrders[0].total === oN.sellerOrders[0].merchandiseSubtotal - 200 + oN.sellerOrders[0].shippingFee && oN.sellerOrders[0].total === oN.grandTotal);
       }
 
-      // Q — a failing 1P Inventory mirror rolls back the OfferInventory commit
+      // Q — 9E-3D-5: OfferInventory is the SOLE checkout gate. An order that
+      //     OfferInventory can cover succeeds even when the now-frozen legacy
+      //     Inventory row could not — and Inventory is left untouched.
       const v7 = await mkVariant(tx, product.id, `v7-${sfx}`, 800, 5);
       const o7 = await mkOffer(tx, axiaro.id, v7, 800, 50); // OfferInventory 50, Inventory only 5
-      await tx.inventory.update({ where: { variantId: v7 }, data: { quantity: 1 } }); // Inventory now 1
+      await tx.inventory.update({ where: { variantId: v7 }, data: { quantity: 1 } }); // frozen Inventory now 1
       const cQ = await tx.cart.create({ data: { token: `tQ-${sfx}`, status: "ACTIVE" }, select: { id: true } });
-      await addLine(tx, cQ.id, v7, o7, 3, 800); // OfferInventory can cover, Inventory cannot
+      await addLine(tx, cQ.id, v7, o7, 3, 800); // OfferInventory covers 3; legacy Inventory (1) does not
       const oiQBefore = (await tx.offerInventory.findFirst({ where: { offerId: o7 }, select: { quantity: true } }))!.quantity;
       const rQ = await runCheckoutCore(tx, wargs(cQ.id));
       const oiQAfter = (await tx.offerInventory.findFirst({ where: { offerId: o7 }, select: { quantity: true } }))!.quantity;
-      ok("Q  Inventory-mirror failure -> whole checkout aborts; OfferInventory NOT deducted; cart still ACTIVE", rQ.ok === false && oiQAfter === oiQBefore && (await tx.cart.findUniqueOrThrow({ where: { id: cQ.id }, select: { status: true } })).status === "ACTIVE");
+      const invQAfter = (await tx.inventory.findUnique({ where: { variantId: v7 }, select: { quantity: true } }))!.quantity;
+      ok("Q  OfferInventory is the sole gate — checkout succeeds (OfferInv 50→47), frozen Inventory untouched at 1", rQ.ok === true && oiQBefore - oiQAfter === 3 && invQAfter === 1);
 
       throw new Rollback();
     }, { timeout: 45000 });
@@ -350,14 +347,10 @@ async function runCheckoutCoreWithCoupon(
   await tx.$executeRawUnsafe(`UPDATE "Cart" SET "status"='CONVERTED' WHERE "id"=$1 AND "status"='ACTIVE'`, args.cartId);
   await tx.$queryRawUnsafe(`SELECT "id" FROM "Coupon" WHERE "id"=$1 FOR UPDATE`, args.coupon.id);
   for (const l of lines) {
+    // Phase 9E-3D-5: OfferInventory SALE commit ONLY.
     const oi = (await tx.$queryRawUnsafe<{ id: string; quantity: number; reserved: number }[]>(`SELECT "id","quantity","reserved" FROM "OfferInventory" WHERE "offerId"=$1 FOR UPDATE`, l.offerId))[0];
     await tx.offerInventory.update({ where: { id: oi.id }, data: { quantity: oi.quantity - l.quantity } });
     await tx.offerAdjustment.create({ data: { offerInventoryId: oi.id, previousQuantity: oi.quantity, delta: -l.quantity, newQuantity: oi.quantity - l.quantity, reason: "SALE", note: `Order ${orderNumber}` } });
-    if (soSeller.type === "FIRST_PARTY") {
-      const inv = (await tx.inventory.findUniqueOrThrow({ where: { variantId: l.variantId }, select: { id: true, quantity: true } }));
-      await tx.inventory.update({ where: { id: inv.id }, data: { quantity: inv.quantity - l.quantity } });
-      await tx.inventoryAdjustment.create({ data: { inventoryId: inv.id, previousQuantity: inv.quantity, delta: -l.quantity, newQuantity: inv.quantity - l.quantity, reason: "SALE", note: `Order ${orderNumber}` } });
-    }
   }
   const order = await tx.order.create({ data: { orderNumber, userId: args.userId, cartId: args.cartId, email: args.userEmail, phone: args.shipAddr.phone, status: "PENDING_PAYMENT", paymentMethod: "NONE", paymentStatus: "PENDING", subtotal, shippingFee, discountTotal, grandTotal, couponId: args.coupon.id, couponCode: args.coupon.code, discountType: args.coupon.type, discountValue: args.coupon.value, shippingMethodId: args.method.id, shippingMethod: args.method.code, shippingMethodCode: args.method.code, shippingMethodName: args.method.name, addressId: args.shipAddr.id, billingAddressId: args.shipAddr.id, shippingAddress: "{}" }, select: { id: true } });
   const so = await tx.sellerOrder.create({ data: { orderId: order.id, sellerId: soSeller.id, sellerName: soSeller.displayName, sellerType: soSeller.type, supportEmail: soSeller.supportEmail, commissionRate: soSeller.commissionRate, shippingMethodCode: args.method.code, shippingMethodName: args.method.name, shippingFee, platformShippingSubsidy: 0, freeShippingApplied: false, merchandiseSubtotal: subtotal, discountAllocated: discountTotal, discountFundedBy: "PLATFORM", commissionAmount: roundHalfUp((subtotal * soSeller.commissionRate) / 10000), total: subtotal - discountTotal + shippingFee, status: "PENDING_PAYMENT", settlementStatus: "PENDING_CAPTURE" }, select: { id: true } });
@@ -380,7 +373,7 @@ function staticChecks() {
   ok("S  createOrderFromCart no longer prices from v.price", !/unitPrice:\s*v\.price/.test(code) && !/v\.price\s*\*\s*item\.quantity/.test(code));
   ok("S  checkout price is the bound offer price (o.price)", /unitPrice:\s*o\.price/.test(code) && /o\.price\s*\*\s*item\.quantity/.test(code));
   ok("S  checkout does NOT call resolveWinningOfferView / re-pick the offer", !/resolveWinningOfferView\s*\(|pickWinningOffer\s*\(|getWinningOffer\s*\(|from ["']@\/lib\/marketplace\/(buy-box|offer-resolver)/.test(code));
-  ok("S  checkout commits OfferInventory + mirrors 1P Inventory", /commitOfferStockForSale\s*\(/.test(code) && /"FIRST_PARTY"/.test(code) && /adjustStock\s*\(/.test(code));
+  ok("S  9E-3D-5: checkout commits OfferInventory ONLY — commitOfferStockForSale, NO adjustStock / Inventory mirror", /commitOfferStockForSale\s*\(/.test(code) && !/adjustStock\s*\(/.test(code) && !/from ["']@\/lib\/inventory["']/.test(checkout));
   ok("S  single-seller gate present (sellerIds.size !== 1 -> SELLER)", /sellerIds\.size !== 1/.test(code) && /code: "SELLER"/.test(code));
   ok("S  exactly one SellerOrder asserted before commit", /soCount !== 1/.test(code));
   ok("S  checkout-flow treats SELLER like STOCK (back to bag)", /res\.code === "SELLER"/.test(flow));

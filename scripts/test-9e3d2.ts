@@ -229,10 +229,12 @@ function staticChecks() {
   // F — Variant.stock schema comment reflects mirror role
   ok("F  schema.prisma Variant.stock documented as a compatibility mirror", /compatibility mirror/.test(schema) && /Read by nobody since Phase 9D-D/.test(schema));
 
-  // G — storefront / checkout inventory paths untouched by this change
-  ok("G  checkout.ts still built from commitOfferStockForSale then adjustStock", (() => {
+  // G — storefront / checkout inventory paths untouched by this (9E-3D-2) change.
+  //     (9E-3D-5 later removed the checkout Inventory mirror — checkout now
+  //     commits OfferInventory only.)
+  ok("G  checkout.ts commits OfferInventory (commitOfferStockForSale) as its SALE writer", (() => {
     const co = strip(readFileSync(new URL("../src/lib/checkout.ts", import.meta.url), "utf8"));
-    return ia(co, /commitOfferStockForSale\s*\(/, /adjustStock\s*\(/);
+    return /commitOfferStockForSale\s*\(/.test(co);
   })());
   ok("G  data.ts storefront still resolves availability via offers (resolveVariantAvailability)", (() => {
     const d = readFileSync(new URL("../src/lib/data.ts", import.meta.url), "utf8");

@@ -72,38 +72,45 @@ async function adjInv(tx: Prisma.TransactionClient, variantId: string, delta: nu
 }
 
 // ── keep in sync with src/lib/admin/order-actions.ts cancelOrderAction ─────
-async function cancelReversal(tx: Prisma.TransactionClient, orderId: string, orderNumber: string, opts?: { failInvMirror?: boolean }) {
+// Phase 9E-3D-5: offer-native → OfferInventory ONLY; legacy → Inventory ONLY.
+async function cancelReversal(tx: Prisma.TransactionClient, orderId: string, orderNumber: string, opts?: { failOfferRestore?: boolean }) {
   const cancelled = await tx.$executeRawUnsafe(
     `UPDATE "Order" SET "status"='CANCELLED', "updatedAt"=now() WHERE "id"=$1 AND "status" IN ('PENDING_PAYMENT','PENDING','PROCESSING')`, orderId);
   if (cancelled === 0) return { restockedUnits: 0, path: "none" as const };
 
   const offerNative = (await tx.offerAdjustment.count({ where: { reason: "SALE", note: `Order ${orderNumber}` } })) > 0;
-
-  // 2a. OfferInventory — offer-native only, per OrderItem.offerId. Locked FIRST.
-  if (offerNative) {
-    const items = await tx.orderItem.findMany({ where: { orderId, offerId: { not: null } }, select: { id: true, offerId: true, quantity: true } });
-    for (const it of items) {
-      if (!it.offerId || it.quantity <= 0) continue;
-      await restoreOffer(tx, it.offerId, it.quantity, "CANCELLATION", `Order ${orderNumber} cancelled · item ${it.id}`);
-    }
-  }
-  // 2b. Inventory — one CANCELLATION per SALE InventoryAdjustment. Locked AFTER.
-  const saleAdj = await tx.inventoryAdjustment.findMany({
-    where: { reason: "SALE", note: `Order ${orderNumber}` },
-    select: { delta: true, inventory: { select: { variantId: true } } },
-  });
   let restockedUnits = 0;
-  for (const a of saleAdj) {
-    const qty = -a.delta;
-    if (qty <= 0) continue;
-    const r = await adjInv(tx, a.inventory.variantId, qty, "CANCELLATION", `Order ${orderNumber} cancelled`, { failLow: opts?.failInvMirror });
-    if (!r.ok) throw new Error("inventory reversal failed");
-    restockedUnits += qty;
+
+  if (offerNative) {
+    // 2a. OfferInventory is the WHOLE reversal, per OrderItem.offerId. No Inventory touch.
+    const items = await tx.orderItem.findMany({ where: { orderId }, select: { id: true, offerId: true, quantity: true } });
+    for (const it of items) {
+      if (it.quantity <= 0) continue;
+      if (it.offerId) {
+        if (opts?.failOfferRestore) throw new Error("offer restore failed");
+        await restoreOffer(tx, it.offerId, it.quantity, "CANCELLATION", `Order ${orderNumber} cancelled · item ${it.id}`);
+      }
+      restockedUnits += it.quantity;
+    }
+  } else {
+    // 2b. LEGACY fallback — one CANCELLATION per SALE InventoryAdjustment.
+    const saleAdj = await tx.inventoryAdjustment.findMany({
+      where: { reason: "SALE", note: `Order ${orderNumber}` },
+      select: { delta: true, inventory: { select: { variantId: true } } },
+    });
+    for (const a of saleAdj) {
+      const qty = -a.delta;
+      if (qty <= 0) continue;
+      const r = await adjInv(tx, a.inventory.variantId, qty, "CANCELLATION", `Order ${orderNumber} cancelled`);
+      if (!r.ok) throw new Error("inventory reversal failed");
+      restockedUnits += qty;
+    }
   }
   return { restockedUnits, path: offerNative ? ("offer-native" as const) : ("legacy" as const) };
 }
 
 // ── keep in sync with src/lib/admin/returns-actions.ts receiveReturnAction ──
+// Phase 9E-3D-5: offer-native line → OfferInventory ONLY; legacy line → Inventory ONLY.
 async function returnRestock(tx: Prisma.TransactionClient, returnId: string, returnNumber: string, orderNumber: string, lines: { returnItemId: string; orderItemId: string | null; variantId: string | null; restockQuantity: number }[]) {
   const res = await tx.returnRequest.updateMany({ where: { id: returnId, status: "APPROVED", restockedAt: null }, data: { status: "RECEIVED", restockedAt: new Date() } });
   if (res.count === 0) return { restocked: 0, path: "none" as const };
@@ -121,12 +128,16 @@ async function returnRestock(tx: Prisma.TransactionClient, returnId: string, ret
     if (l.restockQuantity <= 0) continue;
     const boundOffer = l.orderItemId ? offerByOi.get(l.orderItemId) : undefined;
     const useOffer = offerNative && boundOffer;
-    if (useOffer) await restoreOffer(tx, boundOffer!, l.restockQuantity, "RETURN", `Return ${returnNumber} (order ${orderNumber}) · item ${l.orderItemId}`);
+    if (useOffer) {
+      await restoreOffer(tx, boundOffer!, l.restockQuantity, "RETURN", `Return ${returnNumber} (order ${orderNumber}) · item ${l.orderItemId}`);
+      restocked += l.restockQuantity;
+      continue;
+    }
     if (l.variantId) {
       const r = await adjInv(tx, l.variantId, l.restockQuantity, "RETURN", `Return ${returnNumber} (order ${orderNumber})`);
-      if (!r.ok && !useOffer) continue;
+      if (!r.ok) continue;
+      restocked += l.restockQuantity;
     }
-    restocked += l.restockQuantity;
   }
   return { restocked, path: offerNative ? ("offer-native" as const) : ("legacy" as const) };
 }
@@ -165,20 +176,20 @@ async function dbTests() {
 
   try {
     await prisma.$transaction(async (tx) => {
-      // ---- A / I / N — offer-native cancellation ----
+      // ---- A / I / N — offer-native cancellation (OfferInventory ONLY) ----
       const f1 = await mkFixture(tx, axiaro.id, product.id, `v1-${sfx}`, 20);
       const o1 = await mkOrder(tx, axiaro.id, product.id, f1.variantId, f1.offerId, 3, sfx);
-      await commitOfferSale(tx, f1.offerId, 3, `Order ${o1.orderNumber}`);
-      await adjInv(tx, f1.variantId, -3, "SALE", `Order ${o1.orderNumber}`);
+      await commitOfferSale(tx, f1.offerId, 3, `Order ${o1.orderNumber}`); // OfferAdjustment(SALE) only — no Inventory
       let p = await parity(tx, f1.variantId, f1.offerId);
-      ok("A  after SALE both stores at 17, parity", p.equal && p.oiQ === 17, JSON.stringify(p));
+      ok("A  after offer-native SALE: OfferInventory 17, Inventory UNCHANGED at 20", p.oiQ === 17 && p.invQ === 20, JSON.stringify(p));
 
       const c1 = await cancelReversal(tx, o1.orderId, o1.orderNumber);
       p = await parity(tx, f1.variantId, f1.offerId);
-      ok("A  after cancel both stores back to 20, parity restored (net 0)", p.equal && p.oiQ === 20 && c1.path === "offer-native", JSON.stringify({ p, c1 }));
-      ok("N  no divergence after cancellation (mirror ok too)", p.equal && p.mirror);
+      ok("A  after cancel: OfferInventory back to 20 (net 0), Inventory still 20, path=offer-native", p.oiQ === 20 && p.invQ === 20 && c1.path === "offer-native", JSON.stringify({ p, c1 }));
+      ok("N  no Inventory write by offer-native cancel — Inventory never moved", p.invQ === 20 && p.mirror);
       const cancAdj = await tx.offerAdjustment.findMany({ where: { reason: "CANCELLATION", note: { contains: o1.orderNumber } }, select: { delta: true, note: true } });
-      ok("I  OfferAdjustment(CANCELLATION) created, delta +3, note carries order + item", cancAdj.length === 1 && cancAdj[0].delta === 3 && cancAdj[0].note!.includes(o1.orderItemId));
+      const invCancAdj = await tx.inventoryAdjustment.count({ where: { reason: "CANCELLATION", note: { contains: o1.orderNumber } } });
+      ok("I  OfferAdjustment(CANCELLATION) created (delta +3, item note); NO InventoryAdjustment", cancAdj.length === 1 && cancAdj[0].delta === 3 && cancAdj[0].note!.includes(o1.orderItemId) && invCancAdj === 0);
 
       // ---- D — duplicate cancellation ----
       const before = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f1.offerId }, select: { quantity: true } })).quantity;
@@ -191,25 +202,24 @@ async function dbTests() {
       const f2q = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f2.offerId }, select: { quantity: true } })).quantity;
       const o2 = await mkOrder(tx, axiaro.id, product.id, f1.variantId, f1.offerId, 2, sfx); // another order on v1
       await commitOfferSale(tx, f1.offerId, 2, `Order ${o2.orderNumber}`);
-      await adjInv(tx, f1.variantId, -2, "SALE", `Order ${o2.orderNumber}`);
       await cancelReversal(tx, o2.orderId, o2.orderNumber);
       p = await parity(tx, f1.variantId, f1.offerId);
       const f2after = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f2.offerId }, select: { quantity: true } })).quantity;
-      ok("B  cancel of order-2 restores exactly 2 (v1 back to 20); unrelated v2 unchanged", p.oiQ === 20 && p.equal && f2after === f2q && f2q === 15);
+      ok("B  cancel of order-2 restores exactly 2 (v1 OfferInv back to 20); unrelated v2 unchanged", p.oiQ === 20 && f2after === f2q && f2q === 15);
 
-      // ---- C / J / O — offer-native return ----
+      // ---- C / J / O — offer-native return (OfferInventory ONLY) ----
       const f3 = await mkFixture(tx, axiaro.id, product.id, `v3-${sfx}`, 10);
       const o3 = await mkOrder(tx, axiaro.id, product.id, f3.variantId, f3.offerId, 4, sfx);
-      await commitOfferSale(tx, f3.offerId, 4, `Order ${o3.orderNumber}`);
-      await adjInv(tx, f3.variantId, -4, "SALE", `Order ${o3.orderNumber}`);
+      await commitOfferSale(tx, f3.offerId, 4, `Order ${o3.orderNumber}`); // OfferInv 10 → 6
       const ret = await tx.returnRequest.create({ data: { returnNumber: `RET-${sfx.slice(-6)}A`, orderId: o3.orderId, status: "APPROVED", reason: "NO_LONGER_NEEDED" }, select: { id: true, returnNumber: true } });
       const ri = await tx.returnItem.create({ data: { returnRequestId: ret.id, orderItemId: o3.orderItemId, productId: product.id, variantId: f3.variantId, name: "Item", unitPrice: 1000, quantity: 4, refundAmount: 4000 }, select: { id: true } });
       const rr = await returnRestock(tx, ret.id, ret.returnNumber, o3.orderNumber, [{ returnItemId: ri.id, orderItemId: o3.orderItemId, variantId: f3.variantId, restockQuantity: 2 }]);
       p = await parity(tx, f3.variantId, f3.offerId);
-      ok("C  return receipt restocks 2 to BOTH stores (6 → 8), parity", p.equal && p.oiQ === 8 && rr.path === "offer-native", JSON.stringify({ p, rr }));
-      ok("O  no divergence after return", p.equal && p.mirror);
+      ok("C  offer-native return restocks OfferInventory 6 → 8; Inventory UNCHANGED at 10", p.oiQ === 8 && p.invQ === 10 && rr.path === "offer-native", JSON.stringify({ p, rr }));
+      ok("O  no Inventory write by offer-native return — Inventory never moved", p.invQ === 10 && p.mirror);
       const retAdj = await tx.offerAdjustment.findMany({ where: { reason: "RETURN", note: { contains: ret.returnNumber } }, select: { delta: true, note: true } });
-      ok("J  OfferAdjustment(RETURN) created, delta +2, note carries return + item", retAdj.length === 1 && retAdj[0].delta === 2 && retAdj[0].note!.includes(o3.orderItemId));
+      const invRetAdj = await tx.inventoryAdjustment.count({ where: { reason: "RETURN", note: { contains: ret.returnNumber } } });
+      ok("J  OfferAdjustment(RETURN) created (delta +2, item note); NO InventoryAdjustment", retAdj.length === 1 && retAdj[0].delta === 2 && retAdj[0].note!.includes(o3.orderItemId) && invRetAdj === 0);
 
       // ---- E — duplicate return receive ----
       const oiBeforeE = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f3.offerId }, select: { quantity: true } })).quantity;
@@ -239,46 +249,43 @@ async function dbTests() {
       const oiGafter = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f5.offerId }, select: { quantity: true } })).quantity;
       ok("G  legacy return: Inventory 5→8, OfferInventory UNCHANGED at 8", invG === 8 && oiGafter === oiG && oiG === 8);
 
-      // ---- H — a failing Inventory mirror rolls back the OfferInventory restore ----
+      // ---- H — a failing OfferInventory restore rolls back the whole cancel ----
       const f6 = await mkFixture(tx, axiaro.id, product.id, `v6-${sfx}`, 10);
       const o6 = await mkOrder(tx, axiaro.id, product.id, f6.variantId, f6.offerId, 2, sfx);
-      await commitOfferSale(tx, f6.offerId, 2, `Order ${o6.orderNumber}`);
-      await adjInv(tx, f6.variantId, -2, "SALE", `Order ${o6.orderNumber}`);
+      await commitOfferSale(tx, f6.offerId, 2, `Order ${o6.orderNumber}`); // OfferInv 10 → 8
       const oiH0 = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f6.offerId }, select: { quantity: true } })).quantity;
       let rolledBack = false;
       await tx.$queryRawUnsafe(`SAVEPOINT h6`);
       try {
-        await cancelReversal(tx, o6.orderId, o6.orderNumber, { failInvMirror: true });
+        await cancelReversal(tx, o6.orderId, o6.orderNumber, { failOfferRestore: true });
       } catch {
         rolledBack = true;
         await tx.$queryRawUnsafe(`ROLLBACK TO SAVEPOINT h6`);
       }
       const oiH1 = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: f6.offerId }, select: { quantity: true } })).quantity;
-      ok("H  Inventory-reversal failure rolls back the OfferInventory restore (stays at 8)", rolledBack && oiH1 === oiH0 && oiH1 === 8);
+      const ordH = await tx.order.findUniqueOrThrow({ where: { id: o6.orderId }, select: { status: true } });
+      ok("H  a failing OfferInventory restore rolls back the whole cancel (OfferInv stays 8, order not CANCELLED)", rolledBack && oiH1 === oiH0 && oiH1 === 8 && ordH.status !== "CANCELLED");
 
-      // ---- K — sequential SALE → admin adjust → cancel ----
+      // ---- K — sequential SALE → admin adjust (dual-write) → cancel (OfferInv only) ----
       const f7 = await mkFixture(tx, axiaro.id, product.id, `v7-${sfx}`, 20);
       const o7 = await mkOrder(tx, axiaro.id, product.id, f7.variantId, f7.offerId, 4, sfx);
-      await commitOfferSale(tx, f7.offerId, 4, `Order ${o7.orderNumber}`);           // 16 / 16
-      await adjInv(tx, f7.variantId, -4, "SALE", `Order ${o7.orderNumber}`);
-      // admin adjust +10 — OfferInventory first, then Inventory (§12)
+      await commitOfferSale(tx, f7.offerId, 4, `Order ${o7.orderNumber}`);           // OfferInv 16, Inv 20
+      // admin adjust +10 — still DUAL-WRITE until 9E-3D-6: OfferInventory first, then Inventory (§12)
       await restoreOffer(tx, f7.offerId, 10, "RESTOCK", `admin`);
-      await adjInv(tx, f7.variantId, 10, "RESTOCK", `admin`);                          // 26 / 26
-      await cancelReversal(tx, o7.orderId, o7.orderNumber);                            // +4 both → 30 / 30
+      await adjInv(tx, f7.variantId, 10, "RESTOCK", `admin`);                          // OfferInv 26, Inv 30
+      await cancelReversal(tx, o7.orderId, o7.orderNumber);                            // +4 OfferInv only → OfferInv 30, Inv 30
       p = await parity(tx, f7.variantId, f7.offerId);
-      ok("K  SALE → admin RESTOCK → cancel: final 30/30, parity, no negative", p.equal && p.oiQ === 30 && p.invQ === 30 && p.mirror);
+      ok("K  SALE → admin RESTOCK (dual) → cancel (OfferInv only): OfferInv 30, Inv 30, no negative", p.oiQ === 30 && p.invQ === 30 && p.mirror);
 
       // ---- L — sequential SALE → cancel → admin adjust ----
       const f8 = await mkFixture(tx, axiaro.id, product.id, `v8-${sfx}`, 20);
       const o8 = await mkOrder(tx, axiaro.id, product.id, f8.variantId, f8.offerId, 6, sfx);
-      await commitOfferSale(tx, f8.offerId, 6, `Order ${o8.orderNumber}`);
-      await adjInv(tx, f8.variantId, -6, "SALE", `Order ${o8.orderNumber}`);
-      await cancelReversal(tx, o8.orderId, o8.orderNumber);                            // 20 / 20
-      await restoreOffer(tx, f8.offerId, -5 + 5, "CORRECTION", `admin`);               // no-op guard
+      await commitOfferSale(tx, f8.offerId, 6, `Order ${o8.orderNumber}`);            // OfferInv 14, Inv 20
+      await cancelReversal(tx, o8.orderId, o8.orderNumber);                           // OfferInv 20, Inv 20
       await restoreOffer(tx, f8.offerId, 3, "RESTOCK", `admin`);
-      await adjInv(tx, f8.variantId, 3, "RESTOCK", `admin`);                           // 23 / 23
+      await adjInv(tx, f8.variantId, 3, "RESTOCK", `admin`);                          // OfferInv 23, Inv 23
       p = await parity(tx, f8.variantId, f8.offerId);
-      ok("L  SALE → cancel → admin RESTOCK: final 23/23, parity", p.equal && p.oiQ === 23 && p.invQ === 23);
+      ok("L  SALE → cancel → admin RESTOCK (dual): OfferInv 23, Inv 23", p.oiQ === 23 && p.invQ === 23);
 
       throw new Rollback();
     }, { timeout: 60000 });
@@ -306,18 +313,36 @@ function staticChecks() {
     const ia = s.search(a), ib = s.search(b);
     return ia >= 0 && ib >= 0 && ia < ib;
   };
-  ok("M  cancelOrderAction: restoreOfferStock call before adjustStock call", before(cancelCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("M  receiveReturnAction: restoreOfferStock call before adjustStock call", before(returnsCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
-  ok("M  adjustStockAction: syncFirstPartyOfferStock before adjustStock", before(adminCode, /syncFirstPartyOfferStock\s*\(/, /adjustStock\s*\(/));
+  ok("M  cancelOrderAction: offer-native restoreOfferStock branch precedes the legacy adjustStock branch", before(cancelCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
+  ok("M  receiveReturnAction: offer-native restoreOfferStock branch precedes the legacy adjustStock branch", before(returnsCode, /restoreOfferStock\s*\(/, /adjustStock\s*\(/));
+  ok("M  adjustStockAction: syncFirstPartyOfferStock before adjustStock (admin still dual-write until 9E-3D-6)", before(adminCode, /syncFirstPartyOfferStock\s*\(/, /adjustStock\s*\(/));
   ok("M  updateThresholdAction: syncFirstPartyOfferReorderPoint before setReorderPoint", before(adminCode, /syncFirstPartyOfferReorderPoint\s*\(/, /setReorderPoint\s*\(/));
   ok("M  restoreOfferStock / commitOfferStockForSale use FOR UPDATE on OfferInventory", /FROM "OfferInventory"[\s\S]{0,120}FOR UPDATE/.test(offerInv));
   ok("M  offer-inventory.ts never touches Inventory / Variant.stock", !/tx\.inventory\.|prisma\.inventory\.|(FROM|UPDATE|INTO)\s+"Inventory"|"Variant"\s+SET/i.test(offerInv.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "")));
   ok("M  cancel + return keep the legacy Inventory-only fallback (offerNative gate)", /offerNative\s*=/.test(cancelCode) && /offerNative\s*=/.test(returnsCode));
   ok("M  cancel idempotency = atomic Order.status gate", /status" IN \('PENDING_PAYMENT', 'PENDING', 'PROCESSING'\)/.test(cancel));
   ok("M  return idempotency = ReturnRequest.restockedAt set-once", /status: "APPROVED", restockedAt: null/.test(returns));
-  ok("M  checkout.ts unchanged (still commitOfferStockForSale then adjustStock)", (() => {
+  ok("M  checkout.ts SALE commit is OfferInventory only — commitOfferStockForSale, NO adjustStock", (() => {
     const co = readFileSync(new URL("../src/lib/checkout.ts", import.meta.url), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\/\/.*$/gm, "");
-    return before(co, /commitOfferStockForSale\s*\(/, /adjustStock\s*\(/);
+    return /commitOfferStockForSale\s*\(/.test(co) && !/adjustStock\s*\(/.test(co) && !/from "@\/lib\/inventory"/.test(co);
+  })());
+  ok("M  cancelOrderAction offer-native branch writes NO Inventory (no adjustStock / tx.inventory in the `if (offerNative)` block)", (() => {
+    const m = cancelCode.match(/if\s*\(\s*offerNative\s*\)\s*\{/);
+    if (!m) return false;
+    const start = m.index! + m[0].length;
+    let depth = 1, i = start;
+    while (i < cancelCode.length && depth > 0) { const c = cancelCode[i++]; if (c === "{") depth++; else if (c === "}") depth--; }
+    const branch = cancelCode.slice(start, i);
+    return !/adjustStock\s*\(|tx\.inventory\./.test(branch);
+  })());
+  ok("M  receiveReturnAction offer-native line uses restoreOfferStock then `continue` (no fall-through to adjustStock)", (() => {
+    const m = returnsCode.match(/if\s*\(\s*useOfferPath\s*\)\s*\{/);
+    if (!m) return false;
+    const start = m.index! + m[0].length;
+    let depth = 1, i = start;
+    while (i < returnsCode.length && depth > 0) { const c = returnsCode[i++]; if (c === "{") depth++; else if (c === "}") depth--; }
+    const branch = returnsCode.slice(start, i);
+    return /restoreOfferStock\s*\(/.test(branch) && /continue;/.test(branch) && !/adjustStock\s*\(|tx\.inventory\./.test(branch);
   })());
 }
 

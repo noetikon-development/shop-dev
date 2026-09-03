@@ -1,26 +1,24 @@
 /**
  * Phase 9E-3D — inventory authority reconciliation. READ-ONLY.
  *
- * Proves, for every Axiaro FIRST_PARTY offer (condition NEW, 1:1 with a
- * Variant / Inventory row), that OfferInventory (the operational authority as
- * of 9E-3D-2) and the Inventory / Variant.stock mirrors agree — and flags
- * every class of drift the 9E-3D-0 audit identified.
+ * Two regimes, one script:
  *
- * Parity (must all hold):
- *   OfferInventory.quantity     == Inventory.quantity
- *   OfferInventory.reserved     == Inventory.reserved
- *   OfferInventory.reorderPoint == Inventory.reorderPoint
- *   max(0, OfferInv.q - OfferInv.r) == max(0, Inv.q - Inv.r)          (available)
- *   Variant.stock == max(0, Inventory.quantity - Inventory.reserved)  (the denorm mirror)
+ *   POST-RETIREMENT OFFER CHAIN (authoritative, always strict) —
+ *     OfferInventory opening + Σ OfferAdjustment.delta == OfferInventory.quantity;
+ *     SALE + CANCELLATION + RETURN net per offer-native order; no negative
+ *     OfferInventory; CHECK constraints present; OfferInventory ↔ FIRST_PARTY
+ *     Offer ↔ Variant 1:1 (both directions).
  *
- * Adjustment reconciliation (per offer / variant):
- *   firstOfferAdj.previousQuantity + Σ OfferAdjustment.delta == OfferInventory.quantity
- *   firstInvAdj.previousQuantity  + Σ InventoryAdjustment.delta == Inventory.quantity
- *   Σ SALE deltas + Σ CANCELLATION deltas + Σ RETURN deltas net to the expected movement
+ *   PRE-RETIREMENT LEGACY ARCHIVE (frozen, still internally consistent) —
+ *     Inventory opening + Σ InventoryAdjustment.delta == Inventory.quantity;
+ *     no negative Inventory; Variant.stock == max(0, Inventory.q - r) (the
+ *     denorm mirror tracks its writer, which is still Inventory).
  *
- * Drift detectors:
- *   negative stock · orphaned inventory · missing OfferInventory ·
- *   duplicate adjustments (same offerInventoryId + reason + note > 1)
+ *   CROSS-STORE PARITY (transitional) — OfferInventory.quantity ==
+ *     Inventory.quantity is REQUIRED only for offers where NEITHER store has
+ *     moved past its opening balance. Since Phase 9E-3D-5 an offer-native
+ *     sale / cancel / return moves only OfferInventory, so a moved offer
+ *     legitimately diverges — reported as [INFO], never a failure.
  *
  * Exit 1 on any failure.
  *   node --env-file=.env --import tsx scripts/reconcile-9e3d.ts
@@ -55,51 +53,68 @@ async function run() {
   });
   console.log(`  ${offers.length} FIRST_PARTY NEW offers\n`);
 
-  // ── parity ────────────────────────────────────────────────────────────
+  // Per-store operational-movement flags. Phase 9E-3D-5: offer-native
+  // checkout / cancel / return write ONLY OfferInventory + OfferAdjustment.
+  // The `Inventory` mirror is frozen for operational movement from the
+  // 9E-3D-5 deploy on (admin adjust + variant lifecycle still write it).
+  // So cross-store parity is REQUIRED only while NEITHER store has moved
+  // past its opening balance; once either has, the two legitimately diverge.
+  // An offer's two stores legitimately diverge only when a POST-9E-3D-5
+  // operation touched one but not the other:
+  //   - offer-native SALE / CANCELLATION / RETURN → moves OfferInventory only
+  //     (the offer gains an operational OfferAdjustment)
+  //   - legacy-fallback CANCELLATION / RETURN → moves Inventory only (the
+  //     variant gains a CANCELLATION / RETURN InventoryAdjustment)
+  // Everything else (admin adjust — still dual-write; pre-backfill legacy SALE
+  // — baked into the OfferInventory opening) keeps the two stores equal.
+  const oiMoved = new Set(
+    (await prisma.$queryRawUnsafe(
+      `SELECT DISTINCT "offerInventoryId" AS id FROM "OfferAdjustment"
+       WHERE "reason" IN ('SALE','CANCELLATION','RETURN')`,
+    ) as { id: string }[]).map((r) => r.id),
+  );
+  const invMoved = new Set(
+    (await prisma.$queryRawUnsafe(
+      `SELECT DISTINCT "inventoryId" AS id FROM "InventoryAdjustment"
+       WHERE "reason" IN ('CANCELLATION','RETURN')`,
+    ) as { id: string }[]).map((r) => r.id),
+  );
+
+  // ── PRE-RETIREMENT: cross-store parity (only for un-moved offers) ──────
   let qDiff = 0, rDiff = 0, rpDiff = 0, availDiff = 0, mirrorDiff = 0, missingOI = 0, missingInv = 0;
+  let parityChecked = 0, divergedInfo = 0;
   const qDiffRows: string[] = [];
+  const divergedRows: string[] = [];
   for (const o of offers) {
     const oi = o.inventory;
     const inv = o.variant.inventory;
     if (!oi) { missingOI++; continue; }
     if (!inv) { missingInv++; continue; }
+    if (o.variant.stock !== Math.max(0, inv.quantity - inv.reserved)) mirrorDiff++;
+    const moved = oiMoved.has(oi.id) || invMoved.has(inv.id);
+    if (moved) {
+      if (oi.quantity !== inv.quantity) {
+        divergedInfo++;
+        divergedRows.push(`offer ${o.id}: OfferInv ${oi.quantity} / frozen Inv ${inv.quantity}`);
+      }
+      continue;
+    }
+    parityChecked++;
     if (oi.quantity !== inv.quantity) { qDiff++; qDiffRows.push(`offer ${o.id}: OfferInv ${oi.quantity} vs Inv ${inv.quantity}`); }
     if (oi.reserved !== inv.reserved) rDiff++;
     if (oi.reorderPoint !== inv.reorderPoint) rpDiff++;
-    const oiAvail = Math.max(0, oi.quantity - oi.reserved);
-    const invAvail = Math.max(0, inv.quantity - inv.reserved);
-    if (oiAvail !== invAvail) availDiff++;
-    if (o.variant.stock !== invAvail) { mirrorDiff++; }
+    if (Math.max(0, oi.quantity - oi.reserved) !== Math.max(0, inv.quantity - inv.reserved)) availDiff++;
   }
   check("every FIRST_PARTY offer has an OfferInventory row", missingOI === 0, `${missingOI} missing`);
   check("every such variant has a legacy Inventory row", missingInv === 0, `${missingInv} missing`);
-  check("OfferInventory.quantity == Inventory.quantity (all offers)", qDiff === 0, qDiffRows.slice(0, 5).join(" ; "));
-  check("OfferInventory.reserved == Inventory.reserved", rDiff === 0, `${rDiff} differ`);
-  check("OfferInventory.reorderPoint == Inventory.reorderPoint", rpDiff === 0, `${rpDiff} differ`);
-  check("available parity: max(0,q-r) equal on both stores", availDiff === 0, `${availDiff} differ`);
-  check("Variant.stock == max(0, Inventory.quantity - reserved) (denorm mirror)", mirrorDiff === 0, `${mirrorDiff} differ`);
-
-  // ── operational authority (9E-3D-2) ──────────────────────────────────
-  // OfferInventory is the operational read authority for FIRST_PARTY stock;
-  // Inventory + Variant.stock are synchronized mirrors. Prove full coverage
-  // in BOTH directions and that the mirrors track the authority exactly.
-  let mirrorVsAuthority = 0, statusDiff = 0;
-  for (const o of offers) {
-    const oi = o.inventory;
-    if (!oi) continue;
-    const oiAvail = Math.max(0, oi.quantity - oi.reserved);
-    if (o.variant.stock !== oiAvail) mirrorVsAuthority++;
-    const inv = o.variant.inventory;
-    if (inv) {
-      const st = (q: number, r: number, rp: number) =>
-        q - r <= 0 ? "OUT" : q - r <= rp ? "LOW" : "IN";
-      if (st(oi.quantity, oi.reserved, oi.reorderPoint) !== st(inv.quantity, inv.reserved, inv.reorderPoint)) {
-        statusDiff++;
-      }
-    }
+  check(`OfferInventory.quantity == Inventory.quantity (${parityChecked} un-moved offers)`, qDiff === 0, qDiffRows.slice(0, 5).join(" ; "));
+  check("OfferInventory.reserved == Inventory.reserved (un-moved offers)", rDiff === 0, `${rDiff} differ`);
+  check("OfferInventory.reorderPoint == Inventory.reorderPoint (un-moved offers)", rpDiff === 0, `${rpDiff} differ`);
+  check("available parity on both stores (un-moved offers)", availDiff === 0, `${availDiff} differ`);
+  check("Variant.stock == max(0, Inventory.quantity - reserved) — the denorm mirror tracks its writer (Inventory)", mirrorDiff === 0, `${mirrorDiff} differ`);
+  if (divergedInfo > 0) {
+    console.log(`  [INFO] ${divergedInfo} offer(s) legitimately diverged post-retirement (OfferInventory moved, Inventory frozen): ${divergedRows.slice(0, 5).join(" ; ")}`);
   }
-  check("Variant.stock == max(0, OfferInventory.q - r) (mirror tracks the authority)", mirrorVsAuthority === 0, `${mirrorVsAuthority} differ`);
-  check("derived stock status identical from OfferInventory and Inventory", statusDiff === 0, `${statusDiff} differ`);
 
   const invNoFpOffer = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*)::int AS n FROM "Inventory" i
@@ -222,7 +237,7 @@ async function run() {
 
   console.log(`\n  ${pass} passed, ${fail} failed.`);
   if (fail > 0) { console.error("\nRECONCILIATION FAILED."); process.exitCode = 1; }
-  else console.log("\nRECONCILIATION PASSED — OfferInventory is the operational authority; Inventory + Variant.stock are synchronized mirrors, in parity for every FIRST_PARTY offer.");
+  else console.log("\nRECONCILIATION PASSED — post-retirement OfferAdjustment chain reconciles; the pre-retirement InventoryAdjustment archive is frozen and internally consistent; un-moved offers remain in cross-store parity.");
 }
 
 run().catch((e) => { console.error(e); process.exitCode = 1; }).finally(() => prisma.$disconnect());
