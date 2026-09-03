@@ -25,6 +25,7 @@ export function ProductRail({
   showCategory,
   variant = "scroller",
   compact = false,
+  dense = false,
 }: {
   eyebrow?: string;
   title: string;
@@ -33,6 +34,12 @@ export function ProductRail({
   showCategory?: boolean;
   variant?: "scroller" | "grid";
   compact?: boolean;
+  /**
+   * Tightens each card's info block (one-line title, no free-shipping line) so
+   * cards in the swipeable strip stay close in height and shorter cards don't
+   * reserve a tall block of empty space on mobile.
+   */
+  dense?: boolean;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
 
@@ -92,6 +99,7 @@ export function ProductRail({
             product={p}
             showCategory={showCategory}
             priority={i < 4}
+            dense={dense}
             className={cn(
               "shrink-0 snap-start",
               compact

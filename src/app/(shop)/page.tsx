@@ -31,7 +31,7 @@ export default async function HomePage() {
   ]);
 
   return (
-    <div className="space-y-section pb-8 sm:space-y-section-lg">
+    <div className="flex flex-col gap-9 pb-8 md:gap-12 lg:gap-16">
       <Hero />
       <CategoryTiles categories={tree} />
       <ProductRail
@@ -40,29 +40,30 @@ export default async function HomePage() {
         action={{ label: "View all new", href: "/c/new" }}
         products={newArrivals}
         showCategory
+        dense
       />
       <FeatureBand />
-      {/* Bestsellers → value-props → sale: the value-props strip sits tighter to
-          its neighbours than a full section (matches the CMS renderer). */}
-      <div className="mb-6 sm:mb-10">
+      {/* Bestsellers → value-props → sale form a tighter cluster so the strip
+          sits close to the products it supports. One gap per boundary. */}
+      <div className="flex flex-col gap-6 md:gap-10">
         <ProductRail
           eyebrow="Most loved"
           title="Bestsellers"
           action={{ label: "Shop bestsellers", href: "/c/all?sort=bestselling" }}
           products={bestSellers}
           showCategory
+          dense
+        />
+        <ValueProps />
+        <ProductRail
+          eyebrow="Reduced"
+          title="On sale now"
+          action={{ label: "All sale items", href: "/c/sale" }}
+          products={onSale}
+          showCategory
+          dense
         />
       </div>
-      <div className="mb-6 sm:mb-10">
-        <ValueProps />
-      </div>
-      <ProductRail
-        eyebrow="Reduced"
-        title="On sale now"
-        action={{ label: "All sale items", href: "/c/sale" }}
-        products={onSale}
-        showCategory
-      />
     </div>
   );
 }

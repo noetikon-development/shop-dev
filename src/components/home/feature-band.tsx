@@ -50,7 +50,7 @@ export function FeatureBand() {
           href={f.href}
           className="group grid overflow-hidden rounded-lg border border-line sm:grid-cols-[1.1fr_1fr]"
         >
-          <div className="flex flex-col justify-center gap-3 p-8">
+          <div className="flex flex-col justify-center gap-3 p-6 sm:p-8">
             <p className="eyebrow">{f.eyebrow}</p>
             <h3 className="text-subtitle sm:text-title">{f.title}</h3>
             <p className="text-body text-ink-soft">{f.copy}</p>

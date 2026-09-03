@@ -42,55 +42,55 @@ export async function HomepageBlocks({
   }
   const media = await resolveMediaUrls(ids.filter(Boolean));
 
-  return (
-    <div className="space-y-section pb-8 sm:space-y-section-lg">
-      {await Promise.all(
-        blocks.map(async (block, i) => {
-          const node = (() => {
-            switch (block.type) {
-              case "hero":
-                return <HeroBlock key={block.id} data={block.data} media={media} />;
-              case "category_tiles":
-                return (
-                  <CategoryTiles
-                    key={block.id}
-                    categories={tree}
-                    eyebrow={str(block.data.eyebrow) || undefined}
-                    heading={str(block.data.heading) || undefined}
-                  />
-                );
-              case "product_rail":
-                return <ProductRailBlock key={block.id} data={block.data} />;
-              case "feature_grid":
-                return <FeatureGridBlock key={block.id} data={block.data} media={media} />;
-              case "value_props":
-                return <ValuePropsBlock key={block.id} data={block.data} />;
-              case "rich_text":
-                return <RichTextBlock key={block.id} data={block.data} />;
-              case "editorial":
-                return <EditorialBlock key={block.id} data={block.data} />;
-              default:
-                return null;
-            }
-          })();
-
-          // The value-props strip reads as a supporting service band, not a full
-          // homepage section — it sits tighter to the section above AND below it.
-          // Localized margin on this one boundary (a plain utility class wins over
-          // the zero-specificity `space-y-section` rule); the global spacing token
-          // and every other section keep the normal rhythm.
-          const tightenStripGap =
-            block.type === "value_props" || blocks[i + 1]?.type === "value_props";
-
-          return tightenStripGap && node != null ? (
-            <div key={block.id} className="mb-6 sm:mb-10">
-              {node}
-            </div>
-          ) : (
-            node
+  const rendered = await Promise.all(
+    blocks.map(async (block) => {
+      switch (block.type) {
+        case "hero":
+          return <HeroBlock key={block.id} data={block.data} media={media} />;
+        case "category_tiles":
+          return (
+            <CategoryTiles
+              key={block.id}
+              categories={tree}
+              eyebrow={str(block.data.eyebrow) || undefined}
+              heading={str(block.data.heading) || undefined}
+            />
           );
-        }),
-      )}
+        case "product_rail":
+          return <ProductRailBlock key={block.id} data={block.data} />;
+        case "feature_grid":
+          return <FeatureGridBlock key={block.id} data={block.data} media={media} />;
+        case "value_props":
+          return <ValuePropsBlock key={block.id} data={block.data} />;
+        case "rich_text":
+          return <RichTextBlock key={block.id} data={block.data} />;
+        case "editorial":
+          return <EditorialBlock key={block.id} data={block.data} />;
+        default:
+          return null;
+      }
+    }),
+  );
+
+  // Homepage vertical rhythm. One `gap` per boundary (no `space-y` + margin
+  // stacking): major transitions 36 / 48 / 64, and the value-props strip forms
+  // a tighter cluster with the rails that bracket it (24 / 32 / 40) so it reads
+  // as a supporting band close to the products it supports.
+  const vpIdx = blocks.findIndex((b) => b.type === "value_props");
+  const clusterStart = vpIdx > 0 ? vpIdx - 1 : vpIdx;
+  const clusterEnd = vpIdx >= 0 ? Math.min(vpIdx + 1, blocks.length - 1) : -1;
+
+  return (
+    <div className="flex flex-col gap-9 pb-8 md:gap-12 lg:gap-16">
+      {vpIdx < 0
+        ? rendered
+        : [
+            ...rendered.slice(0, clusterStart),
+            <div key="vp-cluster" className="flex flex-col gap-6 md:gap-10">
+              {rendered.slice(clusterStart, clusterEnd + 1)}
+            </div>,
+            ...rendered.slice(clusterEnd + 1),
+          ]}
     </div>
   );
 }
@@ -235,6 +235,7 @@ async function ProductRailBlock({ data }: { data: Record<string, unknown> }) {
       action={actionLabel && actionHref ? { label: actionLabel, href: actionHref } : undefined}
       products={products}
       showCategory
+      dense
       {...style}
     />
   );
@@ -258,7 +259,7 @@ function FeatureGridBlock({
         const url = mediaUrlOf(media, f.imageMediaId);
         const inner = (
           <>
-            <div className="flex flex-col justify-center gap-3 p-8">
+            <div className="flex flex-col justify-center gap-3 p-6 sm:p-8">
               {str(f.eyebrow) && <p className="eyebrow">{str(f.eyebrow)}</p>}
               <h3 className="text-subtitle sm:text-title">{str(f.title)}</h3>
               {str(f.body) && <p className="text-body text-ink-soft">{str(f.body)}</p>}

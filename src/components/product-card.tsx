@@ -18,11 +18,19 @@ export function ProductCard({
   showCategory = false,
   className,
   priority,
+  dense = false,
 }: {
   product: ProductCardView;
   showCategory?: boolean;
   className?: string;
   priority?: boolean;
+  /**
+   * Tightens the info block for horizontal rails: title clamped to one line and
+   * the free-shipping line dropped. Keeps card heights close together so a
+   * swipeable strip doesn't reserve a tall block of empty space under the
+   * shorter cards. Full-width grids leave it off.
+   */
+  dense?: boolean;
 }) {
   const wished = useWishlist((s) => s.ids.includes(product.id));
   const toggleWish = useWishlistToggle();
@@ -102,7 +110,12 @@ export function ProductCard({
         {showCategory && (
           <p className="eyebrow mb-1">{product.categoryName}</p>
         )}
-        <h3 className="text-body font-medium leading-snug text-ink">
+        <h3
+          className={cn(
+            "text-body font-medium leading-snug text-ink",
+            dense && "line-clamp-1",
+          )}
+        >
           <Link href={href} className="link-underline">
             {product.name}
           </Link>
@@ -141,7 +154,7 @@ export function ProductCard({
           )}
         </div>
 
-        {product.freeShipping && (
+        {product.freeShipping && !dense && (
           <p className="mt-2 text-micro font-medium text-success">Free shipping</p>
         )}
       </div>
