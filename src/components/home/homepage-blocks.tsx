@@ -45,32 +45,50 @@ export async function HomepageBlocks({
   return (
     <div className="space-y-section pb-8 sm:space-y-section-lg">
       {await Promise.all(
-        blocks.map(async (block) => {
-          switch (block.type) {
-            case "hero":
-              return <HeroBlock key={block.id} data={block.data} media={media} />;
-            case "category_tiles":
-              return (
-                <CategoryTiles
-                  key={block.id}
-                  categories={tree}
-                  eyebrow={str(block.data.eyebrow) || undefined}
-                  heading={str(block.data.heading) || undefined}
-                />
-              );
-            case "product_rail":
-              return <ProductRailBlock key={block.id} data={block.data} />;
-            case "feature_grid":
-              return <FeatureGridBlock key={block.id} data={block.data} media={media} />;
-            case "value_props":
-              return <ValuePropsBlock key={block.id} data={block.data} />;
-            case "rich_text":
-              return <RichTextBlock key={block.id} data={block.data} />;
-            case "editorial":
-              return <EditorialBlock key={block.id} data={block.data} />;
-            default:
-              return null;
-          }
+        blocks.map(async (block, i) => {
+          const node = (() => {
+            switch (block.type) {
+              case "hero":
+                return <HeroBlock key={block.id} data={block.data} media={media} />;
+              case "category_tiles":
+                return (
+                  <CategoryTiles
+                    key={block.id}
+                    categories={tree}
+                    eyebrow={str(block.data.eyebrow) || undefined}
+                    heading={str(block.data.heading) || undefined}
+                  />
+                );
+              case "product_rail":
+                return <ProductRailBlock key={block.id} data={block.data} />;
+              case "feature_grid":
+                return <FeatureGridBlock key={block.id} data={block.data} media={media} />;
+              case "value_props":
+                return <ValuePropsBlock key={block.id} data={block.data} />;
+              case "rich_text":
+                return <RichTextBlock key={block.id} data={block.data} />;
+              case "editorial":
+                return <EditorialBlock key={block.id} data={block.data} />;
+              default:
+                return null;
+            }
+          })();
+
+          // The value-props strip reads as a supporting service band, not a full
+          // homepage section — it sits tighter to the section above AND below it.
+          // Localized margin on this one boundary (a plain utility class wins over
+          // the zero-specificity `space-y-section` rule); the global spacing token
+          // and every other section keep the normal rhythm.
+          const tightenStripGap =
+            block.type === "value_props" || blocks[i + 1]?.type === "value_props";
+
+          return tightenStripGap && node != null ? (
+            <div key={block.id} className="mb-6 sm:mb-10">
+              {node}
+            </div>
+          ) : (
+            node
+          );
         }),
       )}
     </div>

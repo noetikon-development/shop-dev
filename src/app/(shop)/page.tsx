@@ -42,14 +42,20 @@ export default async function HomePage() {
         showCategory
       />
       <FeatureBand />
-      <ProductRail
-        eyebrow="Most loved"
-        title="Bestsellers"
-        action={{ label: "Shop bestsellers", href: "/c/all?sort=bestselling" }}
-        products={bestSellers}
-        showCategory
-      />
-      <ValueProps />
+      {/* Bestsellers → value-props → sale: the value-props strip sits tighter to
+          its neighbours than a full section (matches the CMS renderer). */}
+      <div className="mb-6 sm:mb-10">
+        <ProductRail
+          eyebrow="Most loved"
+          title="Bestsellers"
+          action={{ label: "Shop bestsellers", href: "/c/all?sort=bestselling" }}
+          products={bestSellers}
+          showCategory
+        />
+      </div>
+      <div className="mb-6 sm:mb-10">
+        <ValueProps />
+      </div>
       <ProductRail
         eyebrow="Reduced"
         title="On sale now"
