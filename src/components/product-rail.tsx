@@ -43,10 +43,13 @@ export function ProductRail({
    */
   fluidHeight?: boolean;
   /**
-   * Layout-only. Below `md` the rail is a two-column grid (each row sizes to
-   * its own content) instead of one horizontal strip sized to its tallest
-   * card; `md` and up it is the normal swipeable strip / desktop grid.
-   * Homepage rails only.
+   * Layout-only. Below `md` the rail shows the first four products as a
+   * two-column grid (a 2×2 preview — each row sizes to its own content); the
+   * rest stay in the DOM but are `display:none` until `md`, where the rail
+   * becomes the normal swipeable strip / desktop grid with every product
+   * visible. The rail's own heading action ("View all" / "Shop bestsellers" /
+   * "All sale items") is the route to the full set on mobile. Homepage rails
+   * only.
    */
   mobileGrid?: boolean;
 }) {
@@ -120,6 +123,9 @@ export function ProductRail({
               mobileGrid
                 ? cn(
                     "w-auto md:shrink-0 md:snap-start",
+                    // Mobile grid shows a 2×2 preview; the rest live behind the
+                    // rail's "view all" link. All products return from `md` up.
+                    i >= 4 && "max-md:hidden",
                     compact
                       ? "md:w-[38vw] lg:w-[calc((100%-4.5rem)/4.5)]"
                       : "md:w-[42vw] lg:w-[calc((100%-3rem)/4)]",

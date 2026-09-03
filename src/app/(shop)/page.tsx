@@ -31,7 +31,7 @@ export default async function HomePage() {
   ]);
 
   return (
-    <div className="flex flex-col gap-9 md:gap-12 lg:gap-16">
+    <div className="home-root flex flex-col gap-9 md:gap-12 lg:gap-16">
       <Hero />
       <CategoryTiles categories={tree} />
       <ProductRail

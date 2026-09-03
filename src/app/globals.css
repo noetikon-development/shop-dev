@@ -282,6 +282,15 @@
   .animate-marquee { animation: marquee 28s linear infinite; }
 }
 
+/* The homepage sits tighter against the footer than the rest of the store,
+   which keeps the footer's own `mt-20` (80px). Scoped to the homepage
+   wrapper (`.home-root`, a direct child of <main>); SiteFooter is untouched.
+   Unlayered so it wins over the `.mt-20` utility without a specificity
+   fight or !important. */
+main:has(> .home-root) + footer {
+  margin-top: 3rem; /* 48px */
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .001ms !important;

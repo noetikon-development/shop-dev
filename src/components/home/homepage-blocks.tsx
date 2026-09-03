@@ -81,7 +81,7 @@ export async function HomepageBlocks({
   const clusterEnd = vpIdx >= 0 ? Math.min(vpIdx + 1, blocks.length - 1) : -1;
 
   return (
-    <div className="flex flex-col gap-9 md:gap-12 lg:gap-16">
+    <div className="home-root flex flex-col gap-9 md:gap-12 lg:gap-16">
       {vpIdx < 0
         ? rendered
         : [
