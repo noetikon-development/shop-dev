@@ -56,8 +56,10 @@ export async function addToCart(input: unknown): Promise<CartActionResult> {
   };
 }
 
+// Phase 9E-2: cart lines are addressed by their opaque `cartItemId` (the DTO's
+// `key`), never by `variantId` — a cart can hold two lines for one variant.
 const updateSchema = z.object({
-  variantId: z.string().min(1).max(64),
+  cartItemId: z.string().min(1).max(64),
   quantity: z.coerce.number().int().min(0).max(MAX_QTY_PER_LINE),
 });
 
@@ -68,7 +70,7 @@ export async function updateCartItem(input: unknown): Promise<CartActionResult> 
   }
   // Quantity 0 means "remove".
   if (parsed.data.quantity === 0) {
-    await removeCartItemCore(parsed.data.variantId);
+    await removeCartItemCore(parsed.data.cartItemId);
     return { ok: true, cart: await loadCart() };
   }
   const res = await updateCartItemCore(parsed.data);
@@ -83,14 +85,14 @@ export async function updateCartItem(input: unknown): Promise<CartActionResult> 
   };
 }
 
-const removeSchema = z.object({ variantId: z.string().min(1).max(64) });
+const removeSchema = z.object({ cartItemId: z.string().min(1).max(64) });
 
 export async function removeCartItem(input: unknown): Promise<CartActionResult> {
   const parsed = removeSchema.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: "That request wasn’t valid.", cart: await loadCart() };
   }
-  await removeCartItemCore(parsed.data.variantId);
+  await removeCartItemCore(parsed.data.cartItemId);
   return { ok: true, cart: await loadCart() };
 }
 

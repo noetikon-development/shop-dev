@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import { toast } from "sonner";
-import type { CartCouponDTO, CartDTO, CartLineDTO } from "@/lib/cart";
+import type { CartCouponDTO, CartDTO, CartLineDTO, CartSellerGroupDTO } from "@/lib/cart";
 import {
   getCart,
   addToCart,
@@ -26,9 +26,11 @@ import {
  */
 
 export type CartLine = CartLineDTO;
+export type CartSellerGroup = CartSellerGroupDTO;
 
 type CartState = {
   lines: CartLine[];
+  sellerGroups: CartSellerGroup[];
   subtotal: number;
   itemCount: number;
   hasIssues: boolean;
@@ -44,8 +46,8 @@ type CartState = {
     variantId?: string;
     quantity?: number;
   }) => Promise<{ ok: boolean; error?: string }>;
-  setQuantity: (variantId: string, quantity: number) => Promise<void>;
-  removeItem: (variantId: string) => Promise<void>;
+  setQuantity: (cartItemId: string, quantity: number) => Promise<void>;
+  removeItem: (cartItemId: string) => Promise<void>;
   clear: () => Promise<void>;
   applyCoupon: (code: string) => Promise<{ ok: boolean; error?: string }>;
   removeCoupon: () => Promise<void>;
@@ -54,6 +56,7 @@ type CartState = {
 
 export const useCart = create<CartState>()((set, get) => ({
   lines: [],
+  sellerGroups: [],
   subtotal: 0,
   itemCount: 0,
   hasIssues: false,
@@ -64,6 +67,7 @@ export const useCart = create<CartState>()((set, get) => ({
   apply: (dto) =>
     set({
       lines: dto.lines,
+      sellerGroups: dto.sellerGroups,
       subtotal: dto.subtotal,
       itemCount: dto.itemCount,
       hasIssues: dto.hasIssues,
@@ -101,10 +105,10 @@ export const useCart = create<CartState>()((set, get) => ({
     }
   },
 
-  setQuantity: async (variantId, quantity) => {
+  setQuantity: async (cartItemId, quantity) => {
     set({ pending: true });
     try {
-      const res = await updateCartItem({ variantId, quantity });
+      const res = await updateCartItem({ cartItemId, quantity });
       get().apply(res.cart);
       if (res.error) toast.error(res.error);
       else if (res.notice) toast(res.notice);
@@ -113,10 +117,10 @@ export const useCart = create<CartState>()((set, get) => ({
     }
   },
 
-  removeItem: async (variantId) => {
+  removeItem: async (cartItemId) => {
     set({ pending: true });
     try {
-      get().apply((await removeCartItem({ variantId })).cart);
+      get().apply((await removeCartItem({ cartItemId })).cart);
     } finally {
       set({ pending: false });
     }

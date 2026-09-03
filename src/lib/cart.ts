@@ -28,17 +28,24 @@ import type { FullOfferCandidate } from "@/lib/marketplace/types";
  * variant and a quantity. Every mutation re-validates the variant, the product
  * and variant status, and the live commercial terms.
  *
- * Phase 9D-E: the live line price, compare-at and availability come from the
- * winning `Offer` + `OfferInventory` for the line's `Variant` (the SAME offer
- * for all three — `resolveWinningOfferView`), NOT `Variant.price` /
- * `Inventory`. `CartItem` is still keyed by `variantId` only — the winning
- * offer is resolved dynamically on every read/mutation; there is no
- * `CartItem.offerId`. When no offer is eligible the line is explicitly
- * unavailable — it never falls back to a stale `Variant` value.
+ * Phase 9D-E / 9E-1 / 9E-2: a cart LINE is a specific Seller `Offer`, bound
+ * SERVER-SIDE at add-to-cart (`CartItem.offerId`, required). The line's live
+ * price, compare-at and availability all come from that ONE bound Offer +
+ * its `OfferInventory` — never `Variant.price` / `Inventory`, and the bound
+ * Offer is NEVER re-picked on read (no silent seller switch). A cart may hold
+ * two lines for the same `Variant` when they are different Sellers' Offers;
+ * `@@unique([cartId, offerId])` allows at most one line per Offer. Mutations
+ * (update / remove) address a line by its opaque `cartItemId`, never by
+ * `variantId`. `CartDTO.sellerGroups` groups the lines by seller for display.
+ *
+ * The browser never sends a cart id, item id, seller id, offer id or price for
+ * an authority decision — every mutation re-resolves the owner (Supabase
+ * session or the httpOnly guest cookie) and re-reads price / seller / stock
+ * from the database.
  *
  * A cart is NOT a stock reservation: nothing here ever touches inventory
  * reserved counts. Checkout keeps its own independent `Inventory` row-locked
- * reservation authority (unchanged).
+ * reservation authority (unchanged — 9E-2 is cart-only, no checkout change).
  */
 
 export const GUEST_COOKIE = "axiaro_cart";
@@ -50,33 +57,42 @@ export const MAX_QTY_PER_LINE = 99;
 // ---------------------------------------------------------------------------
 
 export type CartLineDTO = {
-  key: string; // === variantId; stable per line
+  key: string; // === cartItemId (Phase 9E-2) — the mutation identity, stable per line
+  cartItemId: string; // explicit alias of `key`
   productId: string;
   slug: string;
   name: string;
   variantId: string;
-  /**
-   * The Offer this line is bound to (Phase 9E-1) — server data, not rendered.
-   * `null` when the line predates the backfill or its bound Offer was deleted.
-   * The 9E-1 read path does NOT re-pick this on load (no silent seller switch);
-   * price / availability display still resolve the winning offer live (9D-E).
-   */
-  boundOfferId: string | null;
+  /** The Offer this line is bound to (server-resolved at add-to-cart). */
+  boundOfferId: string;
+  /** Seller of the bound Offer (Phase 9E-2). Drives the "Sold by …" grouping. */
+  sellerId: string;
+  sellerName: string;
+  sellerType: "FIRST_PARTY" | "THIRD_PARTY";
   sku: string;
   variantLabel: string;
   optionSummary: string;
   imageUrl: string;
-  unitPrice: number; // authoritative live price — winning Offer.price (centavos)
-  compareAtPrice: number | null; // winning Offer.compareAtPrice (same offer)
+  unitPrice: number; // authoritative live price — the BOUND Offer.price (centavos)
+  compareAtPrice: number | null; // the BOUND Offer.compareAtPrice
   priceSnapshot: number; // stored display cache — may be stale
-  priceChanged: boolean; // snapshot !== live price
+  priceChanged: boolean; // snapshot !== live bound-offer price
   quantity: number;
-  available: number; // max(0, OfferInventory.quantity - OfferInventory.reserved) of the winning offer
+  available: number; // max(0, bound OfferInventory.quantity - reserved)
   maxStock: number; // alias of `available` (storefront compatibility)
   lineTotal: number; // unitPrice * min(quantity, available); 0 when unavailable
   freeShipping: boolean;
-  unavailable: boolean; // product/variant not purchasable at all
+  unavailable: boolean; // catalog disabled OR bound Offer inactive / seller suspended / no stock
   overStock: boolean; // quantity > available (still fixable)
+};
+
+/** Cart lines grouped by the bound Offer's seller (Phase 9E-2). */
+export type CartSellerGroupDTO = {
+  sellerId: string;
+  sellerName: string;
+  sellerType: "FIRST_PARTY" | "THIRD_PARTY";
+  lines: CartLineDTO[];
+  merchandiseSubtotal: number; // Σ purchasable lineTotal in this group
 };
 
 /**
@@ -95,7 +111,10 @@ export type CartCouponDTO = {
 };
 
 export type CartDTO = {
+  /** Flat lines — retained for existing consumers; === sellerGroups.flatMap(g => g.lines). */
   lines: CartLineDTO[];
+  /** Phase 9E-2 — lines grouped by the bound Offer's seller, in first-seen order. */
+  sellerGroups: CartSellerGroupDTO[];
   subtotal: number; // purchasable lines only
   itemCount: number; // sum of purchasable, buyable quantities
   hasIssues: boolean; // any line unavailable or over stock
@@ -104,6 +123,7 @@ export type CartDTO = {
 
 export const EMPTY_CART: CartDTO = {
   lines: [],
+  sellerGroups: [],
   subtotal: 0,
   itemCount: 0,
   hasIssues: false,
@@ -131,6 +151,20 @@ const cartInclude = {
   items: {
     orderBy: { createdAt: "asc" },
     include: {
+      // Phase 9E-2: the BOUND Offer (never re-picked). Supplies the line's live
+      // price / compare-at / availability and its seller. Nested here so a whole
+      // cart costs ONE offer query + ONE seller query + ONE offer-inventory
+      // query (Prisma `WHERE id IN (...)`), never one per line.
+      offer: {
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          compareAtPrice: true,
+          seller: { select: { id: true, displayName: true, type: true, status: true } },
+          inventory: { select: { quantity: true, reserved: true } },
+        },
+      },
       variant: {
         select: {
           id: true,
@@ -151,20 +185,6 @@ const cartInclude = {
                 orderBy: [{ sortOrder: "asc" }, { id: "asc" }],
                 select: { url: true, optionValueId: true },
               },
-            },
-          },
-          // Phase 9D-E: the winning Offer supplies price / compare-at /
-          // availability. Nested here so a whole cart costs ONE offers query
-          // (Prisma loads it via `WHERE variantId IN (...)`), not one per line.
-          offers: {
-            select: {
-              id: true,
-              status: true,
-              price: true,
-              compareAtPrice: true,
-              createdAt: true,
-              seller: { select: { type: true, status: true } },
-              inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
             },
           },
           optionValues: {
@@ -220,14 +240,17 @@ function toOfferCandidate(o: OfferRowForCart): FullOfferCandidate {
 function lineDTO(item: CartItemRow): CartLineDTO {
   const v = item.variant;
   const p = v.product;
+  const o = item.offer; // Phase 9E-2: the BOUND offer — never re-picked.
 
-  // Phase 9D-E: price / compare-at / availability all come from ONE winning
-  // offer. `null` → no eligible in-stock offer → the line is unavailable; we
-  // never read `Variant.price` / `Inventory` here.
-  const win = resolveWinningOfferView(v.offers.map(toOfferCandidate));
+  // The line is unavailable when the catalog entry is disabled OR the bound
+  // Offer is no longer live OR it has no stock. The Offer stays bound either
+  // way (spec §24): the customer sees a visible issue and removes / re-adds.
   const catalogEligible = p.status === "ACTIVE" && v.status === "ACTIVE";
-  const available = win?.available ?? 0;
-  const unavailable = !catalogEligible || win === null || available <= 0;
+  const offerLive = o.status === "ACTIVE" && o.seller.status === "APPROVED";
+  const available = o.inventory
+    ? Math.max(0, o.inventory.quantity - o.inventory.reserved)
+    : 0;
+  const unavailable = !catalogEligible || !offerLive || available <= 0;
 
   const optionSummary = v.optionValues
     .slice()
@@ -235,20 +258,21 @@ function lineDTO(item: CartItemRow): CartLineDTO {
     .map((ov) => ov.optionValue.value)
     .join(" · ");
 
-  // Struck / displayed price. Live winning-offer price when there is one;
-  // otherwise the cart-local `priceSnapshot` (never `Variant.price`) so an
-  // already-unavailable line never renders ₱0.
-  const unitPrice = win?.price ?? item.priceSnapshot;
-  const compareAtPrice = win?.compareAtPrice ?? null;
+  const unitPrice = o.price; // the bound Offer's live price — always a real number
   const buyable = Math.min(item.quantity, available);
+  const sellerType = o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY";
 
   return {
-    key: v.id,
+    key: item.id,
+    cartItemId: item.id,
     productId: p.id,
     slug: p.slug,
     name: p.name,
     variantId: v.id,
     boundOfferId: item.offerId,
+    sellerId: o.seller.id,
+    sellerName: o.seller.displayName,
+    sellerType,
     sku: v.sku,
     variantLabel: optionSummary,
     optionSummary,
@@ -259,9 +283,9 @@ function lineDTO(item: CartItemRow): CartLineDTO {
       slug: p.slug,
     }),
     unitPrice,
-    compareAtPrice,
+    compareAtPrice: o.compareAtPrice,
     priceSnapshot: item.priceSnapshot,
-    priceChanged: win !== null && item.priceSnapshot !== unitPrice,
+    priceChanged: item.priceSnapshot !== unitPrice,
     quantity: item.quantity,
     available,
     maxStock: available,
@@ -272,12 +296,34 @@ function lineDTO(item: CartItemRow): CartLineDTO {
   };
 }
 
+/** Group lines by the bound Offer's seller, preserving first-seen order. */
+function groupBySeller(lines: CartLineDTO[]): CartSellerGroupDTO[] {
+  const groups = new Map<string, CartSellerGroupDTO>();
+  for (const l of lines) {
+    let g = groups.get(l.sellerId);
+    if (!g) {
+      g = {
+        sellerId: l.sellerId,
+        sellerName: l.sellerName,
+        sellerType: l.sellerType,
+        lines: [],
+        merchandiseSubtotal: 0,
+      };
+      groups.set(l.sellerId, g);
+    }
+    g.lines.push(l);
+    if (!l.unavailable) g.merchandiseSubtotal += l.lineTotal;
+  }
+  return [...groups.values()];
+}
+
 function buildDTO(cart: CartWithItems | null, coupon: CartCouponDTO | null = null): CartDTO {
   if (!cart) return EMPTY_CART;
   const lines = cart.items.map(lineDTO);
   const purchasable = lines.filter((l) => !l.unavailable);
   return {
     lines,
+    sellerGroups: groupBySeller(lines),
     subtotal: purchasable.reduce((n, l) => n + l.lineTotal, 0),
     itemCount: purchasable.reduce((n, l) => n + Math.min(l.quantity, l.available), 0),
     hasIssues: lines.some((l) => l.unavailable || l.overStock),
@@ -569,30 +615,30 @@ export async function addToCartCore(input: {
 
   const check = await validateVariant(variantId, input.productId);
   if (!check.ok) return { ok: false, code: check.code, error: check.message };
-  if (check.variant.available <= 0) {
+  if (check.variant.available <= 0 || !check.variant.offerId) {
     return { ok: false, code: "OUT_OF_STOCK", error: "That item is out of stock." };
   }
 
   const cartId = await getOrCreateCartId();
   const cap = Math.min(check.variant.available, MAX_QTY_PER_LINE);
 
+  // Phase 9E-2: the line identity is the bound Offer. Adding the SAME offer
+  // again bumps the existing line; a future explicit "buy from seller B" path
+  // (not in 9E-2) resolves a different offerId and so creates a second line.
+  const boundOfferId = check.variant.offerId;
   const prior = await prisma.cartItem.findUnique({
-    where: { cartId_variantId: { cartId, variantId } },
+    where: { cartId_offerId: { cartId, offerId: boundOfferId } },
     select: { quantity: true },
   });
   const requestedQty = (prior?.quantity ?? 0) + addQty;
 
   // Atomic upsert with the cap applied inside the statement, so two concurrent
-  // adds of the same variant can't push quantity past what's available.
-  // Phase 9E-1: `offerId` is the SERVER-resolved winning Offer for this variant
-  // (`check.variant.offerId`); it is set on insert and refreshed on conflict.
-  const boundOfferId = check.variant.offerId;
+  // adds of the same offer can't push quantity past what's available.
   const rows = await prisma.$queryRaw<{ quantity: number }[]>`
     INSERT INTO "CartItem" ("id", "cartId", "variantId", "offerId", "quantity", "priceSnapshot", "createdAt", "updatedAt")
     VALUES (gen_random_uuid()::text, ${cartId}, ${variantId}, ${boundOfferId}, LEAST(${addQty}, ${cap}), ${check.variant.price}, now(), now())
-    ON CONFLICT ("cartId", "variantId") DO UPDATE
+    ON CONFLICT ("cartId", "offerId") DO UPDATE
       SET "quantity" = LEAST("CartItem"."quantity" + ${addQty}, ${cap}),
-          "offerId" = ${boundOfferId},
           "priceSnapshot" = ${check.variant.price},
           "updatedAt" = now()
     RETURNING "quantity"`;
@@ -602,8 +648,43 @@ export async function addToCartCore(input: {
   return { ok: true, capped: finalQty < requestedQty, finalQty, requestedQty };
 }
 
+/**
+ * Load one CartItem BY its opaque id, scoped to the current owner's ACTIVE cart
+ * (Phase 9E-2). Returns `null` when the line does not exist OR belongs to
+ * another cart — a forged `cartItemId` can never reach another customer's line.
+ */
+async function ownedCartLine(cartItemId: string) {
+  const owner = await resolveOwner();
+  if (!owner) return null;
+  const line = await prisma.cartItem.findUnique({
+    where: { id: cartItemId },
+    select: {
+      id: true,
+      cartId: true,
+      variantId: true,
+      offerId: true,
+      cart: { select: { userId: true, token: true, status: true } },
+      offer: {
+        select: {
+          status: true,
+          price: true,
+          seller: { select: { status: true } },
+          inventory: { select: { quantity: true, reserved: true } },
+        },
+      },
+      variant: { select: { status: true, product: { select: { status: true } } } },
+    },
+  });
+  if (!line || line.cart.status !== "ACTIVE") return null;
+  const ownsIt =
+    owner.kind === "user"
+      ? line.cart.userId === owner.userId
+      : line.cart.token === owner.token;
+  return ownsIt ? line : null;
+}
+
 export async function updateCartItemCore(input: {
-  variantId: string;
+  cartItemId: string;
   quantity: number;
 }): Promise<MutationResult> {
   const quantity = Math.floor(input.quantity);
@@ -614,52 +695,41 @@ export async function updateCartItemCore(input: {
     return { ok: false, code: "BAD_QUANTITY", error: `Maximum ${MAX_QTY_PER_LINE} per item.` };
   }
 
-  const owner = await resolveOwner();
-  if (!owner) return { ok: false, code: "NO_CART", error: "Your cart is empty." };
-  const cart = await prisma.cart.findFirst({
-    where:
-      owner.kind === "user"
-        ? { userId: owner.userId, status: "ACTIVE" }
-        : { token: owner.token, status: "ACTIVE" },
-    select: { id: true },
-  });
-  if (!cart) return { ok: false, code: "NO_CART", error: "Your cart is empty." };
+  const line = await ownedCartLine(input.cartItemId);
+  if (!line) return { ok: false, code: "NOT_IN_CART", error: "That item isn’t in your cart." };
 
-  const check = await validateVariant(input.variantId, undefined);
-  if (!check.ok) return { ok: false, code: check.code, error: check.message };
-  if (check.variant.available <= 0) {
+  // Validate the BOUND offer (never re-pick — spec §16). Catalog gate first.
+  const o = line.offer;
+  const catalogEligible =
+    line.variant.status === "ACTIVE" && line.variant.product.status === "ACTIVE";
+  const offerLive = o.status === "ACTIVE" && o.seller.status === "APPROVED";
+  if (!catalogEligible || !offerLive) {
+    return { ok: false, code: "NO_OFFER", error: "That item isn’t available right now." };
+  }
+  const available = o.inventory
+    ? Math.max(0, o.inventory.quantity - o.inventory.reserved)
+    : 0;
+  if (available <= 0) {
     return { ok: false, code: "OUT_OF_STOCK", error: "That item is out of stock." };
   }
 
-  const finalQty = Math.min(quantity, check.variant.available, MAX_QTY_PER_LINE);
-  // Phase 9E-1 note: a quantity change does NOT re-bind `offerId` (offer binding
-  // is an add-to-cart / merge concern — spec §7/§15). `priceSnapshot` keeps its
-  // existing refresh-on-write behaviour.
-  const updated = await prisma.cartItem.updateMany({
-    where: { cartId: cart.id, variantId: input.variantId },
-    data: { quantity: finalQty, priceSnapshot: check.variant.price, updatedAt: new Date() },
+  const finalQty = Math.min(quantity, available, MAX_QTY_PER_LINE);
+  // A quantity change does NOT re-bind `offerId` (spec §16). `priceSnapshot`
+  // keeps its existing refresh-on-write behaviour, from the BOUND offer.
+  await prisma.cartItem.update({
+    where: { id: line.id },
+    data: { quantity: finalQty, priceSnapshot: o.price, updatedAt: new Date() },
   });
-  if (updated.count === 0) {
-    return { ok: false, code: "NOT_IN_CART", error: "That item isn’t in your cart." };
-  }
-  await touchCart(prisma, cart.id);
+  await touchCart(prisma, line.cartId);
 
   return { ok: true, capped: finalQty < quantity, finalQty, requestedQty: quantity };
 }
 
-export async function removeCartItemCore(variantId: string): Promise<void> {
-  const owner = await resolveOwner();
-  if (!owner) return;
-  const cart = await prisma.cart.findFirst({
-    where:
-      owner.kind === "user"
-        ? { userId: owner.userId, status: "ACTIVE" }
-        : { token: owner.token, status: "ACTIVE" },
-    select: { id: true },
-  });
-  if (!cart) return;
-  await prisma.cartItem.deleteMany({ where: { cartId: cart.id, variantId } });
-  await touchCart(prisma, cart.id);
+export async function removeCartItemCore(cartItemId: string): Promise<void> {
+  const line = await ownedCartLine(cartItemId);
+  if (!line) return; // not ours (or gone) — no-op, never touches another cart
+  await prisma.cartItem.delete({ where: { id: line.id } });
+  await touchCart(prisma, line.cartId);
 }
 
 export async function clearCartCore(): Promise<void> {
@@ -770,7 +840,7 @@ export async function mergeGuestCartCore(): Promise<MergeResult> {
 
   const guest = await prisma.cart.findFirst({
     where: { token, status: "ACTIVE" },
-    include: { items: { select: { variantId: true, quantity: true } } },
+    include: { items: { select: { offerId: true, quantity: true } } },
   });
 
   // The guest cookie has served its purpose — drop it either way.
@@ -787,51 +857,63 @@ export async function mergeGuestCartCore(): Promise<MergeResult> {
 
   await prisma.$transaction(async (tx) => {
     for (const gi of guest.items) {
-      const check = await validateVariant(gi.variantId, undefined, tx);
-      if (!check.ok) {
-        notices.push({ kind: "removed", name: "An item", reason: check.message });
+      // Phase 9E-2: merge by the guest line's BOUND offer (never re-pick — a
+      // guest line bound to Seller B must not become Seller A on sign-in). Same
+      // offer in both carts → quantities merge; a different offer (even the same
+      // variant) → a second line survives.
+      const offer = await tx.offer.findUnique({
+        where: { id: gi.offerId },
+        select: {
+          id: true,
+          status: true,
+          price: true,
+          variantId: true,
+          seller: { select: { status: true } },
+          variant: { select: { status: true, product: { select: { name: true, status: true } } } },
+          inventory: { select: { quantity: true, reserved: true } },
+        },
+      });
+
+      const productName = offer?.variant.product.name ?? "An item";
+      const live =
+        offer &&
+        offer.status === "ACTIVE" &&
+        offer.seller.status === "APPROVED" &&
+        offer.variant.status === "ACTIVE" &&
+        offer.variant.product.status === "ACTIVE";
+      if (!live) {
+        notices.push({ kind: "removed", name: productName, reason: "no longer available" });
         continue;
       }
-      if (check.variant.available <= 0) {
-        notices.push({
-          kind: "removed",
-          name: check.variant.productName,
-          reason: "out of stock",
-        });
+      const available = offer.inventory
+        ? Math.max(0, offer.inventory.quantity - offer.inventory.reserved)
+        : 0;
+      if (available <= 0) {
+        notices.push({ kind: "removed", name: productName, reason: "out of stock" });
         continue;
       }
+
       const existing = await tx.cartItem.findUnique({
-        where: { cartId_variantId: { cartId: targetId, variantId: gi.variantId } },
+        where: { cartId_offerId: { cartId: targetId, offerId: offer.id } },
         select: { quantity: true },
       });
       const requested = (existing?.quantity ?? 0) + gi.quantity;
-      const finalQty = Math.min(requested, check.variant.available, MAX_QTY_PER_LINE);
+      const finalQty = Math.min(requested, available, MAX_QTY_PER_LINE);
 
       await tx.cartItem.upsert({
-        where: { cartId_variantId: { cartId: targetId, variantId: gi.variantId } },
-        // Phase 9E-1: newly-created and refreshed merged lines carry the
-        // server-resolved winning Offer.
+        where: { cartId_offerId: { cartId: targetId, offerId: offer.id } },
         create: {
           cartId: targetId,
-          variantId: gi.variantId,
-          offerId: check.variant.offerId,
+          variantId: offer.variantId,
+          offerId: offer.id,
           quantity: finalQty,
-          priceSnapshot: check.variant.price,
+          priceSnapshot: offer.price,
         },
-        update: {
-          quantity: finalQty,
-          offerId: check.variant.offerId,
-          priceSnapshot: check.variant.price,
-        },
+        update: { quantity: finalQty, priceSnapshot: offer.price },
       });
 
       if (finalQty < requested) {
-        notices.push({
-          kind: "capped",
-          name: check.variant.productName,
-          requested,
-          finalQty,
-        });
+        notices.push({ kind: "capped", name: productName, requested, finalQty });
       }
     }
 

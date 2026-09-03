@@ -543,27 +543,30 @@ model CartItem {
   id            String   @id @default(cuid())
   cartId        String
   variantId     String
-  // Marketplace offer binding (Phase 9E-1). The specific Seller Offer this line
-  // is bound to — resolved SERVER-SIDE at add-to-cart with the buy-box rule and
-  // refreshed on every add-to-cart write. Nullable: `null` = no eligible Offer
-  // at bind time (or the bound Offer was later deleted — FK is onDelete SetNull).
-  // NOT yet the authoritative billing record — that stays an Order-time concern.
-  // `variantId` is retained permanently as the catalog anchor. The
-  // `@@unique([cartId, variantId])` constraint is unchanged in 9E-1; the
-  // multi-seller uniqueness change is Phase 9E-2.
-  offerId       String?
+  // Marketplace offer binding. The specific Seller Offer this line is bound to —
+  // resolved SERVER-SIDE at add-to-cart with the buy-box rule. Phase 9E-2: now
+  // REQUIRED and the line-identity column. A cart may hold two lines for the
+  // same Variant when they are different Sellers' Offers; it may hold at most
+  // one line per Offer (`@@unique([cartId, offerId])`). `variantId` is retained
+  // permanently as the catalog anchor (image / options / product link). The
+  // bound Offer is NOT re-picked on cart read — no silent seller switch — and
+  // it is NOT the authoritative billing record (that stays an Order-time
+  // concern). FK is `onDelete: Cascade` (a NOT-NULL column cannot be nulled;
+  // matches `variant`) — offers are soft-retired via `status`, never hard-
+  // deleted in normal operation.
+  offerId       String
   quantity      Int
-  // Display cache only — the authoritative price is always Variant.price, read
-  // live on every getCart / mutation. Refreshed whenever the item is written.
+  // Display cache only — the authoritative live price is the bound Offer's
+  // price, read on every getCart / mutation. Refreshed on add-to-cart writes.
   priceSnapshot Int
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   cart    Cart    @relation(fields: [cartId], references: [id], onDelete: Cascade)
   variant Variant @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  offer   Offer   @relation(fields: [offerId], references: [id], onDelete: Cascade)
 
-  @@unique([cartId, variantId])
+  @@unique([cartId, offerId])
   @@index([cartId])
   @@index([variantId])
   @@index([offerId])

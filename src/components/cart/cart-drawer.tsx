@@ -17,6 +17,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 export function CartDrawer() {
   const { cartOpen, closeCart } = useUI();
   const lines = useCart((s) => s.lines);
+  const sellerGroups = useCart((s) => s.sellerGroups);
   const coupon = useCart((s) => s.coupon);
   const setQuantity = useCart((s) => s.setQuantity);
   const remove = useCart((s) => s.removeItem);
@@ -101,64 +102,71 @@ export function CartDrawer() {
             className="mb-4"
           />
 
-          <ul className="divide-y divide-line">
-            {lines.map((l) => (
-              <li key={l.key} className="flex gap-3 py-4">
-                <Link
-                  href={`/p/${l.slug}`}
-                  onClick={closeCart}
-                  className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken"
-                >
-                  <ProductImage src={l.imageUrl} alt={l.name} compact sizes="64px" />
-                </Link>
-                <div className="min-w-0 flex-1">
-                  <div className="flex justify-between gap-2">
+          {sellerGroups.map((group) => (
+            <div key={group.sellerId} className="border-t border-line first:border-t-0">
+              <p className="pt-3 pb-1 text-micro font-medium uppercase tracking-wide text-ink-faint">
+                Sold by {group.sellerName}
+              </p>
+              <ul className="divide-y divide-line">
+                {group.lines.map((l) => (
+                  <li key={l.key} className="flex gap-3 py-4">
                     <Link
                       href={`/p/${l.slug}`}
                       onClick={closeCart}
-                      className="line-clamp-2 text-sm font-medium"
+                      className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken"
                     >
-                      {l.name}
+                      <ProductImage src={l.imageUrl} alt={l.name} compact sizes="64px" />
                     </Link>
-                    <button
-                      onClick={() => remove(l.variantId)}
-                      aria-label="Remove"
-                      className="shrink-0 grid tap place-items-center text-ink-faint hover:text-sale"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </div>
-                  {l.optionSummary && (
-                    <p className="mt-0.5 text-meta text-ink-soft">{l.optionSummary}</p>
-                  )}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex justify-between gap-2">
+                        <Link
+                          href={`/p/${l.slug}`}
+                          onClick={closeCart}
+                          className="line-clamp-2 text-sm font-medium"
+                        >
+                          {l.name}
+                        </Link>
+                        <button
+                          onClick={() => remove(l.key)}
+                          aria-label="Remove"
+                          className="shrink-0 grid tap place-items-center text-ink-faint hover:text-sale"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
+                      {l.optionSummary && (
+                        <p className="mt-0.5 text-meta text-ink-soft">{l.optionSummary}</p>
+                      )}
 
-                  {l.unavailable ? (
-                    <p className="mt-1.5 inline-flex items-center gap-1 text-meta font-medium text-sale">
-                      <AlertTriangle size={12} /> No longer available
-                    </p>
-                  ) : (
-                    <div className="mt-2 flex items-center justify-between">
-                      <QuantityStepper
-                        value={l.quantity}
-                        onChange={(n) => setQuantity(l.variantId, n)}
-                        max={l.available}
-                        size="sm"
-                        ariaLabel={`Quantity — ${l.name}`}
-                      />
-                      <span className="text-sm font-medium tabular-nums">
-                        {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
-                      </span>
+                      {l.unavailable ? (
+                        <p className="mt-1.5 inline-flex items-center gap-1 text-meta font-medium text-sale">
+                          <AlertTriangle size={12} /> No longer available
+                        </p>
+                      ) : (
+                        <div className="mt-2 flex items-center justify-between">
+                          <QuantityStepper
+                            value={l.quantity}
+                            onChange={(n) => setQuantity(l.key, n)}
+                            max={l.available}
+                            size="sm"
+                            ariaLabel={`Quantity — ${l.name}`}
+                          />
+                          <span className="text-sm font-medium tabular-nums">
+                            {formatPrice(l.unitPrice * Math.min(l.quantity, l.available))}
+                          </span>
+                        </div>
+                      )}
+                      {!l.unavailable && l.overStock && (
+                        <p className="mt-1.5 text-meta font-medium text-clay">
+                          Only {l.available} left in stock
+                        </p>
+                      )}
                     </div>
-                  )}
-                  {!l.unavailable && l.overStock && (
-                    <p className="mt-1.5 text-meta font-medium text-clay">
-                      Only {l.available} left in stock
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
         </div>
       )}
     </SlideOver>
