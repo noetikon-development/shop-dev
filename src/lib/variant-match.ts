@@ -14,7 +14,7 @@ export type MatchOption = { id: string };
 export type MatchVariant = {
   id: string;
   status: string; // "ACTIVE" | "ARCHIVED"
-  stock: number; // available = Inventory.quantity - Inventory.reserved
+  stock: number; // available units of the winning offer (OfferInventory.quantity - reserved), 9D-D
   optionValueIds: string[];
 };
 

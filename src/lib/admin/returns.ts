@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isReturnStatus } from "@/lib/returns/status";
 import { remainingReturnableByOrderItem } from "@/lib/returns";
+import { FIRST_PARTY_OFFER_FILTER } from "@/lib/admin/first-party-inventory";
 
 /**
  * Admin read layer for Returns / RMA (Step 21 P3). Uncached — admins see live
@@ -172,17 +173,21 @@ export async function getAdminReturn(id: string) {
   });
   if (!ret) return null;
 
-  // Whether each returned line's variant still has an inventory row (so the UI
-  // can warn that a restock would be skipped).
+  // Whether each returned line's variant still has a restock target (so the UI
+  // can warn that a restock would be skipped). Phase 9E-3D-3: this probes the
+  // operational authority — the Axiaro FIRST_PARTY `OfferInventory` — not the
+  // legacy `Inventory` mirror. `receiveReturnAction` restocks the bound
+  // `OfferInventory` for an offer-native line; a line whose variant was
+  // hard-deleted has neither store and is the only case this flags.
   const variantIds = [...new Set(ret.items.map((i) => i.variantId).filter((v): v is string => !!v))];
   const withInventory = variantIds.length
     ? new Set(
         (
-          await prisma.inventory.findMany({
-            where: { variantId: { in: variantIds } },
-            select: { variantId: true },
+          await prisma.offerInventory.findMany({
+            where: { offer: { variantId: { in: variantIds }, ...FIRST_PARTY_OFFER_FILTER } },
+            select: { offer: { select: { variantId: true } } },
           })
-        ).map((r) => r.variantId),
+        ).map((r) => r.offer.variantId),
       )
     : new Set<string>();
 

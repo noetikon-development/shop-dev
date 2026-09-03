@@ -3,17 +3,23 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 /**
- * Transaction-safe inventory primitives. Every write is a single atomic,
+ * Transaction-safe `Inventory` primitives. Every write is a single atomic,
  * condition-guarded UPDATE (Postgres row-locks for the duration), so concurrent
  * callers serialise and can never produce an invalid state. The DB CHECK
  * constraints (quantity >= 0, reserved >= 0, quantity >= reserved) are the final
  * backstop.
  *
- * `reserveStock` / `releaseStock` / `commitStock` are the FOUNDATION for a
- * future checkout/order flow — they are intentionally NOT wired to checkout or
- * orders in this step. `adjustStock` is used by the admin (and by the existing
- * mock `placeOrder`, which records a SALE adjustment so Inventory stays the
- * source of truth).
+ * Authority note (Phase 9E-3D-2): `OfferInventory` is the operational source of
+ * truth for FIRST_PARTY stock. `Inventory` (and `Variant.stock`) are
+ * synchronized compatibility mirrors plus the historical `InventoryAdjustment`
+ * ledger. `adjustStock` / `setReorderPoint` are the mirror WRITERS — checkout,
+ * cancellation, returns and the admin all call them as the `Inventory` leg of a
+ * dual-store write, lock order OfferInventory-then-Inventory.
+ *
+ * DEAD / FUTURE UTILITY — unwired, do not delete (9E-3D-3 §9):
+ *   `getAvailableStock` (no callers; the storefront reads OfferInventory) and
+ *   `reserveStock` / `releaseStock` / `commitStock` (the reservation foundation
+ *   for an online-payment hold, still dormant).
  */
 
 type Client = Prisma.TransactionClient | typeof prisma;

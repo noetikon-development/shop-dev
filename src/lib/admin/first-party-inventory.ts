@@ -36,6 +36,7 @@ export const FIRST_PARTY_OFFER_FILTER = {
 export type FirstPartyStock = {
   offerInventoryId: string;
   variantId: string;
+  productName: string;
   quantity: number;
   reserved: number;
   reorderPoint: number;
@@ -59,13 +60,14 @@ export async function getFirstPartyStock(
       reserved: true,
       reorderPoint: true,
       updatedAt: true,
-      offer: { select: { variantId: true } },
+      offer: { select: { variantId: true, variant: { select: { product: { select: { name: true } } } } } },
     },
   });
   if (!oi) return null;
   return {
     offerInventoryId: oi.id,
     variantId: oi.offer.variantId,
+    productName: oi.offer.variant.product.name,
     quantity: oi.quantity,
     reserved: oi.reserved,
     reorderPoint: oi.reorderPoint,

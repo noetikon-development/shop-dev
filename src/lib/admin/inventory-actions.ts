@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock, setReorderPoint } from "@/lib/inventory";
+import { getFirstPartyStock } from "@/lib/admin/first-party-inventory";
 import {
   syncFirstPartyOfferStock,
   syncFirstPartyOfferReorderPoint,
@@ -17,6 +18,22 @@ export type InventoryActionState = {
   ok?: boolean;
   message?: string;
 };
+
+/**
+ * Carries a message that is SAFE to show an admin verbatim — the user-facing
+ * copy from `adjustStock` / `setReorderPoint`, or a curated fallback. Anything
+ * thrown inside the transaction that is NOT an `AdjustError` (a raw Prisma
+ * error, the internal `syncFirstPartyOfferStock` invariant message, …) is
+ * logged server-side and replaced with a generic message — no SQL, schema,
+ * internal identifiers or stack traces reach the UI (Phase 9E-3D-3 §4).
+ */
+class AdjustError extends Error {}
+
+function toActionError(err: unknown, context: string, generic: string): InventoryActionState {
+  if (err instanceof AdjustError) return { error: err.message };
+  console.error(`[${context}] unexpected error`, err);
+  return { error: generic };
+}
 
 const adjustSchema = z.object({
   variantId: z.string().min(1),
@@ -55,10 +72,9 @@ export async function adjustStockAction(
   }
   const { variantId, mode, amount, reason, note } = parsed.data;
 
-  const inv = await prisma.inventory.findUnique({
-    where: { variantId },
-    select: { quantity: true, reserved: true, variant: { select: { product: { select: { name: true } } } } },
-  });
+  // Phase 9E-3D-3: preload the current quantity from the operational authority
+  // (the Axiaro FIRST_PARTY OfferInventory), not the legacy Inventory mirror.
+  const inv = await getFirstPartyStock(variantId);
   if (!inv) return { error: "No inventory record for that variant." };
 
   let delta: number;
@@ -85,18 +101,28 @@ export async function adjustStockAction(
   let result: Awaited<ReturnType<typeof adjustStock>>;
   try {
     result = await prisma.$transaction(async (tx) => {
-      await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
+      try {
+        await syncFirstPartyOfferStock(variantId, delta, effectiveReason, note || null, admin.user.id, tx);
+      } catch (syncErr) {
+        // Internal invariant / DB error from the offer mirror sync — log the
+        // detail server-side, surface a sanitized message (§4).
+        console.error("[adjustStockAction] OfferInventory sync failed for variant", variantId, syncErr);
+        throw new AdjustError(
+          "Couldn’t adjust stock — the stored figures need a refresh. Reload the page and try again.",
+        );
+      }
       const r = await adjustStock(
         { variantId, delta, reason: effectiveReason, note: note || null, actorUserId: admin.user.id },
         tx,
       );
-      // `adjustStock` returns { ok: false } without throwing on an invariant
-      // violation — throw so the OfferInventory write above rolls back too.
-      if (!r.ok) throw new Error(r.error ?? "Adjustment failed.");
+      // `adjustStock` returns { ok: false } (user-facing copy) without throwing
+      // on an invariant violation — re-throw it as an AdjustError so the
+      // OfferInventory write above rolls back too and the message passes through.
+      if (!r.ok) throw new AdjustError(r.error ?? "Adjustment failed.");
       return r;
     });
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Adjustment failed." };
+    return toActionError(err, "adjustStockAction", "Couldn’t adjust stock right now. Please try again.");
   }
   if (!result.ok) return { error: result.error ?? "Adjustment failed." };
 
@@ -105,7 +131,7 @@ export async function adjustStockAction(
     action: auditAction,
     targetType: "variant",
     targetId: variantId,
-    summary: `${admin.user.email} ${mode === "set" ? "corrected" : "adjusted"} stock for “${inv.variant.product.name}” (${result.previousQuantity} → ${result.newQuantity})`,
+    summary: `${admin.user.email} ${mode === "set" ? "corrected" : "adjusted"} stock for “${inv.productName}” (${result.previousQuantity} → ${result.newQuantity})`,
     meta: {
       previousQuantity: result.previousQuantity,
       newQuantity: result.newQuantity,
@@ -142,10 +168,8 @@ export async function updateThresholdAction(
   }
   const { variantId, reorderPoint } = parsed.data;
 
-  const inv = await prisma.inventory.findUnique({
-    where: { variantId },
-    select: { variant: { select: { product: { select: { name: true } } } } },
-  });
+  // Phase 9E-3D-3: preload from the operational authority, not the mirror.
+  const inv = await getFirstPartyStock(variantId);
   if (!inv) return { error: "No inventory record for that variant." };
 
   // Phase 9D-D + 9E-3D-1: OfferInventory.reorderPoint AND Inventory.reorderPoint
@@ -155,13 +179,18 @@ export async function updateThresholdAction(
   let result: Awaited<ReturnType<typeof setReorderPoint>>;
   try {
     result = await prisma.$transaction(async (tx) => {
-      await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
+      try {
+        await syncFirstPartyOfferReorderPoint(variantId, reorderPoint, tx);
+      } catch (syncErr) {
+        console.error("[updateThresholdAction] OfferInventory reorder-point sync failed for variant", variantId, syncErr);
+        throw new AdjustError("Couldn’t update the threshold — please reload the page and try again.");
+      }
       const r = await setReorderPoint(variantId, reorderPoint, tx);
-      if (!r.ok) throw new Error(r.error ?? "Could not update the threshold.");
+      if (!r.ok) throw new AdjustError(r.error ?? "Could not update the threshold.");
       return r;
     });
   } catch (err) {
-    return { error: err instanceof Error ? err.message : "Could not update the threshold." };
+    return toActionError(err, "updateThresholdAction", "Couldn’t update the threshold right now. Please try again.");
   }
   if (!result.ok) return { error: result.error ?? "Could not update the threshold." };
   if (result.previous === reorderPoint) return { ok: true, message: "Threshold unchanged." };
@@ -171,7 +200,7 @@ export async function updateThresholdAction(
     action: "inventory.threshold_updated",
     targetType: "variant",
     targetId: variantId,
-    summary: `${admin.user.email} set the low-stock threshold for “${inv.variant.product.name}” to ${reorderPoint}`,
+    summary: `${admin.user.email} set the low-stock threshold for “${inv.productName}” to ${reorderPoint}`,
     meta: { previous: result.previous, reorderPoint },
   });
 
