@@ -83,9 +83,7 @@ export async function requestChangesAction(
     summary: `${admin.user.email} sent product request "${res.productName}" back for changes`,
     meta: { sellerId: res.sellerId, from: "PENDING", to: "DRAFT" },
   });
-  scheduleEmail(() =>
-    sendSellerProductRequestRejected(parsed.data.requestId, { reviewedAt: res.reviewedAt, outcome: "changes_requested" }),
-  );
+  scheduleEmail(() => sendSellerProductRequestRejected(parsed.data.requestId));
 
   revalidate(parsed.data.requestId, res.sellerId);
   return { ok: true, message: "Sent back to the seller as a draft." };
@@ -114,9 +112,7 @@ export async function rejectRequestAction(
     summary: `${admin.user.email} rejected product request "${res.productName}"`,
     meta: { sellerId: res.sellerId, from: "PENDING", to: "REJECTED" },
   });
-  scheduleEmail(() =>
-    sendSellerProductRequestRejected(parsed.data.requestId, { reviewedAt: res.reviewedAt, outcome: "rejected" }),
-  );
+  scheduleEmail(() => sendSellerProductRequestRejected(parsed.data.requestId));
 
   revalidate(parsed.data.requestId, res.sellerId);
   return { ok: true, message: "Request rejected." };
@@ -168,9 +164,7 @@ export async function linkExistingProductAction(
     summary: `${admin.user.email} approved product request "${res.productName}" (linked)`,
     meta: { sellerId: res.sellerId, productId: res.productId, mode: "link" },
   });
-  scheduleEmail(() =>
-    sendSellerProductRequestApproved(parsed.data.requestId, { reviewedAt: res.reviewedAt, linked: true }),
-  );
+  scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 
   revalidate(parsed.data.requestId, res.sellerId);
   return { ok: true, message: `Linked to ${res.productSlug}. The seller can now list against it.` };
@@ -277,13 +271,7 @@ export async function createProductFromRequestAction(
     summary: `${admin.user.email} approved product request "${res.productName}" (new product)`,
     meta: { sellerId: res.sellerId, productId: res.productId, mode: "create" },
   });
-  scheduleEmail(() =>
-    sendSellerProductRequestApproved(parsed.data.requestId, {
-      reviewedAt: res.reviewedAt,
-      linked: false,
-      listUrl: `/seller/offers/new?q=${encodeURIComponent(res.productName)}`,
-    }),
-  );
+  scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 
   revalidateStorefront();
   revalidate(parsed.data.requestId, res.sellerId);

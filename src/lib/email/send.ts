@@ -1,7 +1,13 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getEmailConfig } from "@/lib/email/config";
 import { getTransport } from "@/lib/email/transport";
+
+/** DB client for the EmailLog bookkeeping. Defaults to the module client; a
+ *  transaction client can be threaded in so an automated test rolls back. It
+ *  never changes what any existing caller does (they don't pass one). */
+type LogClient = Prisma.TransactionClient | typeof prisma;
 
 /**
  * Central email dispatch (Step 17).
@@ -69,6 +75,8 @@ export type DispatchInput = {
   replyTo?: string;
   /** Admin-initiated re-send: reuse an existing FAILED / SKIPPED log row. */
   retry?: boolean;
+  /** Optional transaction client for the EmailLog bookkeeping (tests only). */
+  client?: Prisma.TransactionClient;
 };
 
 export type DispatchResult = {
@@ -99,10 +107,12 @@ export async function recordEmailFailure(input: {
   error: string;
   userId?: string | null;
   orderId?: string | null;
+  client?: Prisma.TransactionClient;
 }): Promise<DispatchResult> {
+  const db: LogClient = input.client ?? prisma;
   const error = input.error.slice(0, MAX_ERROR_LEN);
   try {
-    const res = await prisma.emailLog.createMany({
+    const res = await db.emailLog.createMany({
       data: [
         {
           type: input.type,
@@ -118,7 +128,7 @@ export async function recordEmailFailure(input: {
       skipDuplicates: true,
     });
     if (res.count === 0) {
-      await prisma.emailLog
+      await db.emailLog
         .updateMany({
           where: { idempotencyKey: input.idempotencyKey, status: { in: ["FAILED", "SKIPPED"] } },
           data: { status: "FAILED", error },
@@ -132,12 +142,13 @@ export async function recordEmailFailure(input: {
 }
 
 export async function dispatchEmail(input: DispatchInput): Promise<DispatchResult> {
+  const db: LogClient = input.client ?? prisma;
   // 1. Claim the idempotency key. `createMany({ skipDuplicates: true })` is
   //    concurrency-safe (the UNIQUE constraint decides) and — unlike `create` —
   //    does not throw / log a query error when the key already exists.
   let logId: string;
   try {
-    const res = await prisma.emailLog.createMany({
+    const res = await db.emailLog.createMany({
       data: [
         {
           type: input.type,
@@ -155,7 +166,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
     if (res.count === 0) {
       // The key already exists — this email was already handled.
       if (!input.retry) return { ok: true, deduped: true, status: "DEDUPED" };
-      const existing = await prisma.emailLog.findUnique({
+      const existing = await db.emailLog.findUnique({
         where: { idempotencyKey: input.idempotencyKey },
         select: { id: true, status: true },
       });
@@ -163,11 +174,11 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
         return { ok: true, deduped: true, status: "DEDUPED" };
       }
       logId = existing.id;
-      await prisma.emailLog
+      await db.emailLog
         .update({ where: { id: logId }, data: { subject: input.subject.slice(0, 500), error: null } })
         .catch(() => {});
     } else {
-      const row = await prisma.emailLog.findUniqueOrThrow({
+      const row = await db.emailLog.findUniqueOrThrow({
         where: { idempotencyKey: input.idempotencyKey },
         select: { id: true },
       });
@@ -183,7 +194,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
 
   // 2. Not configured (no SMTP creds, or EMAIL_MODE=log) → record SKIPPED.
   if (!cfg.configured || !transport) {
-    await prisma.emailLog
+    await db.emailLog
       .update({
         where: { id: logId },
         data: {
@@ -197,7 +208,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
   }
 
   // 3. Attempt the send.
-  await prisma.emailLog
+  await db.emailLog
     .update({ where: { id: logId }, data: { status: "SENDING", attempts: { increment: 1 } } })
     .catch(() => {});
 
@@ -216,7 +227,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
       html: input.html,
       ...(replyToAddr ? { replyTo: replyToAddr } : {}),
     });
-    await prisma.emailLog
+    await db.emailLog
       .update({
         where: { id: logId },
         data: {
@@ -231,7 +242,7 @@ export async function dispatchEmail(input: DispatchInput): Promise<DispatchResul
     return { ok: true, status: "SENT" };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    await prisma.emailLog
+    await db.emailLog
       .update({
         where: { id: logId },
         data: { status: "FAILED", provider: "smtp", error: message.slice(0, MAX_ERROR_LEN) },

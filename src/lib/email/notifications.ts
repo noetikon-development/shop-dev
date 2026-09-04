@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/site-url";
 import { getStoreBrand } from "@/lib/site-settings";
@@ -134,6 +135,8 @@ type DispatchMeta = {
   from?: string;
   replyTo?: string;
   retry?: boolean;
+  /** Optional transaction client for EmailLog bookkeeping (tests only). */
+  client?: Prisma.TransactionClient;
 };
 
 /**
@@ -210,6 +213,7 @@ async function renderAndDispatch(
       idempotencyKey: meta.idempotencyKey,
       userId: meta.userId,
       orderId: meta.orderId,
+      client: meta.client,
       error: `render_failed: ${err instanceof Error ? err.message : String(err)}`,
     });
   }
@@ -1269,13 +1273,17 @@ export async function sendRefundCompleted(paymentRefundId: string): Promise<Disp
 // reusing its idempotency key (so it never becomes a second row / second send).
 // ---------------------------------------------------------------------------
 
-export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
-  const log = await prisma.emailLog.findUnique({
+export async function retryEmailByLog(
+  logId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<DispatchResult> {
+  const log = await client.emailLog.findUnique({
     where: { id: logId },
-    select: { type: true, orderId: true, userId: true, status: true },
+    select: { type: true, orderId: true, userId: true, status: true, idempotencyKey: true },
   });
   if (!log) return { ok: false, status: "FAILED", error: "log_not_found" };
   if (log.status === "SENT") return { ok: true, deduped: true, status: "DEDUPED" };
+  const tx = client === prisma ? undefined : (client as Prisma.TransactionClient);
 
   switch (log.type) {
     case "order_confirmation":
@@ -1295,6 +1303,30 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
     case "payment_confirmation":
       // Order-scoped, deterministic (re-reads the PAID Payment) — safe to re-send.
       return log.orderId ? sendPaymentConfirmation(log.orderId) : { ok: false, status: "FAILED", error: "no_order" };
+
+    // Seller product-request emails (9F-5c.1). The request id — and, for the
+    // rejected key, the outcome — are encoded in the idempotency key; every
+    // other value is reconstructed from the `SellerProductRequest` row. The
+    // ORIGINAL key is passed straight back so the retry reuses the same
+    // EmailLog row (never a second row, never a second send).
+    case "seller_product_request_submitted":
+    case "seller_product_request_approved":
+    case "seller_product_request_rejected": {
+      const parts = log.idempotencyKey.split(":");
+      const requestId = parts[1];
+      if (!requestId) return { ok: false, status: "FAILED", error: "no_request" };
+      const shared: SellerRequestEmailOpts = { retry: true, idempotencyKey: log.idempotencyKey, client: tx };
+      if (log.type === "seller_product_request_submitted") {
+        return sendSellerProductRequestSubmitted(requestId, shared);
+      }
+      if (log.type === "seller_product_request_approved") {
+        return sendSellerProductRequestApproved(requestId, shared);
+      }
+      const outcome: "rejected" | "changes_requested" =
+        parts[2] === "changes_requested" ? "changes_requested" : "rejected";
+      return sendSellerProductRequestRejected(requestId, { ...shared, outcome });
+    }
+
     default:
       // auth emails / P2 security notices / support (contact-form) emails /
       // return (P3) emails / refund_issued / refund_completed are not retryable
@@ -1321,17 +1353,35 @@ type SellerRequestEmailContext = {
   recipients: string;
   reviewNote: string | null;
   resultProductId: string | null;
+  reviewedAt: Date | null;
+  status: string;
+};
+
+/**
+ * Options common to the three seller product-request senders. `retry` +
+ * `idempotencyKey` are set only by `retryEmailByLog` — the original call sites
+ * pass nothing and every event-specific value is reconstructed from the
+ * `SellerProductRequest` row (recipient, product/list info, approval state,
+ * reviewedAt). `client` threads a transaction client for automated tests.
+ */
+type SellerRequestEmailOpts = {
+  retry?: boolean;
+  idempotencyKey?: string;
+  client?: Prisma.TransactionClient;
 };
 
 async function loadSellerRequestEmailContext(
   requestId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
 ): Promise<SellerRequestEmailContext | null> {
-  const req = await prisma.sellerProductRequest.findUnique({
+  const req = await client.sellerProductRequest.findUnique({
     where: { id: requestId },
     select: {
       proposedName: true,
       reviewStatusNote: true,
       resultProductId: true,
+      reviewedAt: true,
+      status: true,
       seller: {
         select: {
           displayName: true,
@@ -1365,20 +1415,27 @@ async function loadSellerRequestEmailContext(
     recipients: [...addrs].join(", "),
     reviewNote: req.reviewStatusNote,
     resultProductId: req.resultProductId,
+    reviewedAt: req.reviewedAt,
+    status: req.status,
   };
 }
 
 /** Seller — "we received your product request". Key: SELLER_PRODUCT_REQUEST_SUBMITTED:<id>. */
-export async function sendSellerProductRequestSubmitted(requestId: string): Promise<DispatchResult> {
+export async function sendSellerProductRequestSubmitted(
+  requestId: string,
+  opts: SellerRequestEmailOpts = {},
+): Promise<DispatchResult> {
   try {
-    const ctx = await loadSellerRequestEmailContext(requestId);
+    const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
     if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
     return renderAndDispatch(
       {
         type: "seller_product_request_submitted",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: `SELLER_PRODUCT_REQUEST_SUBMITTED:${requestId}`,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_SUBMITTED:${requestId}`,
+        retry: opts.retry,
+        client: opts.client,
       },
       () =>
         renderSellerProductRequestSubmitted({
@@ -1397,23 +1454,53 @@ export async function sendSellerProductRequestSubmitted(requestId: string): Prom
 
 /**
  * Seller — the request was approved (linked to an existing product OR a new
- * canonical product was created). `reviewedAt` buckets the idempotency key so a
- * later review round can send again. Key:
- * SELLER_PRODUCT_REQUEST_APPROVED:<id>:<reviewedAt ms>.
+ * canonical product was created). Everything is derived from the request row:
+ * `reviewedAt` buckets the key so a later review round sends again; `linked` vs
+ * "added" comes from whether a `seller_product_request.linked` audit row exists;
+ * the "Create listing" deep-link from the result product's ACTIVE variants.
+ * Key: SELLER_PRODUCT_REQUEST_APPROVED:<id>:<reviewedAt ms>.
  */
 export async function sendSellerProductRequestApproved(
   requestId: string,
-  opts: { reviewedAt: Date; linked: boolean; listUrl?: string | null },
+  opts: SellerRequestEmailOpts = {},
 ): Promise<DispatchResult> {
   try {
-    const ctx = await loadSellerRequestEmailContext(requestId);
+    const db = opts.client ?? prisma;
+    const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
     if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    const reviewedAt = ctx.reviewedAt ?? new Date();
+    const linked =
+      (await db.adminAuditLog.count({
+        where: {
+          targetType: "seller_product_request",
+          targetId: requestId,
+          action: "seller_product_request.linked",
+        },
+      })) > 0;
+
+    let listUrl: string | null = null;
+    if (ctx.resultProductId) {
+      const activeVariants = await db.variant.findMany({
+        where: { productId: ctx.resultProductId, status: "ACTIVE" },
+        select: { id: true },
+        take: 2,
+      });
+      listUrl =
+        activeVariants.length === 1
+          ? `/seller/offers/new?variantId=${activeVariants[0].id}`
+          : `/seller/offers/new?q=${encodeURIComponent(ctx.productName)}`;
+    }
+
     return renderAndDispatch(
       {
         type: "seller_product_request_approved",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: `SELLER_PRODUCT_REQUEST_APPROVED:${requestId}:${opts.reviewedAt.getTime()}`,
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_APPROVED:${requestId}:${reviewedAt.getTime()}`,
+        retry: opts.retry,
+        client: opts.client,
       },
       () =>
         renderSellerProductRequestApproved({
@@ -1422,8 +1509,8 @@ export async function sendSellerProductRequestApproved(
           sellerName: ctx.sellerName,
           productName: ctx.productName,
           requestUrl: ctx.requestUrl,
-          linked: opts.linked,
-          listUrl: opts.listUrl ? `${ctx.siteUrl}${opts.listUrl}` : null,
+          linked,
+          listUrl: listUrl ? `${ctx.siteUrl}${listUrl}` : null,
           reviewNote: ctx.reviewNote,
         }),
     );
@@ -1435,21 +1522,32 @@ export async function sendSellerProductRequestApproved(
 
 /**
  * Seller — the request was rejected (terminal) or sent back for changes.
+ * `outcome` is derived from the request's current status (REJECTED → "rejected",
+ * otherwise "changes_requested"); the retry path passes it back explicitly since
+ * it can read it straight off the log key.
  * Key: SELLER_PRODUCT_REQUEST_REJECTED:<id>:<outcome>:<reviewedAt ms>.
  */
 export async function sendSellerProductRequestRejected(
   requestId: string,
-  opts: { reviewedAt: Date; outcome: "rejected" | "changes_requested" },
+  opts: SellerRequestEmailOpts & { outcome?: "rejected" | "changes_requested" } = {},
 ): Promise<DispatchResult> {
   try {
-    const ctx = await loadSellerRequestEmailContext(requestId);
+    const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
     if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    const outcome = opts.outcome ?? (ctx.status === "REJECTED" ? "rejected" : "changes_requested");
+    const reviewedAt = ctx.reviewedAt ?? new Date();
+
     return renderAndDispatch(
       {
         type: "seller_product_request_rejected",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: `SELLER_PRODUCT_REQUEST_REJECTED:${requestId}:${opts.outcome}:${opts.reviewedAt.getTime()}`,
+        idempotencyKey:
+          opts.idempotencyKey ??
+          `SELLER_PRODUCT_REQUEST_REJECTED:${requestId}:${outcome}:${reviewedAt.getTime()}`,
+        retry: opts.retry,
+        client: opts.client,
       },
       () =>
         renderSellerProductRequestRejected({
@@ -1458,7 +1556,7 @@ export async function sendSellerProductRequestRejected(
           sellerName: ctx.sellerName,
           productName: ctx.productName,
           requestUrl: ctx.requestUrl,
-          outcome: opts.outcome,
+          outcome,
           reviewNote: ctx.reviewNote,
         }),
     );

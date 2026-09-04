@@ -324,7 +324,9 @@ async function staticTests() {
   ok("28 · submit email fired from the seller submit action", /sendSellerProductRequestSubmitted/.test(sellerActions));
   ok("29 · approve email fired on link + create", (actions.match(/sendSellerProductRequestApproved/g) ?? []).length >= 2);
   ok("30 · reject / changes email fired", (actions.match(/sendSellerProductRequestRejected/g) ?? []).length >= 2);
-  ok("31 · idempotency keys bucket by reviewedAt so repeats don't collide but a re-review can send", /SELLER_PRODUCT_REQUEST_APPROVED:\$\{requestId\}:\$\{opts.reviewedAt.getTime\(\)\}/.test(emailNotifs));
+  // 9F-5c.1: reviewedAt is now derived from the request row, and a retry can
+  // pass the original key back verbatim — the key still buckets by reviewedAt-ms.
+  ok("31 · idempotency keys bucket by reviewedAt so repeats don't collide but a re-review can send", /SELLER_PRODUCT_REQUEST_APPROVED:\$\{requestId\}:\$\{reviewedAt\.getTime\(\)\}/.test(emailNotifs) && /opts\.idempotencyKey \?\?/.test(emailNotifs));
   ok("32 · dispatch goes through renderAndDispatch (records a FAILED EmailLog on render failure)", /renderAndDispatch\(/.test(emailNotifs.slice(emailNotifs.indexOf("sendSellerProductRequestSubmitted"))));
   ok("11 · recipients are seller OWNER/MANAGER + notifyEmail, never a customer", /role: \{ in: \["OWNER", "MANAGER"\] \}/.test(emailNotifs) && /notifyEmail/.test(emailNotifs));
   ok("11 · no email on a DRAFT save (only createRequestAction/updateRequestAction, no send there)", !/sendSellerProductRequest\w+\(/.test(sellerActions.slice(0, sellerActions.indexOf("submitRequestAction"))));
