@@ -370,6 +370,16 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
           WHERE "id" = ${productId}`;
       }
 
+      // 3b. Marketplace (9F-3): keep the seller plane in step — a cancelled
+      //     parent order's SellerOrder(s) become CANCELLED so the seller sees
+      //     the true state. Status-guarded so an already-CANCELLED / historic
+      //     row is untouched. Does NOT alter Order.status semantics, events,
+      //     audit or email — those are handled above / below unchanged.
+      await tx.sellerOrder.updateMany({
+        where: { orderId, status: { not: "CANCELLED" } },
+        data: { status: "CANCELLED", updatedAt: new Date() },
+      });
+
       // 4. Timeline event.
       await tx.orderEvent.create({
         data: {

@@ -2,7 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { Plus, Package, AlertTriangle } from "lucide-react";
 import { requireSellerSession } from "@/lib/seller/session";
+import { sellerCan } from "@/lib/marketplace/seller-context";
 import { getSellerDashboard } from "@/lib/seller/offers";
+import { countOpenSellerReturns } from "@/lib/seller/returns";
 import { PageHeader, StatCard, Card, EmptyState, StatusBadge } from "@/components/seller/ui";
 import { pesos, offerStatusTone } from "@/lib/seller/format";
 
@@ -10,7 +12,11 @@ export const metadata: Metadata = { title: "Dashboard" };
 
 export default async function SellerDashboardPage() {
   const { ctx } = await requireSellerSession("/seller");
-  const { statusCounts, lowStock, totalOffers, recent } = await getSellerDashboard(ctx);
+  const canReturns = sellerCan(ctx, "manage_seller_returns");
+  const [{ statusCounts, lowStock, totalOffers, recent }, openReturns] = await Promise.all([
+    getSellerDashboard(ctx),
+    canReturns ? countOpenSellerReturns(ctx) : Promise.resolve(0),
+  ]);
 
   return (
     <div>
@@ -27,12 +33,12 @@ export default async function SellerDashboardPage() {
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total offers" value={totalOffers} hint="Across all statuses" />
         <StatCard label="Draft" value={statusCounts.DRAFT} hint="Not yet published" />
-        <StatCard label="Inactive" value={statusCounts.INACTIVE} hint="Paused by you" />
-        <StatCard
-          label="Low stock"
-          value={lowStock}
-          hint="At or below reorder point"
-        />
+        <StatCard label="Low stock" value={lowStock} hint="At or below reorder point" />
+        {canReturns ? (
+          <StatCard label="Returns to receive" value={openReturns} hint="Approved — awaiting your receipt" />
+        ) : (
+          <StatCard label="Inactive" value={statusCounts.INACTIVE} hint="Paused by you" />
+        )}
       </section>
 
       <Card padded={false}>
