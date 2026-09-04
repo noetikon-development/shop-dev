@@ -126,8 +126,27 @@ export type OfferResolutionContext = Record<string, never>;
  */
 export type SellerContext = {
   sellerId: string;
+  /** the seller's customer-facing display name — for the portal chrome */
+  sellerName: string;
   sellerUserId: string;
+  /** the application `User.id` behind this seller session — for audit / actorUserId */
+  userId: string;
   role: SellerUserRole;
   /** union of seller-scoped permission keys granted by `role` */
   permissions: Set<string>;
+};
+
+/**
+ * One ACTIVE seller membership for the signed-in user, as surfaced by the
+ * portal session resolver. `sellerStatus` is carried so the portal can explain
+ * why an otherwise-valid membership is not usable (seller SUSPENDED / not yet
+ * APPROVED).
+ */
+export type SellerMembership = {
+  sellerId: string;
+  sellerName: string;
+  sellerSlug: string;
+  sellerStatus: SellerStatus;
+  sellerType: SellerType;
+  role: SellerUserRole;
 };

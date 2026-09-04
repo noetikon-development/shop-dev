@@ -184,22 +184,36 @@ async function realParityTests(prisma: PrismaClient) {
         select: {
           id: true, status: true, price: true, compareAtPrice: true, createdAt: true,
           seller: { select: { type: true, status: true } },
-          inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
+          inventory: {
+            select: {
+              quantity: true, reserved: true, reorderPoint: true,
+              adjustments: { where: { reason: { not: "MIGRATION_OPENING" } }, select: { id: true }, take: 1 },
+            },
+          },
         },
       },
     },
   });
-  let priceOk = 0, compareOk = 0, availOk = 0;
+  let priceOk = 0, compareOk = 0, availOk = 0, availCompared = 0;
   for (const v of variants) {
     const win = resolveWinningOfferView(v.offers.map(toCand));
     const refAvail = Math.max(0, (v.inventory?.quantity ?? 0) - (v.inventory?.reserved ?? 0));
     if (win && win.price === v.price) priceOk++;
     if (win && (win.compareAtPrice ?? null) === (v.compareAtPrice ?? null)) compareOk++;
-    if (win && win.available === refAvail) availOk++;
+    // Cross-store availability parity holds only for offers that have NOT moved
+    // past their MIGRATION_OPENING balance. Since the 9E-3D retirement boundary a
+    // moved FIRST_PARTY offer's OfferInventory legitimately diverges from the
+    // frozen legacy Inventory (same regime as reconcile:9e3d) — skip those.
+    const fpOffer = v.offers.find((o) => o.seller.type === "FIRST_PARTY");
+    const moved = (fpOffer?.inventory?.adjustments.length ?? 0) > 0;
+    if (!moved) {
+      availCompared++;
+      if (win && win.available === refAvail) availOk++;
+    }
   }
   ok(`B  winning-offer price == Variant.price for all ${variants.length} ACTIVE variants`, priceOk === variants.length, `${priceOk}/${variants.length}`);
   ok(`B  winning-offer compareAt == Variant.compareAtPrice for all ${variants.length}`, compareOk === variants.length, `${compareOk}/${variants.length}`);
-  ok(`B  winning-offer available == Inventory available for all ${variants.length}`, availOk === variants.length, `${availOk}/${variants.length}`);
+  ok(`B  winning-offer available == Inventory available for all un-moved offers`, availOk === availCompared, `${availOk}/${availCompared} (of ${variants.length}; ${variants.length - availCompared} moved post-retirement)`);
 }
 
 async function syntheticFixtureTests(prisma: PrismaClient) {

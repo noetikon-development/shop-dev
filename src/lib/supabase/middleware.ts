@@ -10,6 +10,13 @@ const PROTECTED_PREFIXES = ["/account", "/wishlist", "/checkout"];
 const ADMIN_PREFIX = "/admin";
 const ADMIN_PUBLIC_PATHS = ["/admin/login"];
 
+// Seller portal. Same shape as the admin area: everything under /seller needs an
+// authenticated session except the login page. The seller-membership check (is
+// this user linked to an APPROVED seller?) needs the database and lives in
+// src/app/seller/(portal)/layout.tsx, which returns a real 403.
+const SELLER_PREFIX = "/seller";
+const SELLER_PUBLIC_PATHS = ["/seller/login"];
+
 /**
  * Runs in proxy.ts on every request:
  *  1. Refreshes the Supabase auth session (rotates cookies).
@@ -65,6 +72,17 @@ export async function updateSession(request: NextRequest) {
     url.pathname = "/admin/login";
     url.search =
       pathname === ADMIN_PREFIX ? "" : `?redirectTo=${encodeURIComponent(pathname)}`;
+    return NextResponse.redirect(url);
+  }
+
+  const isSellerArea =
+    pathname === SELLER_PREFIX || pathname.startsWith(`${SELLER_PREFIX}/`);
+  const isSellerPublic = SELLER_PUBLIC_PATHS.includes(pathname);
+  if (isSellerArea && !isSellerPublic && !user) {
+    const url = request.nextUrl.clone();
+    url.pathname = "/seller/login";
+    url.search =
+      pathname === SELLER_PREFIX ? "" : `?redirectTo=${encodeURIComponent(pathname)}`;
     return NextResponse.redirect(url);
   }
 

@@ -7,17 +7,19 @@ import { permissionsForSellerRole } from "@/lib/marketplace/seller-permissions";
 import type { SellerContext, SellerUserRole } from "@/lib/marketplace/types";
 
 /**
- * Seller-plane authorization (Phase 9C scaffolding).
+ * Seller-plane authorization.
  *
  * ─────────────────────────────────────────────────────────────────────────────
- * NOT WIRED. There is no /seller route, no /seller layout and no seller server
- * action in Phase 9C. This module is the foundation a later phase builds on. It
- * does NOT touch `/admin` authentication or the global RBAC in any way.
- * ─────────────────────────────────────────────────────────────────────────────
+ * Mirrors src/lib/admin/rbac.ts, but for the SELLER plane. It does NOT touch
+ * `/admin` authentication or the global RBAC (UserRole / Role / Permission) in
+ * any way — the two planes are independent. A person may hold both, either, or
+ * neither.
  *
- * Mirrors src/lib/admin/rbac.ts:
- *   getCurrentSellerContext(seller)  → SellerContext | null   (like getCurrentAdmin)
- *   requireSellerContext(seller)     → SellerContext | throws  (like requireAdmin)
+ * `getCurrentSellerContext(sellerIdOrSlug)` resolves a context for ONE named
+ * seller. The `/seller` portal does not know the seller id at entry, so it goes
+ * through `src/lib/seller/session.ts` (`getSellerSession`), which lists the
+ * caller's memberships and then calls this for the chosen one.
+ * ─────────────────────────────────────────────────────────────────────────────
  *
  * A seller user is authorised for a given seller ONLY when:
  *   1. they are a verified Supabase user with an application User row, AND
@@ -37,7 +39,7 @@ export const getCurrentSellerContext = cache(
 
     const seller = await prisma.seller.findFirst({
       where: { OR: [{ id: key }, { slug: key }] },
-      select: { id: true, status: true },
+      select: { id: true, status: true, displayName: true },
     });
     if (!seller || seller.status !== "APPROVED") return null;
 
@@ -50,7 +52,9 @@ export const getCurrentSellerContext = cache(
     const role = membership.role as SellerUserRole;
     return {
       sellerId: seller.id,
+      sellerName: seller.displayName,
       sellerUserId: membership.id,
+      userId: user.id,
       role,
       permissions: permissionsForSellerRole(role),
     };
@@ -64,8 +68,8 @@ export function sellerCan(ctx: SellerContext, permission: string): boolean {
 
 /**
  * Require a seller context for `sellerIdOrSlug`, or raise the Next.js 403
- * interrupt. For use by a future /seller layout / server action — unused in
- * Phase 9C.
+ * interrupt. Used by the `/seller` layout / server actions once the caller's
+ * seller has been resolved.
  */
 export async function requireSellerContext(sellerIdOrSlug: string): Promise<SellerContext> {
   const ctx = await getCurrentSellerContext(sellerIdOrSlug);

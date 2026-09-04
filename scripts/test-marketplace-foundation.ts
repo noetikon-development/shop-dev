@@ -181,7 +181,14 @@ async function dbTests(prisma: PrismaClient) {
       });
       await tx.offerInventory.create({ data: { offerId: offerB.id, quantity: 20, reserved: 0, reorderPoint: 2 } });
 
-      const ctxA: SellerContext = { sellerId: sellerA.id, sellerUserId: "x", role: "OWNER", permissions: new Set() };
+      const ctxA: SellerContext = {
+        sellerId: sellerA.id,
+        sellerName: "Test A",
+        sellerUserId: "x",
+        userId: "test-user",
+        role: "OWNER",
+        permissions: new Set(),
+      };
 
       const aOwn = await getOfferForSeller(ctxA, offerA.id, tx);
       ok("11 getOfferForSeller returns the seller's own offer", aOwn?.id === offerA.id);

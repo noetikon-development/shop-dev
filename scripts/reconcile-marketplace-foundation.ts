@@ -58,8 +58,24 @@ export async function reconcile(prisma: PrismaClient, baseline = BASELINE) {
       `status=${axiaro.status} slug=${axiaro.slug} commissionRate=${axiaro.commissionRate}`);
   }
 
-  add(13, "No unexpected THIRD_PARTY seller exists", tp.length === 0,
-    `THIRD_PARTY sellers: ${tp.length}`);
+  // Phase 9F-1 evolved this check. Third-party sellers may now exist (the Seller
+  // Portal foundation + a dev sandbox seller), but the customer-visibility
+  // invariant is what matters while `marketplace.multiSellerCheckout` is false:
+  // NO third-party Offer may be ACTIVE, so none can win the buy box.
+  const gateRow = await prisma.storeSetting.findUnique({
+    where: { key: "marketplace.multiSellerCheckout" },
+    select: { value: true },
+  });
+  const multiSellerOn = gateRow?.value === "true";
+  const activeTpOffers = await prisma.offer.count({
+    where: { status: "ACTIVE", seller: { is: { type: "THIRD_PARTY" } } },
+  });
+  add(
+    13,
+    "No THIRD_PARTY Offer is ACTIVE while multi-seller checkout is off",
+    multiSellerOn || activeTpOffers === 0,
+    `multiSellerCheckout=${gateRow?.value ?? "<absent>"} · active 3P offers: ${activeTpOffers} · 3P sellers: ${tp.length}`,
+  );
 
   const qualifyingVariants = await prisma.variant.findMany({
     where: { status: "ACTIVE", product: { status: { in: ["ACTIVE", "DRAFT"] } } },

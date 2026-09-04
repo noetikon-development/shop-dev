@@ -50,6 +50,9 @@
     "test:9e3d3": "node --env-file=.env --import tsx scripts/test-9e3d3.ts",
     "test:9e3d5": "node --env-file=.env --import tsx scripts/test-9e3d5.ts",
     "test:9e3d6": "node --env-file=.env --import tsx scripts/test-9e3d6.ts",
+    "test:9f1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f1.ts",
+    "test:9f2": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f2.ts",
+    "seed:seller:sandbox": "node --env-file=.env --import tsx scripts/seed-seller-sandbox.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"
   },
