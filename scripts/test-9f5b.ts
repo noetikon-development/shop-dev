@@ -41,6 +41,7 @@ import {
   attachRequestImage,
   detachRequestImage,
   checkRequestDuplicates,
+  parseProposal,
 } from "../src/lib/marketplace/seller-product-request-repository";
 import { getSellerRequestForSeller } from "../src/lib/marketplace/seller-product-request-repository";
 import type { SellerContext } from "../src/lib/marketplace/types";
@@ -155,7 +156,9 @@ async function dbTests() {
         }, tx);
         ok("2 · updateSellerRequest (DRAFT) → ok", edited.ok === true);
         const row2 = await tx.sellerProductRequest.findUnique({ where: { id: reqId }, select: { proposedName: true, proposedVariants: true } });
-        ok("2 · edit persisted", row2?.proposedName === `Custom Widget ${t} v2` && Array.isArray(row2?.proposedVariants) && (row2!.proposedVariants as unknown[]).length === 2);
+        // 9F-5c: proposedVariants is now { options, variants } (parseProposal
+        // normalises the legacy bare-array shape too).
+        ok("2 · edit persisted", row2?.proposedName === `Custom Widget ${t} v2` && parseProposal(row2?.proposedVariants).variants.length === 2);
 
         // 6 / 7 — cross-seller
         ok("6 · getSellerRequestForSeller(B, A's id) → null", (await getSellerRequestForSeller(ctxB, reqId, tx)) === null);

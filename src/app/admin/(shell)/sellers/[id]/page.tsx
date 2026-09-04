@@ -152,7 +152,9 @@ export default async function AdminSellerDetailPage({
           <Card padded={false}>
             <div className="flex items-center justify-between border-b border-line px-5 py-3">
               <h2 className="text-sm font-semibold">Product requests</h2>
-              <span className="text-xs text-ink-faint">read-only · {requests.length}</span>
+              <Link href="/admin/seller-product-requests" className="text-xs text-clay hover:underline">
+                review queue ↗
+              </Link>
             </div>
             {requests.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-faint">No product requests from this seller.</p>
@@ -161,7 +163,12 @@ export default async function AdminSellerDetailPage({
                 {requests.map((r) => (
                   <li key={r.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
                     <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium text-ink">{r.name}</span>
+                      <Link
+                        href={`/admin/seller-product-requests/${r.id}`}
+                        className="block truncate font-medium text-ink hover:underline"
+                      >
+                        {r.name}
+                      </Link>
                       <span className="block truncate text-xs text-ink-faint">{r.categoryName ?? "no category"}</span>
                     </span>
                     <span className="text-xs text-ink-faint">

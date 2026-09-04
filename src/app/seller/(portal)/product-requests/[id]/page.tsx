@@ -50,18 +50,20 @@ export default async function SellerProductRequestDetailPage({
         </div>
       )}
       {r.status === "APPROVED" && (
-        <div className="mb-6 rounded-sm border border-line bg-surface-sunken px-4 py-3 text-sm text-ink-soft">
-          Approved.{" "}
+        <div className="mb-6 rounded-sm border border-sage/40 bg-sage-50 px-4 py-3 text-sm text-ink-soft">
+          <p className="font-medium text-ink">Your product request was approved.</p>
           {r.resultProduct ? (
-            <>
-              Axiaro created <strong className="text-ink">{r.resultProduct.name}</strong> —{" "}
-              <Link href={`/seller/offers/new?q=${encodeURIComponent(r.resultProduct.name)}`} className="underline">
-                list against it
+            <div className="mt-1.5 flex flex-wrap items-center gap-3">
+              <span>
+                Axiaro added <strong className="text-ink">{r.resultProduct.name}</strong> to the
+                catalog. Create your listing to set your price, condition and stock.
+              </span>
+              <Link href={r.resultProduct.listUrl} className="btn btn-primary py-1.5 text-xs">
+                Create listing
               </Link>
-              .
-            </>
+            </div>
           ) : (
-            "Axiaro is preparing the catalog entry."
+            <p className="mt-1">Axiaro is preparing the catalog entry — check back shortly.</p>
           )}
         </div>
       )}
@@ -84,6 +86,7 @@ export default async function SellerProductRequestDetailPage({
                   categoryNote: r.categoryNote,
                   barcode: r.barcode,
                   sellerNote: r.sellerNote,
+                  options: r.options,
                   variants: r.variants,
                 }}
               />
@@ -94,11 +97,25 @@ export default async function SellerProductRequestDetailPage({
                 <Field label="Category">{r.categoryName ?? r.categoryNote}</Field>
                 <Field label="Short description" full>{r.shortDesc}</Field>
                 <Field label="Description" full>{r.description}</Field>
+                <Field label="Options" full>
+                  {r.options.length
+                    ? r.options.map((o) => (
+                        <span key={o.name} className="block">
+                          {o.name}: {o.values.join(", ")}
+                        </span>
+                      ))
+                    : null}
+                </Field>
                 <Field label="Variants" full>
                   {r.variants.length
                     ? r.variants.map((v, i) => (
                         <span key={i} className="block">
                           {v.label}
+                          {v.optionValues && Object.keys(v.optionValues).length
+                            ? ` · ${Object.entries(v.optionValues)
+                                .map(([k, val]) => `${k}: ${val}`)
+                                .join(", ")}`
+                            : ""}
                           {v.proposedSku ? ` · SKU ${v.proposedSku}` : ""}
                           {v.barcode ? ` · ${v.barcode}` : ""}
                         </span>

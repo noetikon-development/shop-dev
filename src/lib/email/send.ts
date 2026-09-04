@@ -41,7 +41,10 @@ export type EmailType =
   | "refund_issued"
   | "refund_completed"
   | "email_verification"
-  | "password_reset";
+  | "password_reset"
+  | "seller_product_request_submitted"
+  | "seller_product_request_approved"
+  | "seller_product_request_rejected";
 
 export type DispatchInput = {
   type: EmailType;

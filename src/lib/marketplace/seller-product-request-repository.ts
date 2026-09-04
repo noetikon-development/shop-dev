@@ -45,12 +45,33 @@ const MAX_VARIANTS = 12;
 const SKU_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const BARCODE_RE = /^[0-9]{8,14}$/;
 
+// Proposed option limits — MIRROR the canonical catalog (`productOptionsSchema` /
+// `productOptionSchema` in src/lib/admin/catalog-schemas.ts) so a seller can
+// never propose a shape the admin can't map 1:1 during 9F-5c.
+export const MAX_OPTION_TYPES = 3;
+export const MAX_OPTION_VALUES = 24;
+const MAX_OPTION_NAME_LEN = 40;
+const MAX_OPTION_VALUE_LEN = 60;
+
+/** One proposed option type + its values, e.g. { name: "Colour", values: ["Black","Navy"] }. */
+export type ProposedOption = { name: string; values: string[] };
+
 export type ProposedVariant = {
   label: string;
   proposedSku?: string | null;
   barcode?: string | null;
+  /** free-text note (legacy field, kept for older rows — no longer written) */
   attributes?: string | null;
+  /** structured option → value map, e.g. { Colour: "Black", Size: "M" } */
+  optionValues?: Record<string, string> | null;
 };
+
+/**
+ * The shape stored in the `SellerProductRequest.proposedVariants` Json? column
+ * since 9F-5c. Older rows hold a bare `ProposedVariant[]` — `parseProposal`
+ * normalises both. NO new column: options live inside the same JSON value.
+ */
+export type ProposedPayload = { options: ProposedOption[]; variants: ProposedVariant[] };
 
 export type SellerRequestInput = {
   proposedName: string;
@@ -60,9 +81,62 @@ export type SellerRequestInput = {
   proposedCategoryId?: string | null;
   categoryNote?: string | null;
   barcode?: string | null;
+  proposedOptions?: ProposedOption[];
   proposedVariants?: ProposedVariant[];
   sellerNote?: string | null;
 };
+
+/**
+ * Normalise the stored `proposedVariants` JSON to `{ options, variants }`.
+ * Accepts the legacy bare-array shape (options: []) and the 9F-5c object shape.
+ */
+export function parseProposal(raw: unknown): ProposedPayload {
+  const asVariant = (v: unknown): ProposedVariant | null => {
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    const label = typeof o.label === "string" ? o.label : "";
+    if (!label) return null;
+    let optionValues: Record<string, string> | null = null;
+    if (o.optionValues && typeof o.optionValues === "object" && !Array.isArray(o.optionValues)) {
+      optionValues = {};
+      for (const [k, val] of Object.entries(o.optionValues as Record<string, unknown>)) {
+        if (typeof val === "string" && val.trim()) optionValues[k] = val;
+      }
+      if (Object.keys(optionValues).length === 0) optionValues = null;
+    }
+    return {
+      label,
+      proposedSku: typeof o.proposedSku === "string" ? o.proposedSku : null,
+      barcode: typeof o.barcode === "string" ? o.barcode : null,
+      attributes: typeof o.attributes === "string" ? o.attributes : null,
+      optionValues,
+    };
+  };
+  const asOption = (v: unknown): ProposedOption | null => {
+    if (!v || typeof v !== "object") return null;
+    const o = v as Record<string, unknown>;
+    const name = typeof o.name === "string" ? o.name.trim() : "";
+    const values = Array.isArray(o.values)
+      ? [...new Set(o.values.filter((x): x is string => typeof x === "string").map((x) => x.trim()).filter(Boolean))]
+      : [];
+    if (!name || values.length === 0) return null;
+    return { name, values };
+  };
+
+  if (Array.isArray(raw)) {
+    return { options: [], variants: raw.map(asVariant).filter((v): v is ProposedVariant => v != null) };
+  }
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    return {
+      options: Array.isArray(o.options) ? o.options.map(asOption).filter((x): x is ProposedOption => x != null) : [],
+      variants: Array.isArray(o.variants)
+        ? o.variants.map(asVariant).filter((v): v is ProposedVariant => v != null)
+        : [],
+    };
+  }
+  return { options: [], variants: [] };
+}
 
 // ---------------------------------------------------------------------------
 // Validation
@@ -99,6 +173,35 @@ function validateInput(
     return { ok: false, code: "VALIDATION", error: "Barcode must be 8–14 digits (GTIN / EAN / UPC)." };
   }
 
+  // ── proposed option types (advisory — admin curates canonical rows in 9F-5c) ──
+  const options: ProposedOption[] = [];
+  for (const raw of input.proposedOptions ?? []) {
+    const oName = cleanUserText(raw?.name ?? "").slice(0, MAX_OPTION_NAME_LEN);
+    const oValues = [
+      ...new Set(
+        (raw?.values ?? [])
+          .map((x) => cleanUserText(String(x)).slice(0, MAX_OPTION_VALUE_LEN))
+          .filter(Boolean),
+      ),
+    ];
+    if (!oName && oValues.length === 0) continue; // skip a blank row
+    if (!oName) return { ok: false, code: "VALIDATION", error: "Every option type needs a name." };
+    if (oValues.length === 0) {
+      return { ok: false, code: "VALIDATION", error: `Option "${oName}" needs at least one value.` };
+    }
+    if (oValues.length > MAX_OPTION_VALUES) {
+      return { ok: false, code: "VALIDATION", error: `Option "${oName}" has too many values (max ${MAX_OPTION_VALUES}).` };
+    }
+    options.push({ name: oName, values: oValues });
+  }
+  if (options.length > MAX_OPTION_TYPES) {
+    return { ok: false, code: "VALIDATION", error: `Too many option types (max ${MAX_OPTION_TYPES}).` };
+  }
+  if (new Set(options.map((o) => o.name.toLowerCase())).size !== options.length) {
+    return { ok: false, code: "VALIDATION", error: "Each option type must have a unique name." };
+  }
+  const optionByName = new Map(options.map((o) => [o.name.toLowerCase(), o]));
+
   const rawVariants = input.proposedVariants ?? [];
   if (rawVariants.length > MAX_VARIANTS) {
     return { ok: false, code: "VALIDATION", error: `Too many variants (max ${MAX_VARIANTS}).` };
@@ -116,8 +219,30 @@ function validateInput(
       return { ok: false, code: "VALIDATION", error: `Variant barcode "${vBarcode}" must be 8–14 digits.` };
     }
     const attributes = v.attributes != null ? cleanUserText(v.attributes).slice(0, 200) || null : null;
-    variants.push({ label, proposedSku: sku, barcode: vBarcode, attributes });
+    // structured option-value map — keys must be declared option types, values
+    // must be one of that option's declared values.
+    let optionValues: Record<string, string> | null = null;
+    if (v.optionValues && typeof v.optionValues === "object") {
+      const clean: Record<string, string> = {};
+      for (const [k, val] of Object.entries(v.optionValues)) {
+        const value = cleanUserText(String(val ?? "")).slice(0, MAX_OPTION_VALUE_LEN);
+        if (!value) continue;
+        const opt = optionByName.get(k.trim().toLowerCase());
+        if (!opt) {
+          return { ok: false, code: "VALIDATION", error: `Variant option "${k}" isn't one of your option types.` };
+        }
+        if (!opt.values.some((ov) => ov.toLowerCase() === value.toLowerCase())) {
+          return { ok: false, code: "VALIDATION", error: `"${value}" isn't a value of option "${opt.name}".` };
+        }
+        clean[opt.name] = value;
+      }
+      if (Object.keys(clean).length > 0) optionValues = clean;
+    }
+    variants.push({ label, proposedSku: sku, barcode: vBarcode, attributes, optionValues });
   }
+
+  const payload: ProposedPayload = { options, variants };
+  const hasPayload = options.length > 0 || variants.length > 0;
 
   return {
     ok: true,
@@ -130,7 +255,7 @@ function validateInput(
       proposedCategoryId: input.proposedCategoryId?.trim() || null,
       categoryNote,
       barcode,
-      proposedVariants: variants.length ? (variants as unknown as Prisma.InputJsonValue) : undefined,
+      proposedVariants: hasPayload ? (payload as unknown as Prisma.InputJsonValue) : undefined,
       sellerNote,
     },
   };
@@ -428,7 +553,7 @@ export async function submitSellerRequest(
         proposedBrand: current.proposedBrand,
         proposedCategoryId: current.proposedCategoryId,
         barcode: current.barcode,
-        proposedVariants: (current.proposedVariants as unknown as ProposedVariant[]) ?? [],
+        proposedVariants: parseProposal(current.proposedVariants).variants,
       },
       { excludeRequestId: requestId },
       tx,

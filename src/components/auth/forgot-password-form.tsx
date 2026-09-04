@@ -7,11 +7,14 @@ import { requestPasswordReset, type ForgotState } from "@/lib/auth-actions";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 
-export function ForgotPasswordForm() {
+export function ForgotPasswordForm({ next = "/login" }: { next?: string }) {
   const [state, formAction, pending] = useActionState<ForgotState, FormData>(
     requestPasswordReset,
     {},
   );
+
+  const backHref = next === "/seller/login" ? "/seller/login" : "/login";
+  const backLabel = next === "/seller/login" ? "Back to seller sign in" : "Back to sign in";
 
   if (state.ok) {
     return (
@@ -25,10 +28,10 @@ export function ForgotPasswordForm() {
           expires in one hour.
         </p>
         <Link
-          href="/login"
+          href={backHref}
           className={buttonClasses({ variant: "outline", className: "mt-6 w-full" })}
         >
-          Back to sign in
+          {backLabel}
         </Link>
       </div>
     );
@@ -42,6 +45,7 @@ export function ForgotPasswordForm() {
       </p>
 
       <form action={formAction} className="mt-7 space-y-4">
+        <input type="hidden" name="next" value={next} />
         <Field label="Email" type="email" name="email" required autoComplete="email" />
 
         {state.error && (
@@ -55,8 +59,8 @@ export function ForgotPasswordForm() {
 
       <p className="mt-6 text-center text-sm text-ink-soft">
         Remembered it?{" "}
-        <Link href="/login" className="font-medium text-ink underline underline-offset-4">
-          Sign in
+        <Link href={backHref} className="font-medium text-ink underline underline-offset-4">
+          {next === "/seller/login" ? "Seller sign in" : "Sign in"}
         </Link>
       </p>
     </div>

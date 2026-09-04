@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { Loader2, Store } from "lucide-react";
 import { Logo } from "@/components/logo";
+import { Field } from "@/components/ui/field";
 import { sellerLogin, type SellerLoginState } from "@/lib/seller/auth-actions";
 
 export function SellerLoginForm() {
@@ -28,14 +29,20 @@ export function SellerLoginForm() {
 
       <form action={formAction} className="mt-7 space-y-4">
         <input type="hidden" name="redirectTo" value={redirectTo} />
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Email</span>
-          <input type="email" name="email" required autoComplete="email" className="field" />
-        </label>
-        <label className="block">
-          <span className="mb-1.5 block text-sm font-medium">Password</span>
-          <input type="password" name="password" required autoComplete="current-password" className="field" />
-        </label>
+        <Field label="Email" type="email" name="email" required autoComplete="email" />
+        <Field
+          label="Password"
+          type="password"
+          name="password"
+          required
+          autoComplete="current-password"
+        />
+
+        <div className="text-right">
+          <Link href="/forgot-password?next=/seller/login" className="text-xs text-ink-soft underline hover:text-ink">
+            Forgot password?
+          </Link>
+        </div>
 
         {state.error && (
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>

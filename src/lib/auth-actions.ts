@@ -11,6 +11,7 @@ import { syncAppUser } from "@/lib/auth";
 import { getSiteUrl } from "@/lib/site-url";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendPasswordChanged, sendEmailChanged, sendSignInAlert } from "@/lib/email/notifications";
+import { safeAuthNext, DEFAULT_AUTH_NEXT } from "@/lib/auth/safe-next";
 import { recordSignIn, summarizeUserAgent } from "@/lib/auth/devices";
 
 /** Best-effort User-Agent for this request — used only for a coarse device summary. */
@@ -202,9 +203,15 @@ export async function requestPasswordReset(
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   if (!email.includes("@")) return { error: "Enter a valid email address." };
 
+  // Where to send the visitor once the reset succeeds. Strict allow-list —
+  // "/login" (customer) or "/seller/login". The seller flow arrives with
+  // ?next=/seller/login; anything else falls back to the customer default.
+  const next = safeAuthNext(String(formData.get("next") ?? ""));
+  const resetPath = next === DEFAULT_AUTH_NEXT ? "/reset-password" : `/reset-password?next=${encodeURIComponent(next)}`;
+
   const supabase = await createClient();
   await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${getSiteUrl()}/auth/callback?next=/reset-password`,
+    redirectTo: `${getSiteUrl()}/auth/callback?next=${encodeURIComponent(resetPath)}`,
   });
   // Always report success — never reveal whether the address is registered.
   return { ok: true };

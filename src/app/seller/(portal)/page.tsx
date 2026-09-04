@@ -7,6 +7,7 @@ import { getSellerDashboard } from "@/lib/seller/offers";
 import { countOpenSellerReturns } from "@/lib/seller/returns";
 import { countOpenSellerRequests } from "@/lib/seller/product-requests";
 import { PageHeader, StatCard, Card, EmptyState, StatusBadge } from "@/components/seller/ui";
+import { SellerApprovedBanner } from "@/components/seller/approved-banner";
 import { pesos, offerStatusTone } from "@/lib/seller/format";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -22,6 +23,7 @@ export default async function SellerDashboardPage() {
 
   return (
     <div>
+      <SellerApprovedBanner sellerName={ctx.sellerName} />
       <PageHeader
         title={`Welcome, ${ctx.sellerName}`}
         description="Manage the products you list on the Axiaro catalog, and the stock behind them."

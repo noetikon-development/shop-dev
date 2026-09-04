@@ -14,9 +14,12 @@ import {
   detachRequestImage,
   type SellerRequestError,
   type ProposedVariant,
+  type ProposedOption,
   type DuplicateBlock,
   type DuplicateWarning,
 } from "@/lib/marketplace/seller-product-request-repository";
+import { sendSellerProductRequestSubmitted } from "@/lib/email/notifications";
+import { scheduleEmail } from "@/lib/email/schedule";
 
 /**
  * `/seller/product-requests` server actions (Phase 9F-5b).
@@ -54,7 +57,34 @@ const fieldsSchema = z.object({
   sellerNote: z.string().trim().max(2200).optional(),
 });
 
-/** Parse `variant.<i>.<field>` flat form entries into a ProposedVariant[]. */
+/** Parse `option.<i>.name` + `option.<i>.values` (newline / comma separated). */
+function parseOptionForm(formData: FormData): ProposedOption[] {
+  const idx = new Set<number>();
+  for (const key of formData.keys()) {
+    const m = key.match(/^option\.(\d+)\./);
+    if (m) idx.add(Number(m[1]));
+  }
+  const out: ProposedOption[] = [];
+  for (const i of [...idx].sort((a, b) => a - b)) {
+    const name = String(formData.get(`option.${i}.name`) ?? "").trim();
+    const values = [
+      ...new Set(
+        String(formData.get(`option.${i}.values`) ?? "")
+          .split(/[\n,]/)
+          .map((v) => v.trim())
+          .filter(Boolean),
+      ),
+    ];
+    if (!name && values.length === 0) continue;
+    out.push({ name, values });
+  }
+  return out;
+}
+
+/**
+ * Parse `variant.<i>.<field>` flat form entries into a ProposedVariant[].
+ * `variant.<i>.optionValue.<Option Name>` entries become the structured map.
+ */
 function parseVariantForm(formData: FormData): ProposedVariant[] {
   const idx = new Set<number>();
   for (const key of formData.keys()) {
@@ -65,11 +95,16 @@ function parseVariantForm(formData: FormData): ProposedVariant[] {
   for (const i of [...idx].sort((a, b) => a - b)) {
     const label = String(formData.get(`variant.${i}.label`) ?? "").trim();
     if (!label) continue;
+    const optionValues: Record<string, string> = {};
+    for (const [key, val] of formData.entries()) {
+      const m = key.match(new RegExp(`^variant\\.${i}\\.optionValue\\.(.+)$`));
+      if (m && String(val).trim()) optionValues[m[1]] = String(val).trim();
+    }
     out.push({
       label,
       proposedSku: String(formData.get(`variant.${i}.sku`) ?? "").trim() || null,
       barcode: String(formData.get(`variant.${i}.barcode`) ?? "").trim() || null,
-      attributes: String(formData.get(`variant.${i}.attributes`) ?? "").trim() || null,
+      optionValues: Object.keys(optionValues).length ? optionValues : null,
     });
   }
   return out;
@@ -118,6 +153,7 @@ export async function createRequestAction(
     proposedCategoryId: parsed.data.proposedCategoryId ?? null,
     categoryNote: parsed.data.categoryNote ?? null,
     barcode: parsed.data.barcode ?? null,
+    proposedOptions: parseOptionForm(formData),
     proposedVariants: parseVariantForm(formData),
     sellerNote: parsed.data.sellerNote ?? null,
   });
@@ -146,6 +182,7 @@ export async function updateRequestAction(
     proposedCategoryId: parsed.data.proposedCategoryId ?? null,
     categoryNote: parsed.data.categoryNote ?? null,
     barcode: parsed.data.barcode ?? null,
+    proposedOptions: parseOptionForm(formData),
     proposedVariants: parseVariantForm(formData),
     sellerNote: parsed.data.sellerNote ?? null,
   });
@@ -178,6 +215,9 @@ export async function submitRequestAction(
     summary: `seller ${ctx.sellerName} submitted product request ${requestId}`,
     meta: { sellerId: ctx.sellerId, requestId, warnings: res.warnings.map((w) => w.message) },
   });
+
+  // 9F-5c Part 11 — one "submitted for review" acknowledgement to the seller.
+  scheduleEmail(() => sendSellerProductRequestSubmitted(requestId));
 
   revalidate(requestId);
   return {

@@ -3,11 +3,19 @@ import Link from "next/link";
 import { getSupabaseUser } from "@/lib/auth";
 import { ResetPasswordForm } from "@/components/auth/reset-password-form";
 import { buttonClasses } from "@/components/ui/button";
+import { safeAuthNext } from "@/lib/auth/safe-next";
 
 export const metadata: Metadata = { title: "Set a new password" };
 export const dynamic = "force-dynamic";
 
-export default async function ResetPasswordPage() {
+export default async function ResetPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next: rawNext } = await searchParams;
+  const next = safeAuthNext(rawNext);
+
   // Arriving here means the recovery link exchanged a short-lived session via
   // /auth/callback. If there's no session, the link was invalid or expired.
   const user = await getSupabaseUser();
@@ -20,7 +28,7 @@ export default async function ResetPasswordPage() {
           Password reset links are valid for one hour. Request a fresh one.
         </p>
         <Link
-          href="/forgot-password"
+          href={next === "/seller/login" ? "/forgot-password?next=/seller/login" : "/forgot-password"}
           className={buttonClasses({ className: "mt-6 w-full" })}
         >
           Request a new link
@@ -29,5 +37,5 @@ export default async function ResetPasswordPage() {
     );
   }
 
-  return <ResetPasswordForm />;
+  return <ResetPasswordForm next={next} />;
 }

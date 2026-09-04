@@ -7,8 +7,10 @@ import { resetPassword, type PasswordState } from "@/lib/auth-actions";
 import { Button, buttonClasses } from "@/components/ui/button";
 import { Field } from "@/components/ui/field";
 
-export function ResetPasswordForm() {
+export function ResetPasswordForm({ next = "/login" }: { next?: string }) {
   const [state, formAction, pending] = useActionState<PasswordState, FormData>(resetPassword, {});
+  const signInHref = next === "/seller/login" ? "/seller/login" : "/login";
+  const signInLabel = next === "/seller/login" ? "Go to seller sign in" : "Sign in";
 
   if (state.ok) {
     return (
@@ -20,8 +22,8 @@ export function ResetPasswordForm() {
         <p className="mt-2 text-sm text-ink-soft">
           You can now sign in with your new password.
         </p>
-        <Link href="/login" className={buttonClasses({ className: "mt-6 w-full" })}>
-          Sign in
+        <Link href={signInHref} className={buttonClasses({ className: "mt-6 w-full" })}>
+          {signInLabel}
         </Link>
       </div>
     );

@@ -27,6 +27,11 @@ import { renderPaymentConfirmation } from "@/lib/email/templates/payment-confirm
 import { renderRefundIssued } from "@/lib/email/templates/refund-issued";
 import { renderRefundCompleted } from "@/lib/email/templates/refund-completed";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
+import {
+  renderSellerProductRequestSubmitted,
+  renderSellerProductRequestApproved,
+  renderSellerProductRequestRejected,
+} from "@/lib/email/templates/seller-product-request";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -1296,6 +1301,170 @@ export async function retryEmailByLog(logId: string): Promise<DispatchResult> {
       // here: they carry time-of-event content (or a single-use provider
       // reference) that must not be regenerated and re-sent later.
       return { ok: false, status: "FAILED", error: "not_retryable" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller product-request notifications (Phase 9F-5c Part 11)
+//
+// Recipients: the seller's ACTIVE OWNER / MANAGER members (their User.email) plus
+// `Seller.notifyEmail` when set. NEVER a customer address. One email per event,
+// deduped on a deterministic key. Non-throwing.
+// ---------------------------------------------------------------------------
+
+type SellerRequestEmailContext = {
+  brand: string;
+  siteUrl: string;
+  sellerName: string;
+  productName: string;
+  requestUrl: string;
+  recipients: string;
+  reviewNote: string | null;
+  resultProductId: string | null;
+};
+
+async function loadSellerRequestEmailContext(
+  requestId: string,
+): Promise<SellerRequestEmailContext | null> {
+  const req = await prisma.sellerProductRequest.findUnique({
+    where: { id: requestId },
+    select: {
+      proposedName: true,
+      reviewStatusNote: true,
+      resultProductId: true,
+      seller: {
+        select: {
+          displayName: true,
+          notifyEmail: true,
+          sellerUsers: {
+            where: { status: "ACTIVE", role: { in: ["OWNER", "MANAGER"] } },
+            select: { user: { select: { email: true } } },
+          },
+        },
+      },
+    },
+  });
+  if (!req) return null;
+
+  const addrs = new Set<string>();
+  for (const su of req.seller.sellerUsers) {
+    const e = su.user.email?.trim().toLowerCase();
+    if (e && EMAIL_RE.test(e)) addrs.add(e);
+  }
+  const notify = req.seller.notifyEmail?.trim().toLowerCase();
+  if (notify && EMAIL_RE.test(notify)) addrs.add(notify);
+  if (addrs.size === 0) return null;
+
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  return {
+    brand,
+    siteUrl,
+    sellerName: req.seller.displayName,
+    productName: req.proposedName,
+    requestUrl: `${siteUrl}/seller/product-requests/${requestId}`,
+    recipients: [...addrs].join(", "),
+    reviewNote: req.reviewStatusNote,
+    resultProductId: req.resultProductId,
+  };
+}
+
+/** Seller — "we received your product request". Key: SELLER_PRODUCT_REQUEST_SUBMITTED:<id>. */
+export async function sendSellerProductRequestSubmitted(requestId: string): Promise<DispatchResult> {
+  try {
+    const ctx = await loadSellerRequestEmailContext(requestId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    return renderAndDispatch(
+      {
+        type: "seller_product_request_submitted",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: `SELLER_PRODUCT_REQUEST_SUBMITTED:${requestId}`,
+      },
+      () =>
+        renderSellerProductRequestSubmitted({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          productName: ctx.productName,
+          requestUrl: ctx.requestUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProductRequestSubmitted", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Seller — the request was approved (linked to an existing product OR a new
+ * canonical product was created). `reviewedAt` buckets the idempotency key so a
+ * later review round can send again. Key:
+ * SELLER_PRODUCT_REQUEST_APPROVED:<id>:<reviewedAt ms>.
+ */
+export async function sendSellerProductRequestApproved(
+  requestId: string,
+  opts: { reviewedAt: Date; linked: boolean; listUrl?: string | null },
+): Promise<DispatchResult> {
+  try {
+    const ctx = await loadSellerRequestEmailContext(requestId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    return renderAndDispatch(
+      {
+        type: "seller_product_request_approved",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: `SELLER_PRODUCT_REQUEST_APPROVED:${requestId}:${opts.reviewedAt.getTime()}`,
+      },
+      () =>
+        renderSellerProductRequestApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          productName: ctx.productName,
+          requestUrl: ctx.requestUrl,
+          linked: opts.linked,
+          listUrl: opts.listUrl ? `${ctx.siteUrl}${opts.listUrl}` : null,
+          reviewNote: ctx.reviewNote,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProductRequestApproved", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Seller — the request was rejected (terminal) or sent back for changes.
+ * Key: SELLER_PRODUCT_REQUEST_REJECTED:<id>:<outcome>:<reviewedAt ms>.
+ */
+export async function sendSellerProductRequestRejected(
+  requestId: string,
+  opts: { reviewedAt: Date; outcome: "rejected" | "changes_requested" },
+): Promise<DispatchResult> {
+  try {
+    const ctx = await loadSellerRequestEmailContext(requestId);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    return renderAndDispatch(
+      {
+        type: "seller_product_request_rejected",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: `SELLER_PRODUCT_REQUEST_REJECTED:${requestId}:${opts.outcome}:${opts.reviewedAt.getTime()}`,
+      },
+      () =>
+        renderSellerProductRequestRejected({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          productName: ctx.productName,
+          requestUrl: ctx.requestUrl,
+          outcome: opts.outcome,
+          reviewNote: ctx.reviewNote,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProductRequestRejected", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
 

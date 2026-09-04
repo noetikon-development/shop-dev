@@ -82,6 +82,15 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     emptyLabel: "No variants to manage here yet.",
     live: true,
   },
+  {
+    path: "/admin/seller-product-requests",
+    label: "Seller requests",
+    description: "Review products third-party sellers have asked Axiaro to add to the catalog.",
+    group: "catalog",
+    accepts: ["manage_content", "create_products"],
+    emptyLabel: "No seller product requests yet.",
+    live: true,
+  },
 
   // Standalone sections
   {

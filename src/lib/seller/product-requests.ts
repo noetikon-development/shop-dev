@@ -5,8 +5,10 @@ import {
   countSellerRequests,
   getSellerRequestForSeller,
   checkRequestDuplicates,
+  parseProposal,
   type SellerRequestStatus,
   type ProposedVariant,
+  type ProposedOption,
   type DuplicateReport,
 } from "@/lib/marketplace/seller-product-request-repository";
 import type { SellerContext } from "@/lib/marketplace/types";
@@ -32,26 +34,13 @@ export type SellerRequestRow = {
   updatedAt: string;
 };
 
-function parseVariants(raw: unknown): ProposedVariant[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((v): v is Record<string, unknown> => Boolean(v) && typeof v === "object")
-    .map((v) => ({
-      label: typeof v.label === "string" ? v.label : "",
-      proposedSku: typeof v.proposedSku === "string" ? v.proposedSku : null,
-      barcode: typeof v.barcode === "string" ? v.barcode : null,
-      attributes: typeof v.attributes === "string" ? v.attributes : null,
-    }))
-    .filter((v) => v.label);
-}
-
 function toRow(r: Row): SellerRequestRow {
   return {
     id: r.id,
     status: r.status,
     name: r.proposedName,
     categoryName: r.proposedCategory?.name ?? null,
-    variantCount: parseVariants(r.proposedVariants).length,
+    variantCount: parseProposal(r.proposedVariants).variants.length,
     imageCount: r.images.length,
     submittedAt: r.submittedAt?.toISOString() ?? null,
     updatedAt: r.updatedAt.toISOString(),
@@ -92,12 +81,13 @@ export type SellerRequestDetailView = {
   categoryName: string | null;
   categoryNote: string | null;
   barcode: string | null;
+  options: ProposedOption[];
   variants: ProposedVariant[];
   sellerNote: string | null;
   reviewNote: string | null;
   reviewedAt: string | null;
   submittedAt: string | null;
-  resultProduct: { name: string; slug: string } | null;
+  resultProduct: { name: string; slug: string; listUrl: string } | null;
   images: { id: string; url: string; filename: string; role: string; sortOrder: number }[];
   createdAt: string;
   updatedAt: string;
@@ -112,7 +102,7 @@ export async function getSellerRequestDetail(
   const r = await getSellerRequestForSeller(ctx, requestId);
   if (!r) return null;
 
-  const variants = parseVariants(r.proposedVariants);
+  const { options, variants } = parseProposal(r.proposedVariants);
   const editable = r.status === "DRAFT";
 
   const duplicates = editable
@@ -128,6 +118,24 @@ export async function getSellerRequestDetail(
       )
     : null;
 
+  // Post-approval "Create listing" deep-link (9F-5c Part 8). When the canonical
+  // product has exactly one ACTIVE variant, preselect it; otherwise send the
+  // seller to the catalog picker pre-filtered by the product name. This NEVER
+  // creates an Offer — the seller still owns price / condition / stock.
+  let resultProduct: SellerRequestDetailView["resultProduct"] = null;
+  if (r.resultProductId && r.resultProduct) {
+    const activeVariants = await prisma.variant.findMany({
+      where: { productId: r.resultProductId, status: "ACTIVE" },
+      select: { id: true },
+      take: 2,
+    });
+    const listUrl =
+      activeVariants.length === 1
+        ? `/seller/offers/new?variantId=${activeVariants[0].id}`
+        : `/seller/offers/new?q=${encodeURIComponent(r.resultProduct.name)}`;
+    resultProduct = { name: r.resultProduct.name, slug: r.resultProduct.slug, listUrl };
+  }
+
   return {
     id: r.id,
     status: r.status,
@@ -140,12 +148,13 @@ export async function getSellerRequestDetail(
     categoryName: r.proposedCategory?.name ?? null,
     categoryNote: r.categoryNote,
     barcode: r.barcode,
+    options,
     variants,
     sellerNote: r.sellerNote,
     reviewNote: r.reviewStatusNote,
     reviewedAt: r.reviewedAt?.toISOString() ?? null,
     submittedAt: r.submittedAt?.toISOString() ?? null,
-    resultProduct: r.resultProduct ? { name: r.resultProduct.name, slug: r.resultProduct.slug } : null,
+    resultProduct,
     images: r.images.map((i) => ({
       id: i.id,
       url: i.mediaAsset.url,

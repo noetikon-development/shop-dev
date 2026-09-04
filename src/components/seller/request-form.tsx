@@ -10,7 +10,13 @@ import {
 import { FormField, Select, notify, usePersistentAction } from "@/components/seller/ui";
 
 type Category = { id: string; name: string; parentName: string | null };
-type Variant = { label: string; proposedSku?: string | null; barcode?: string | null; attributes?: string | null };
+type Variant = {
+  label: string;
+  proposedSku?: string | null;
+  barcode?: string | null;
+  optionValues?: Record<string, string> | null;
+};
+type OptionDef = { name: string; values: string[] };
 
 type Defaults = {
   proposedName: string;
@@ -21,8 +27,12 @@ type Defaults = {
   categoryNote: string | null;
   barcode: string | null;
   sellerNote: string | null;
+  options: OptionDef[];
   variants: Variant[];
 };
+
+const MAX_OPTIONS = 3;
+const MAX_VARIANTS = 12;
 
 export function RequestForm({
   mode,
@@ -38,6 +48,11 @@ export function RequestForm({
   const action = mode === "create" ? createRequestAction : updateRequestAction;
   const { state, onSubmit, pending } = usePersistentAction<SellerRequestActionState>(action, {});
 
+  const [options, setOptions] = useState<{ name: string; values: string }[]>(
+    defaults?.options.length
+      ? defaults.options.map((o) => ({ name: o.name, values: o.values.join(", ") }))
+      : [],
+  );
   const [rows, setRows] = useState<Variant[]>(
     defaults?.variants.length ? defaults.variants : [{ label: "Default" }],
   );
@@ -47,9 +62,31 @@ export function RequestForm({
     if (state.error) notify.error(state.error);
   }, [state]);
 
+  // Parsed option definitions (name + non-empty values) used to render the
+  // per-variant selectors.
+  const parsedOptions = options
+    .map((o) => ({
+      name: o.name.trim(),
+      values: [...new Set(o.values.split(/[\n,]/).map((v) => v.trim()).filter(Boolean))],
+    }))
+    .filter((o) => o.name && o.values.length);
+
+  const setOption = (i: number, patch: Partial<{ name: string; values: string }>) =>
+    setOptions((o) => o.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
+  const addOption = () => setOptions((o) => (o.length < MAX_OPTIONS ? [...o, { name: "", values: "" }] : o));
+  const removeOption = (i: number) => setOptions((o) => o.filter((_, idx) => idx !== i));
+
   const setRow = (i: number, patch: Partial<Variant>) =>
     setRows((r) => r.map((row, idx) => (idx === i ? { ...row, ...patch } : row)));
-  const addRow = () => setRows((r) => (r.length < 12 ? [...r, { label: "" }] : r));
+  const setRowOption = (i: number, optName: string, value: string) =>
+    setRows((r) =>
+      r.map((row, idx) =>
+        idx === i
+          ? { ...row, optionValues: { ...(row.optionValues ?? {}), [optName]: value } }
+          : row,
+      ),
+    );
+  const addRow = () => setRows((r) => (r.length < MAX_VARIANTS ? [...r, { label: "" }] : r));
   const removeRow = (i: number) => setRows((r) => (r.length > 1 ? r.filter((_, idx) => idx !== i) : r));
 
   return (
@@ -111,49 +148,114 @@ export function RequestForm({
       </div>
 
       <fieldset className="space-y-3">
-        <legend className="text-sm font-medium text-ink">Variants</legend>
+        <legend className="text-sm font-medium text-ink">Options</legend>
         <p className="text-xs text-ink-faint">
-          One row per option you want to sell (e.g. a size or colour). Axiaro sets the final SKUs.
+          Optional. If the product comes in a Colour, Size etc., name the option and list its values
+          (comma-separated). Up to {MAX_OPTIONS} options, {24} values each. Axiaro builds the final
+          option/variant structure and SKUs.
         </p>
-        {rows.map((row, i) => (
-          <div key={i} className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+        {options.map((opt, i) => (
+          <div key={i} className="grid gap-2 sm:grid-cols-[1fr_2fr_auto]">
             <input
-              name={`variant.${i}.label`}
-              value={row.label}
-              onChange={(e) => setRow(i, { label: e.target.value })}
-              placeholder="Label (e.g. Oak / Large)"
-              maxLength={60}
+              name={`option.${i}.name`}
+              value={opt.name}
+              onChange={(e) => setOption(i, { name: e.target.value })}
+              placeholder="Option name (e.g. Colour)"
+              maxLength={40}
               className="field text-sm"
             />
             <input
-              name={`variant.${i}.sku`}
-              value={row.proposedSku ?? ""}
-              onChange={(e) => setRow(i, { proposedSku: e.target.value })}
-              placeholder="Proposed SKU (optional)"
-              maxLength={64}
-              className="field text-sm"
-            />
-            <input
-              name={`variant.${i}.barcode`}
-              value={row.barcode ?? ""}
-              onChange={(e) => setRow(i, { barcode: e.target.value })}
-              placeholder="Barcode (optional)"
-              inputMode="numeric"
-              maxLength={20}
+              name={`option.${i}.values`}
+              value={opt.values}
+              onChange={(e) => setOption(i, { values: e.target.value })}
+              placeholder="Values, comma-separated (e.g. Black, Navy, Sand)"
               className="field text-sm"
             />
             <button
               type="button"
-              onClick={() => removeRow(i)}
-              disabled={rows.length <= 1}
-              aria-label="Remove variant"
-              className="btn btn-ghost px-2 py-2 text-ink-faint disabled:opacity-40"
+              onClick={() => removeOption(i)}
+              aria-label="Remove option"
+              className="btn btn-ghost px-2 py-2 text-ink-faint"
             >
               <X size={14} />
             </button>
           </div>
         ))}
-        <button type="button" onClick={addRow} disabled={rows.length >= 12} className="btn btn-outline py-1.5 text-xs">
+        {options.length < MAX_OPTIONS && (
+          <button type="button" onClick={addOption} className="btn btn-outline py-1.5 text-xs">
+            <Plus size={13} /> Add option
+          </button>
+        )}
+      </fieldset>
+
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium text-ink">Variants</legend>
+        <p className="text-xs text-ink-faint">
+          One row per variant you want to sell. Axiaro sets the final SKUs.
+        </p>
+        {rows.map((row, i) => (
+          <div key={i} className="space-y-2 rounded-sm border border-line-soft p-2">
+            <div className="grid gap-2 sm:grid-cols-[1fr_1fr_1fr_auto]">
+              <input
+                name={`variant.${i}.label`}
+                value={row.label}
+                onChange={(e) => setRow(i, { label: e.target.value })}
+                placeholder="Label (e.g. Oak / Large)"
+                maxLength={60}
+                className="field text-sm"
+              />
+              <input
+                name={`variant.${i}.sku`}
+                value={row.proposedSku ?? ""}
+                onChange={(e) => setRow(i, { proposedSku: e.target.value })}
+                placeholder="Proposed SKU (optional)"
+                maxLength={64}
+                className="field text-sm"
+              />
+              <input
+                name={`variant.${i}.barcode`}
+                value={row.barcode ?? ""}
+                onChange={(e) => setRow(i, { barcode: e.target.value })}
+                placeholder="Barcode (optional)"
+                inputMode="numeric"
+                maxLength={20}
+                className="field text-sm"
+              />
+              <button
+                type="button"
+                onClick={() => removeRow(i)}
+                disabled={rows.length <= 1}
+                aria-label="Remove variant"
+                className="btn btn-ghost px-2 py-2 text-ink-faint disabled:opacity-40"
+              >
+                <X size={14} />
+              </button>
+            </div>
+            {parsedOptions.length > 0 && (
+              <div className="grid gap-2 sm:grid-cols-3">
+                {parsedOptions.map((opt) => (
+                  <label key={opt.name} className="block text-xs text-ink-faint">
+                    {opt.name}
+                    <select
+                      name={`variant.${i}.optionValue.${opt.name}`}
+                      value={row.optionValues?.[opt.name] ?? ""}
+                      onChange={(e) => setRowOption(i, opt.name, e.target.value)}
+                      className="field mt-0.5 pr-9 text-sm"
+                    >
+                      <option value="">—</option>
+                      {opt.values.map((v) => (
+                        <option key={v} value={v}>
+                          {v}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        <button type="button" onClick={addRow} disabled={rows.length >= MAX_VARIANTS} className="btn btn-outline py-1.5 text-xs">
           <Plus size={13} /> Add variant
         </button>
       </fieldset>

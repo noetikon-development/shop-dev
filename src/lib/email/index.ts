@@ -28,6 +28,9 @@ export {
   sendRefundCompleted,
   sendEmailVerification,
   sendPasswordReset,
+  sendSellerProductRequestSubmitted,
+  sendSellerProductRequestApproved,
+  sendSellerProductRequestRejected,
 } from "@/lib/email/notifications";
 export { isEmailConfigured, getEmailConfig } from "@/lib/email/config";
 export type { DispatchResult, EmailType } from "@/lib/email/send";
