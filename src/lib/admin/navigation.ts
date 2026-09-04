@@ -256,17 +256,25 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     emptyLabel: "No media uploaded yet.",
     live: true,
   },
+  // Admin
   {
     path: "/admin/sellers",
-    label: "Seller content",
-    description: "Review third-party seller store-profile submissions.",
-    group: "content",
-    accepts: ["manage_content"],
-    emptyLabel: "No seller profiles awaiting review.",
+    label: "Sellers",
+    description: "Onboard and manage third-party marketplace sellers and their members.",
+    group: "admin",
+    accepts: ["manage_settings", "manage_content"],
+    emptyLabel: "No sellers yet.",
     live: true,
   },
-
-  // Admin
+  {
+    path: "/admin/sellers/new",
+    label: "New seller",
+    description: "Create a third-party seller.",
+    group: "admin",
+    accepts: ["manage_settings"],
+    hideInNav: true,
+    live: true,
+  },
   {
     path: "/admin/users",
     label: "Admin Users",
