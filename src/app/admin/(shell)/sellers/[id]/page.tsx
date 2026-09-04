@@ -3,7 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireAnyPermission } from "@/lib/admin/rbac";
-import { getAdminSeller } from "@/lib/admin/sellers/repository";
+import { getAdminSeller, listSellerOffersForAdmin } from "@/lib/admin/sellers/repository";
 import { sellerStatusLabel, sellerStatusTone } from "@/lib/admin/sellers/lifecycle";
 import { countryName } from "@/lib/countries";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
@@ -28,7 +28,7 @@ export default async function AdminSellerDetailPage({
   const canReviewContent = admin.isSuperAdmin || admin.permissions.has("manage_content");
 
   const { id } = await params;
-  const s = await getAdminSeller(id);
+  const [s, listings] = await Promise.all([getAdminSeller(id), listSellerOffersForAdmin(id, { limit: 100 })]);
   if (!s) notFound();
 
   const social = SELLER_SOCIAL_KEYS.map((k) => [k, s.profile.socialLinks[k]] as const).filter(([, v]) => Boolean(v));
@@ -91,6 +91,55 @@ export default async function AdminSellerDetailPage({
               <SellerUsersPanel sellerId={s.id} users={s.sellerUsers} />
             </Card>
           )}
+
+          <Card padded={false}>
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <h2 className="text-sm font-semibold">Listings</h2>
+              <span className="text-xs text-ink-faint">
+                read-only · {listings.length}
+                {listings.length === 100 ? "+" : ""}
+              </span>
+            </div>
+            {listings.length === 0 ? (
+              <p className="px-5 py-4 text-sm text-ink-faint">This seller has no catalog listings.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[40rem] border-collapse text-xs">
+                  <thead>
+                    <tr className="border-b border-line bg-surface-sunken/60 text-[10px] uppercase tracking-wide text-ink-faint">
+                      <th className="px-4 py-2 text-left">Product / option</th>
+                      <th className="px-4 py-2 text-left">SKU</th>
+                      <th className="px-4 py-2 text-left">Condition</th>
+                      <th className="px-4 py-2 text-right">Price</th>
+                      <th className="px-4 py-2 text-right">Stock</th>
+                      <th className="px-4 py-2 text-left">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listings.map((o) => (
+                      <tr key={o.id} className="border-b border-line/60 last:border-0">
+                        <td className="px-4 py-2">
+                          <span className="font-medium text-ink">{o.productName}</span>
+                          <span className="block text-ink-faint">{o.optionLabel}</span>
+                        </td>
+                        <td className="px-4 py-2 font-mono text-ink-soft">{o.sellerSku ?? o.variantSku}</td>
+                        <td className="px-4 py-2 text-ink-soft">{o.condition}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-ink-soft">
+                          ₱{(o.price / 100).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2 text-right tabular-nums text-ink-soft">{o.available}</td>
+                        <td className="px-4 py-2">
+                          <StatusBadge tone={o.status === "ACTIVE" ? "success" : o.status === "ARCHIVED" ? "danger" : "neutral"}>
+                            {o.status}
+                          </StatusBadge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
 
           <Card>
             <h2 className="mb-3 text-sm font-semibold">Submitted profile</h2>

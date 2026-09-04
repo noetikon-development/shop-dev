@@ -22,16 +22,16 @@ export default async function SellerDashboardPage() {
     <div>
       <PageHeader
         title={`Welcome, ${ctx.sellerName}`}
-        description="Manage the offers you list on the Axiaro catalog, and the stock behind them."
+        description="Manage the products you list on the Axiaro catalog, and the stock behind them."
         actions={
           <Link href="/seller/offers/new" className="btn btn-primary py-2 text-sm">
-            <Plus size={14} /> New offer
+            <Plus size={14} /> Add listing
           </Link>
         }
       />
 
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total offers" value={totalOffers} hint="Across all statuses" />
+        <StatCard label="Total listings" value={totalOffers} hint="Across all statuses" />
         <StatCard label="Draft" value={statusCounts.DRAFT} hint="Not yet published" />
         <StatCard label="Low stock" value={lowStock} hint="At or below reorder point" />
         {canReturns ? (
@@ -43,7 +43,7 @@ export default async function SellerDashboardPage() {
 
       <Card padded={false}>
         <div className="flex items-center justify-between border-b border-line px-5 py-3">
-          <h2 className="text-sm font-semibold">Recent offers</h2>
+          <h2 className="text-sm font-semibold">Recent listings</h2>
           <Link href="/seller/offers" className="text-xs text-ink-soft hover:text-ink">
             View all
           </Link>
@@ -52,11 +52,11 @@ export default async function SellerDashboardPage() {
           <div className="p-5">
             <EmptyState
               icon={<Package size={18} />}
-              title="No offers yet"
-              description="Create your first offer against a catalog product to get started."
+              title="No listings yet"
+              description="Create your first listing against a catalog product to get started."
               action={
                 <Link href="/seller/offers/new" className="btn btn-primary py-2 text-sm">
-                  <Plus size={14} /> New offer
+                  <Plus size={14} /> Add listing
                 </Link>
               }
               compact

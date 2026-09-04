@@ -18,7 +18,10 @@ export type SellerRoute = {
 
 export const SELLER_ROUTES: SellerRoute[] = [
   { path: "/seller", label: "Dashboard", live: true },
-  { path: "/seller/offers", label: "My Offers", accepts: "view_offers", live: true },
+  // 9F-5a: the seller-facing label is "Listings" (was the older offer-centric
+  // wording). The route path stays /seller/offers — an Offer is still the
+  // underlying model; only the label changed.
+  { path: "/seller/offers", label: "Listings", accepts: "view_offers", live: true },
   { path: "/seller/orders", label: "Orders", accepts: "view_seller_orders", live: true },
   { path: "/seller/returns", label: "Returns", accepts: "manage_seller_returns", live: true },
   { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: true },
@@ -31,8 +34,8 @@ export function sellerNav(permissions: Set<string>, role: string): SellerRoute[]
 
 const CRUMB_LABELS: Record<string, string> = {
   seller: "Seller",
-  offers: "My Offers",
-  new: "New offer",
+  offers: "Listings",
+  new: "Add listing",
   orders: "Orders",
   returns: "Returns",
   settings: "Settings",
@@ -47,7 +50,7 @@ export function sellerBreadcrumbs(pathname: string): { label: string; href?: str
     const isLast = i === parts.length - 1;
     // an id segment (cuid-ish) shows contextually
     const idLabel =
-      parts[i - 1] === "orders" ? "Order" : parts[i - 1] === "returns" ? "Return" : "Offer";
+      parts[i - 1] === "orders" ? "Order" : parts[i - 1] === "returns" ? "Return" : "Listing";
     const label = CRUMB_LABELS[part] ?? (/^[a-z0-9]{20,}$/i.test(part) ? idLabel : part);
     crumbs.push({ label, href: isLast ? undefined : acc });
   });

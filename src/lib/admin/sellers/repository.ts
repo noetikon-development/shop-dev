@@ -114,6 +114,75 @@ export async function listAdminSellers(
   }));
 }
 
+/**
+ * READ-ONLY (9F-5a) — a seller's listings (Offers) for the admin detail page.
+ * The operator can see what a third-party seller lists against the catalog; it
+ * carries no actions. Cross-seller by design (admin plane). Stock comes from the
+ * authoritative `OfferInventory`, never `Variant.stock`.
+ */
+export type AdminSellerOfferRow = {
+  id: string;
+  productName: string;
+  optionLabel: string;
+  variantSku: string;
+  sellerSku: string | null;
+  condition: string;
+  status: string;
+  price: number;
+  compareAtPrice: number | null;
+  available: number;
+  updatedAt: string;
+};
+
+export async function listSellerOffersForAdmin(
+  sellerId: string,
+  opts: { limit?: number } = {},
+  client: Client = prisma,
+): Promise<AdminSellerOfferRow[]> {
+  const rows = await client.offer.findMany({
+    where: { sellerId },
+    orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+    take: Math.min(opts.limit ?? 100, 200),
+    select: {
+      id: true,
+      condition: true,
+      status: true,
+      price: true,
+      compareAtPrice: true,
+      sellerSku: true,
+      updatedAt: true,
+      inventory: { select: { quantity: true, reserved: true } },
+      variant: {
+        select: {
+          sku: true,
+          product: { select: { name: true } },
+          optionValues: {
+            select: { optionValue: { select: { value: true, option: { select: { sortOrder: true } } } } },
+          },
+        },
+      },
+    },
+  });
+  return rows.map((o) => ({
+    id: o.id,
+    productName: o.variant.product.name,
+    optionLabel:
+      o.variant.optionValues
+        .slice()
+        .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
+        .map((ov) => ov.optionValue.value)
+        .join(" · ") || "Default",
+    variantSku: o.variant.sku,
+    sellerSku: o.sellerSku,
+    condition: o.condition,
+    status: o.status,
+    price: o.price,
+    compareAtPrice: o.compareAtPrice,
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    updatedAt: o.updatedAt.toISOString(),
+  }));
+}
+
 export async function sellerStatusCounts(client: Client = prisma): Promise<Record<string, number>> {
   const rows = await client.seller.groupBy({ by: ["status"], _count: { _all: true } });
   const out: Record<string, number> = { PENDING: 0, APPROVED: 0, SUSPENDED: 0, CLOSED: 0 };

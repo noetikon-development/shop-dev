@@ -11,7 +11,7 @@ import { OfferEditForm } from "@/components/seller/offer-edit-form";
 import { OfferStatusControls } from "@/components/seller/offer-status-controls";
 import { OfferStockPanel } from "@/components/seller/offer-stock-panel";
 
-export const metadata: Metadata = { title: "Offer" };
+export const metadata: Metadata = { title: "Listing" };
 
 export default async function SellerOfferDetailPage({ params }: PageProps<"/seller/offers/[id]">) {
   const { ctx } = await requireSellerSession("/seller/offers");
@@ -34,7 +34,7 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
         href="/seller/offers"
         className="mb-4 inline-flex items-center gap-1 text-sm text-ink-soft hover:text-ink"
       >
-        <ArrowLeft size={14} /> Back to My Offers
+        <ArrowLeft size={14} /> Back to Listings
       </Link>
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
@@ -80,8 +80,8 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
           <Card>
             <h2 className="mb-3 text-sm font-semibold">Availability</h2>
             <p className="text-sm text-ink-soft">
-              This offer is <strong className="text-ink">{offer.status.toLowerCase()}</strong> and is{" "}
-              <strong className="text-ink">not visible to buyers</strong>. Publishing offers to the
+              This listing is <strong className="text-ink">{offer.status.toLowerCase()}</strong> and is{" "}
+              <strong className="text-ink">not visible to buyers</strong>. Publishing listings to the
               storefront opens in a later marketplace phase.
             </p>
           </Card>

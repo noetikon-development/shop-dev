@@ -14,7 +14,7 @@ import {
 } from "@/components/seller/ui";
 import { pesos, offerStatusTone, conditionLabel } from "@/lib/seller/format";
 
-export const metadata: Metadata = { title: "My Offers" };
+export const metadata: Metadata = { title: "Listings" };
 
 export default async function SellerOffersPage({
   searchParams,
@@ -34,11 +34,11 @@ export default async function SellerOffersPage({
   return (
     <div>
       <PageHeader
-        title="My Offers"
-        description="Every offer you list against the Axiaro catalog. New offers start as a draft."
+        title="Listings"
+        description="Every product you list against the Axiaro catalog. New listings start as a draft."
         actions={
           <Link href="/seller/offers/new" className="btn btn-primary py-2 text-sm">
-            <Plus size={14} /> New offer
+            <Plus size={14} /> Add listing
           </Link>
         }
       />
@@ -58,21 +58,21 @@ export default async function SellerOffersPage({
       </FilterBar>
 
       <p className="mb-3 text-xs text-ink-faint">
-        {total} offer{total === 1 ? "" : "s"}
+        {total} listing{total === 1 ? "" : "s"}
       </p>
 
       {rows.length === 0 ? (
         <EmptyState
           icon={<Package size={18} />}
-          title="No offers match"
+          title="No listings match"
           description={
             q || status
               ? "Try clearing the filters."
-              : "Create your first offer against a catalog product."
+              : "Create your first listing against a catalog product."
           }
           action={
             <Link href="/seller/offers/new" className="btn btn-primary py-2 text-sm">
-              <Plus size={14} /> New offer
+              <Plus size={14} /> Add listing
             </Link>
           }
         />

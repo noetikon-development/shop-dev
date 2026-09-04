@@ -30,7 +30,7 @@ export default async function SellerOrdersPage({ searchParams }: PageProps<"/sel
     <div>
       <PageHeader
         title="Orders"
-        description="Orders placed for your offers. Fulfil each one — mark it ready, add a shipment, then ship and confirm delivery."
+        description="Orders placed for your listings. Fulfil each one — mark it ready, add a shipment, then ship and confirm delivery."
       />
 
       <FilterBar>
@@ -60,7 +60,7 @@ export default async function SellerOrdersPage({ searchParams }: PageProps<"/sel
           description={
             q || status
               ? "Try clearing the filters."
-              : "Orders for your offers will appear here once buyers start purchasing."
+              : "Orders for your listings will appear here once buyers start purchasing."
           }
         />
       ) : (

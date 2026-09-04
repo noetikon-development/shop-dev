@@ -27,7 +27,7 @@ export function OfferStatusControls({ offerId, status }: { offerId: string; stat
   };
 
   if (status === "ARCHIVED") {
-    return <p className="text-sm text-ink-faint">This offer is archived and can’t be changed.</p>;
+    return <p className="text-sm text-ink-faint">This listing is archived and can’t be changed.</p>;
   }
 
   return (
@@ -75,8 +75,8 @@ export function OfferStatusControls({ offerId, status }: { offerId: string; stat
           setConfirmArchive(false);
           submit("ARCHIVED");
         }}
-        title="Archive this offer?"
-        message="Archived offers are read-only and can't be brought back. The stock history stays for your records."
+        title="Archive this listing?"
+        message="Archived listings are read-only and can't be brought back. The stock history stays for your records."
         confirmLabel="Archive"
         tone="danger"
         pending={pending}

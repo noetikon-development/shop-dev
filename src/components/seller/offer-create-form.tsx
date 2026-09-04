@@ -15,13 +15,18 @@ export function OfferCreateForm({
   variantId,
   catalogPrice,
   catalogCompareAt,
+  takenConditions = [],
 }: {
   variantId: string;
   catalogPrice: number;
   catalogCompareAt: number | null;
+  /** conditions the seller already lists for this variant — shown disabled */
+  takenConditions?: string[];
 }) {
   const { state, onSubmit, pending } = usePersistentAction<SellerActionState>(createOfferAction, {});
   const fe = state.fieldErrors ?? {};
+  const taken = new Set(takenConditions);
+  const firstFree = CONDITIONS.find((c) => !taken.has(c.value))?.value ?? "NEW";
 
   return (
     <form onSubmit={onSubmit} className="space-y-4">
@@ -55,11 +60,17 @@ export function OfferCreateForm({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2">
-        <FormField label="Condition" htmlFor="condition" error={fe.condition}>
-          <Select id="condition" name="condition" defaultValue="NEW">
+        <FormField
+          label="Condition"
+          htmlFor="condition"
+          error={fe.condition}
+          hint={taken.size > 0 ? "Greyed-out conditions are already listed." : undefined}
+        >
+          <Select id="condition" name="condition" defaultValue={firstFree}>
             {CONDITIONS.map((c) => (
-              <option key={c.value} value={c.value}>
+              <option key={c.value} value={c.value} disabled={taken.has(c.value)}>
                 {c.label}
+                {taken.has(c.value) ? " — already listed" : ""}
               </option>
             ))}
           </Select>
@@ -103,10 +114,10 @@ export function OfferCreateForm({
       <div className="flex items-center gap-2 border-t border-line pt-4">
         <button type="submit" disabled={pending} className="btn btn-primary py-2 text-sm">
           {pending && <Loader2 size={14} className="animate-spin" />}
-          Create draft offer
+          Create listing
         </button>
         <span className="text-xs text-ink-faint">
-          New offers are saved as a draft — publishing opens later.
+          New listings are saved as a draft — publishing to buyers opens later.
         </span>
       </div>
     </form>
