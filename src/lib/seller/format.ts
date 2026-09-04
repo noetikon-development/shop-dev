@@ -28,3 +28,23 @@ export function pesos(centavos: number): string {
     maximumFractionDigits: 2,
   })}`;
 }
+
+const CONTENT_STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger" | "info"> = {
+  DRAFT: "neutral",
+  PENDING: "info",
+  APPROVED: "success",
+};
+
+export function contentStatusTone(status: string) {
+  return CONTENT_STATUS_TONE[status] ?? "neutral";
+}
+
+const CONTENT_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "Draft",
+  PENDING: "In review",
+  APPROVED: "Approved",
+};
+
+export function contentStatusLabel(status: string) {
+  return CONTENT_STATUS_LABEL[status] ?? status;
+}

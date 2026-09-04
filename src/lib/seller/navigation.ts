@@ -21,7 +21,7 @@ export const SELLER_ROUTES: SellerRoute[] = [
   { path: "/seller/offers", label: "My Offers", accepts: "view_offers", live: true },
   { path: "/seller/orders", label: "Orders", accepts: "view_seller_orders", live: true },
   { path: "/seller/returns", label: "Returns", accepts: "manage_seller_returns", live: true },
-  { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: false },
+  { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: true },
 ];
 
 export function sellerNav(permissions: Set<string>, role: string): SellerRoute[] {

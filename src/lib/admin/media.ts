@@ -240,9 +240,17 @@ export async function uploadMedia(params: {
   file: File;
   folder?: string;
   alt?: string;
+  /**
+   * Phase 9F-4a. When present the asset is attributed to this seller and its
+   * storage path is FORCED under `sellers/<sellerId>/…` regardless of `folder`
+   * — the seller plane never controls where its files land.
+   */
+  owner?: { sellerId: string };
 }): Promise<{ ok: true; asset: MediaRecord } | { ok: false; error: string }> {
   const { file } = params;
-  const folder = safeFolder(params.folder);
+  const folder = params.owner
+    ? `sellers/${params.owner.sellerId}`
+    : safeFolder(params.folder);
   const alt = (params.alt ?? "").trim().slice(0, 300) || null;
 
   if (!file || file.size === 0) return { ok: false, error: "Choose a file to upload." };
@@ -288,6 +296,7 @@ export async function uploadMedia(params: {
       alt,
       width: dims?.width ?? null,
       height: dims?.height ?? null,
+      sellerId: params.owner?.sellerId ?? null,
     },
     select: MEDIA_SELECT,
   });
@@ -295,23 +304,50 @@ export async function uploadMedia(params: {
   return { ok: true, asset };
 }
 
+/**
+ * Low-level object + row removal — NO reference check. Callers own the
+ * authorization and reference-safety checks (admin `deleteMedia` does the
+ * generic scan; the seller plane does its own seller-scoped scan). Best-effort
+ * on the storage side; the Postgres row is the source of truth.
+ */
+export async function purgeMediaAsset(
+  id: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<{ ok: boolean; error?: string }> {
+  const asset = await client.mediaAsset.findUnique({ where: { id } });
+  if (!asset) return { ok: true };
+  const supabase = createAdminClient();
+  await supabase.storage.from(asset.bucket).remove([asset.path]);
+  await client.mediaAsset.delete({ where: { id } });
+  return { ok: true };
+}
+
 /** Where a media asset is currently referenced. Empty = safe to delete. */
-export async function mediaReferences(id: string): Promise<string[]> {
-  const [productImages, categories, blocks, settings] = await Promise.all([
-    prisma.productImage.findMany({
+export async function mediaReferences(
+  id: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string[]> {
+  const [productImages, categories, blocks, settings, sellers] = await Promise.all([
+    client.productImage.findMany({
       where: { mediaAssetId: id },
       select: { product: { select: { name: true } } },
       take: 5,
     }),
-    prisma.category.findMany({ where: { imageMediaId: id }, select: { name: true }, take: 5 }),
-    prisma.contentBlock.findMany({
+    client.category.findMany({ where: { imageMediaId: id }, select: { name: true }, take: 5 }),
+    client.contentBlock.findMany({
       where: { data: { contains: id } },
       select: { key: true, title: true },
       take: 5,
     }),
-    prisma.storeSetting.findMany({
+    client.storeSetting.findMany({
       where: { value: id, key: { endsWith: "MediaId" } },
       select: { label: true, key: true },
+      take: 5,
+    }),
+    // Phase 9F-4a — a seller's logo / banner.
+    client.seller.findMany({
+      where: { OR: [{ logoMediaId: id }, { bannerMediaId: id }] },
+      select: { displayName: true, logoMediaId: true, bannerMediaId: true },
       take: 5,
     }),
   ]);
@@ -321,6 +357,10 @@ export async function mediaReferences(id: string): Promise<string[]> {
   for (const c of categories) refs.push(`Category image — ${c.name}`);
   for (const b of blocks) refs.push(`Content block — ${b.title ?? b.key}`);
   for (const s of settings) refs.push(`Setting — ${s.label ?? s.key}`);
+  for (const s of sellers) {
+    const which = s.logoMediaId === id ? "logo" : "banner";
+    refs.push(`Seller ${which} — ${s.displayName}`);
+  }
   return refs;
 }
 

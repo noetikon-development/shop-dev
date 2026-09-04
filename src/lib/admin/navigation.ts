@@ -256,6 +256,15 @@ export const ADMIN_ROUTES: AdminRoute[] = [
     emptyLabel: "No media uploaded yet.",
     live: true,
   },
+  {
+    path: "/admin/sellers",
+    label: "Seller content",
+    description: "Review third-party seller store-profile submissions.",
+    group: "content",
+    accepts: ["manage_content"],
+    emptyLabel: "No seller profiles awaiting review.",
+    live: true,
+  },
 
   // Admin
   {

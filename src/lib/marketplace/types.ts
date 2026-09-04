@@ -10,6 +10,64 @@ export type SellerStatus = "PENDING" | "APPROVED" | "SUSPENDED" | "CLOSED";
 export type SellerUserRole = "OWNER" | "MANAGER" | "STAFF";
 export type SellerUserStatus = "ACTIVE" | "INVITED" | "DISABLED";
 
+/**
+ * Seller store-profile moderation state (Phase 9F-4a). The seller edits the
+ * profile bundle; the DRAFT → PENDING → APPROVED cycle gates whether it could
+ * ever be shown to customers (nothing renders it in 9F-4a). An APPROVED bundle
+ * that the seller edits again returns to PENDING.
+ */
+export type SellerContentStatus = "DRAFT" | "PENDING" | "APPROVED";
+
+/** The seller-editable, MODERATED store-profile bundle. */
+export type SellerProfileDraft = {
+  bio: string | null;
+  logoMediaId: string | null;
+  bannerMediaId: string | null;
+  returnPolicy: string | null;
+  shippingPolicy: string | null;
+  shipFromCity: string | null;
+  shipFromCountry: string | null;
+  socialLinks: SellerSocialLinks;
+};
+
+/** Known social platforms a seller may link. All optional, https only. */
+export type SellerSocialLinks = {
+  website?: string;
+  facebook?: string;
+  instagram?: string;
+  tiktok?: string;
+  youtube?: string;
+  x?: string;
+};
+
+export const SELLER_SOCIAL_KEYS = [
+  "website",
+  "facebook",
+  "instagram",
+  "tiktok",
+  "youtube",
+  "x",
+] as const;
+
+/** Full seller-settings view for the `/seller/settings` page. */
+export type SellerSettingsView = {
+  sellerId: string;
+  displayName: string;
+  slug: string;
+  status: SellerStatus;
+  /** operational contact — saved immediately, not moderated */
+  supportEmail: string;
+  notifyEmail: string | null;
+  /** the moderated bundle */
+  profile: SellerProfileDraft;
+  logoUrl: string | null;
+  bannerUrl: string | null;
+  contentStatus: SellerContentStatus;
+  contentSubmittedAt: string | null;
+  contentReviewedAt: string | null;
+  contentReviewNote: string | null;
+};
+
 export type OfferCondition = "NEW" | "REFURBISHED" | "USED_LIKE_NEW" | "USED_GOOD";
 export type OfferStatus = "DRAFT" | "ACTIVE" | "INACTIVE" | "ARCHIVED";
 export type FulfillmentType = "SELLER_FULFILLED" | "PLATFORM_FULFILLED";

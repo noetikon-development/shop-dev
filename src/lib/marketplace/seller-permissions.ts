@@ -38,6 +38,9 @@ export const SELLER_ROLE_PERMISSIONS: Record<SellerUserRole, SellerPermission[]>
     "view_seller_orders",
     "manage_seller_fulfillment",
     "manage_seller_returns",
+    // 9F-4a: store profile / settings. NOT manage_seller_users (that stays
+    // OWNER-only, pending 9F-4b seller-user management).
+    "manage_seller_settings",
   ],
   STAFF: ["view_offers", "view_seller_orders", "manage_seller_fulfillment"],
 };

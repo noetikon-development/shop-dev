@@ -1146,12 +1146,24 @@ model MediaAsset {
   folder    String   @default("") // logical grouping, e.g. "banners", "products"
   createdAt DateTime @default(now())
 
+  // Phase 9F-4a — non-null = a seller-owned asset (stored under sellers/<id>/…);
+  // null = an operator / global asset (every pre-9F-4a row). ON DELETE SET NULL:
+  // deleting the Seller detaches its assets without cascading file rows away.
+  sellerId String?
+
   productImages  ProductImage[]
   categoryImages Category[]     @relation("CategoryImage")
+
+  // Phase 9F-4a marketplace relations. Three distinct links between a Seller and
+  // its media, so each is a named relation.
+  seller        Seller?  @relation("SellerOwnedMedia", fields: [sellerId], references: [id], onDelete: SetNull)
+  sellerLogoOf  Seller[] @relation("SellerLogo")
+  sellerBannerOf Seller[] @relation("SellerBanner")
 
   @@unique([bucket, path])
   @@index([folder])
   @@index([mimeType])
+  @@index([sellerId])
 }
 
 // ----------------------------------------------------------------------------
@@ -1196,6 +1208,31 @@ model Seller {
   // (1500 = 15.00%). STORED ONLY — Phase 9C never reads or calculates it.
   // FIRST_PARTY (Axiaro) = 0.
   commissionRate Int      @default(0)
+
+  // ── Seller-owned store profile (Phase 9F-4a) ──────────────────────────────
+  // Editable by the seller at /seller/settings (permission manage_seller_settings,
+  // OWNER + MANAGER). The profile bundle (bio … socialLinks) is MODERATED:
+  // contentStatus DRAFT → PENDING → APPROVED, and an APPROVED bundle edited by
+  // the seller returns to PENDING. An admin with `manage_content` approves or
+  // rejects. NONE of these fields are rendered to customers in 9F-4a.
+  // `notifyEmail` is an operational contact — saved immediately, NOT part of the
+  // moderated bundle. `type` / `status` / `slug` / `commissionRate` / `displayName`
+  // stay operator-controlled and are never writable from the seller plane.
+  bio                String?
+  logoMediaId        String?
+  bannerMediaId      String?
+  returnPolicy       String?
+  shippingPolicy     String?
+  shipFromCity       String?
+  shipFromCountry    String?
+  socialLinks        Json?
+  notifyEmail        String?
+  contentStatus      String    @default("DRAFT") // DRAFT | PENDING | APPROVED
+  contentSubmittedAt DateTime?
+  contentReviewedAt  DateTime?
+  contentReviewedBy  String? // admin User.id — plain snapshot, no FK (matches OrderItem.sellerId)
+  contentReviewNote  String?
+
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -1205,8 +1242,15 @@ model Seller {
   // a Seller that owns any historical seller order cannot be hard-deleted.
   sellerOrders SellerOrder[]
 
+  // Phase 9F-4a media. `logoMedia` / `bannerMedia` point at one asset each;
+  // `ownedMedia` is every asset the seller has uploaded. All SET NULL on delete.
+  logoMedia   MediaAsset?  @relation("SellerLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
+  bannerMedia MediaAsset?  @relation("SellerBanner", fields: [bannerMediaId], references: [id], onDelete: SetNull)
+  ownedMedia  MediaAsset[] @relation("SellerOwnedMedia")
+
   @@index([type])
   @@index([status])
+  @@index([contentStatus])
 }
 
 // Membership of an application User in a Seller, with a seller-scoped role.
