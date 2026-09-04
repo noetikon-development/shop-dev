@@ -48,3 +48,25 @@ const CONTENT_STATUS_LABEL: Record<string, string> = {
 export function contentStatusLabel(status: string) {
   return CONTENT_STATUS_LABEL[status] ?? status;
 }
+
+const REQUEST_STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger" | "info"> = {
+  DRAFT: "neutral",
+  PENDING: "info",
+  APPROVED: "success",
+  REJECTED: "danger",
+};
+
+export function requestStatusTone(status: string) {
+  return REQUEST_STATUS_TONE[status] ?? "neutral";
+}
+
+const REQUEST_STATUS_LABEL: Record<string, string> = {
+  DRAFT: "Draft",
+  PENDING: "In review",
+  APPROVED: "Approved",
+  REJECTED: "Rejected",
+};
+
+export function requestStatusLabel(status: string) {
+  return REQUEST_STATUS_LABEL[status] ?? status;
+}

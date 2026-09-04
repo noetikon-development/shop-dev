@@ -244,6 +244,9 @@ model Category {
   products   Product[]
   imageMedia MediaAsset? @relation("CategoryImage", fields: [imageMediaId], references: [id], onDelete: SetNull)
 
+  // Phase 9F-5b — seller product requests proposing this category (advisory only).
+  sellerProductRequests SellerProductRequest[] @relation("SellerProductRequestCategory")
+
   @@index([parentId])
   @@index([active])
 }
@@ -285,6 +288,10 @@ model Product {
   variants Variant[]
   reviews  Review[]
   wishedBy WishlistItem[]
+
+  // Phase 9F-5b — set (SET NULL) when a seller product request is APPROVED and
+  // this Product is the canonical result. Back-relation only; no column on Product.
+  fromSellerRequests SellerProductRequest[] @relation("SellerProductRequestResult")
 
   @@index([categoryId])
   @@index([status])
@@ -1160,6 +1167,9 @@ model MediaAsset {
   sellerLogoOf  Seller[] @relation("SellerLogo")
   sellerBannerOf Seller[] @relation("SellerBanner")
 
+  // Phase 9F-5b — seller product-request images. Cascade with the join row.
+  sellerProductRequestImages SellerProductRequestImage[] @relation("SellerProductRequestImage")
+
   @@unique([bucket, path])
   @@index([folder])
   @@index([mimeType])
@@ -1247,6 +1257,9 @@ model Seller {
   logoMedia   MediaAsset?  @relation("SellerLogo", fields: [logoMediaId], references: [id], onDelete: SetNull)
   bannerMedia MediaAsset?  @relation("SellerBanner", fields: [bannerMediaId], references: [id], onDelete: SetNull)
   ownedMedia  MediaAsset[] @relation("SellerOwnedMedia")
+
+  // Phase 9F-5b — products this seller has proposed for the Axiaro catalog.
+  productRequests SellerProductRequest[]
 
   @@index([type])
   @@index([status])
@@ -1466,4 +1479,74 @@ model Shipment {
   @@index([sellerOrderId])
   @@index([status])
   @@index([carrier])
+}
+
+// ----------------------------------------------------------------------------
+// Marketplace — Seller Product Requests (Phase 9F-5b)
+//
+// ADDITIVE ONLY. A third-party seller proposes a product Axiaro does not yet
+// carry. Every `proposed*` field is ADVISORY — the seller can never write it to
+// `Product` / `Variant`. An Axiaro admin reviews the request in a LATER phase
+// (9F-5c) and, if approved, creates or links the canonical Product; only then is
+// `resultProductId` set.
+//
+// This model adds NO `sellerId` column to `Product` or `Variant` and changes no
+// existing catalog column. `SellerProductRequestImage` references a seller-owned
+// `MediaAsset` (the app layer enforces `MediaAsset.sellerId == request.sellerId`).
+//
+// No customer visibility. No inventory. No offer. `marketplace.multiSellerCheckout`
+// is unaffected.
+// ----------------------------------------------------------------------------
+
+model SellerProductRequest {
+  id       String @id @default(cuid())
+  sellerId String
+  status   String @default("DRAFT") // DRAFT | PENDING | APPROVED | REJECTED
+
+  // -- Seller proposal — ADVISORY. Never auto-written to Product / Variant. --
+  proposedName        String
+  proposedBrand       String?
+  proposedShortDesc   String?
+  proposedDescription String?
+  proposedCategoryId  String? // an existing Category the seller picked (nullable)
+  categoryNote        String? // free text — "can't find my category"
+  barcode             String? // GTIN / EAN / UPC — for duplicate detection
+  // [{ label, proposedSku?, barcode?, attributes? }] — one entry minimum.
+  proposedVariants    Json?
+  sellerNote          String?
+
+  // -- Admin review (written by 9F-5c; stored here now for the data shape). --
+  reviewStatusNote String?
+  reviewedById     String? // admin User.id — plain snapshot, NO FK (matches OrderItem.sellerId)
+  reviewedAt       DateTime?
+  submittedAt      DateTime?
+  // Set (SET NULL) on APPROVED — the canonical Product this request produced /
+  // was linked to. A NULL here on an APPROVED row means "approved, product TBD".
+  resultProductId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller           Seller                     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  proposedCategory Category?                  @relation("SellerProductRequestCategory", fields: [proposedCategoryId], references: [id], onDelete: SetNull)
+  resultProduct    Product?                   @relation("SellerProductRequestResult", fields: [resultProductId], references: [id], onDelete: SetNull)
+  images           SellerProductRequestImage[]
+
+  @@index([sellerId])
+  @@index([status])
+}
+
+model SellerProductRequestImage {
+  id           String @id @default(cuid())
+  requestId    String
+  mediaAssetId String
+  sortOrder    Int    @default(0)
+  role         String @default("gallery") // main | gallery | variant
+
+  request    SellerProductRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  mediaAsset MediaAsset           @relation("SellerProductRequestImage", fields: [mediaAssetId], references: [id], onDelete: Cascade)
+
+  @@unique([requestId, mediaAssetId])
+  @@index([requestId])
+  @@index([mediaAssetId])
 }

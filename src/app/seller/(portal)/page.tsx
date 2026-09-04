@@ -5,6 +5,7 @@ import { requireSellerSession } from "@/lib/seller/session";
 import { sellerCan } from "@/lib/marketplace/seller-context";
 import { getSellerDashboard } from "@/lib/seller/offers";
 import { countOpenSellerReturns } from "@/lib/seller/returns";
+import { countOpenSellerRequests } from "@/lib/seller/product-requests";
 import { PageHeader, StatCard, Card, EmptyState, StatusBadge } from "@/components/seller/ui";
 import { pesos, offerStatusTone } from "@/lib/seller/format";
 
@@ -13,9 +14,10 @@ export const metadata: Metadata = { title: "Dashboard" };
 export default async function SellerDashboardPage() {
   const { ctx } = await requireSellerSession("/seller");
   const canReturns = sellerCan(ctx, "manage_seller_returns");
-  const [{ statusCounts, lowStock, totalOffers, recent }, openReturns] = await Promise.all([
+  const [{ statusCounts, lowStock, totalOffers, recent }, openReturns, openRequests] = await Promise.all([
     getSellerDashboard(ctx),
     canReturns ? countOpenSellerReturns(ctx) : Promise.resolve(0),
+    countOpenSellerRequests(ctx),
   ]);
 
   return (
@@ -32,12 +34,12 @@ export default async function SellerDashboardPage() {
 
       <section className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total listings" value={totalOffers} hint="Across all statuses" />
-        <StatCard label="Draft" value={statusCounts.DRAFT} hint="Not yet published" />
         <StatCard label="Low stock" value={lowStock} hint="At or below reorder point" />
+        <StatCard label="Product requests" value={openRequests} hint="Submitted, awaiting Axiaro review" />
         {canReturns ? (
           <StatCard label="Returns to receive" value={openReturns} hint="Approved — awaiting your receipt" />
         ) : (
-          <StatCard label="Inactive" value={statusCounts.INACTIVE} hint="Paused by you" />
+          <StatCard label="Draft listings" value={statusCounts.DRAFT} hint="Not yet published" />
         )}
       </section>
 

@@ -22,6 +22,9 @@ export const SELLER_ROUTES: SellerRoute[] = [
   // wording). The route path stays /seller/offers — an Offer is still the
   // underlying model; only the label changed.
   { path: "/seller/offers", label: "Listings", accepts: "view_offers", live: true },
+  // 9F-5b: propose a product Axiaro doesn't carry yet. Same permission as
+  // listings (manage_offers) — it's the front of the same workflow.
+  { path: "/seller/product-requests", label: "Product requests", accepts: "manage_offers", live: true },
   { path: "/seller/orders", label: "Orders", accepts: "view_seller_orders", live: true },
   { path: "/seller/returns", label: "Returns", accepts: "manage_seller_returns", live: true },
   { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: true },
@@ -39,6 +42,7 @@ const CRUMB_LABELS: Record<string, string> = {
   orders: "Orders",
   returns: "Returns",
   settings: "Settings",
+  "product-requests": "Product requests",
 };
 
 export function sellerBreadcrumbs(pathname: string): { label: string; href?: string }[] {
@@ -48,10 +52,13 @@ export function sellerBreadcrumbs(pathname: string): { label: string; href?: str
   parts.forEach((part, i) => {
     acc += `/${part}`;
     const isLast = i === parts.length - 1;
+    const prev = parts[i - 1];
     // an id segment (cuid-ish) shows contextually
     const idLabel =
-      parts[i - 1] === "orders" ? "Order" : parts[i - 1] === "returns" ? "Return" : "Listing";
-    const label = CRUMB_LABELS[part] ?? (/^[a-z0-9]{20,}$/i.test(part) ? idLabel : part);
+      prev === "orders" ? "Order" : prev === "returns" ? "Return" : prev === "product-requests" ? "Request" : "Listing";
+    let label: string;
+    if (part === "new" && prev === "product-requests") label = "New request";
+    else label = CRUMB_LABELS[part] ?? (/^[a-z0-9]{20,}$/i.test(part) ? idLabel : part);
     crumbs.push({ label, href: isLast ? undefined : acc });
   });
   return crumbs;

@@ -273,7 +273,11 @@ function staticTests() {
   ok("17 · seller offer repo never imports @/lib/inventory", !/@\/lib\/inventory/.test(read("src/lib/marketplace/seller-repository.ts")));
 
   // no schema change
-  ok("schema · prisma/schema.prisma has no SellerProductRequest (9F-5b, not now)", !/SellerProductRequest/.test(read("prisma/schema.prisma")));
+  // 9F-5a itself made no schema change; its guarantee is that canonical
+  // ownership is untouched — assert no sellerId lands on Product / Variant.
+  const _schema = read("prisma/schema.prisma");
+  const _productBlock = _schema.slice(_schema.indexOf("model Product {"), _schema.indexOf("model ProductImage {"));
+  ok("schema · no sellerId column on Product (canonical ownership unchanged)", !/^\s*sellerId\s+String/m.test(_productBlock));
 }
 
 async function main() {

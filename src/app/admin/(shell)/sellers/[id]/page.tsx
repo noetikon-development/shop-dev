@@ -3,7 +3,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireAnyPermission } from "@/lib/admin/rbac";
-import { getAdminSeller, listSellerOffersForAdmin } from "@/lib/admin/sellers/repository";
+import {
+  getAdminSeller,
+  listSellerOffersForAdmin,
+  listSellerProductRequestsForAdmin,
+} from "@/lib/admin/sellers/repository";
 import { sellerStatusLabel, sellerStatusTone } from "@/lib/admin/sellers/lifecycle";
 import { countryName } from "@/lib/countries";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
@@ -28,7 +32,11 @@ export default async function AdminSellerDetailPage({
   const canReviewContent = admin.isSuperAdmin || admin.permissions.has("manage_content");
 
   const { id } = await params;
-  const [s, listings] = await Promise.all([getAdminSeller(id), listSellerOffersForAdmin(id, { limit: 100 })]);
+  const [s, listings, requests] = await Promise.all([
+    getAdminSeller(id),
+    listSellerOffersForAdmin(id, { limit: 100 }),
+    listSellerProductRequestsForAdmin(id, { limit: 50 }),
+  ]);
   if (!s) notFound();
 
   const social = SELLER_SOCIAL_KEYS.map((k) => [k, s.profile.socialLinks[k]] as const).filter(([, v]) => Boolean(v));
@@ -138,6 +146,37 @@ export default async function AdminSellerDetailPage({
                   </tbody>
                 </table>
               </div>
+            )}
+          </Card>
+
+          <Card padded={false}>
+            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+              <h2 className="text-sm font-semibold">Product requests</h2>
+              <span className="text-xs text-ink-faint">read-only · {requests.length}</span>
+            </div>
+            {requests.length === 0 ? (
+              <p className="px-5 py-4 text-sm text-ink-faint">No product requests from this seller.</p>
+            ) : (
+              <ul className="divide-y divide-line-soft">
+                {requests.map((r) => (
+                  <li key={r.id} className="flex items-center gap-3 px-5 py-2.5 text-sm">
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium text-ink">{r.name}</span>
+                      <span className="block truncate text-xs text-ink-faint">{r.categoryName ?? "no category"}</span>
+                    </span>
+                    <span className="text-xs text-ink-faint">
+                      {r.submittedAt ? new Date(r.submittedAt).toLocaleDateString() : "—"}
+                    </span>
+                    <StatusBadge
+                      tone={
+                        r.status === "APPROVED" ? "success" : r.status === "REJECTED" ? "danger" : r.status === "PENDING" ? "info" : "neutral"
+                      }
+                    >
+                      {r.status}
+                    </StatusBadge>
+                  </li>
+                ))}
+              </ul>
             )}
           </Card>
 

@@ -183,6 +183,48 @@ export async function listSellerOffersForAdmin(
   }));
 }
 
+/**
+ * READ-ONLY (9F-5b) — a seller's product requests for the admin detail page.
+ * Minimal visibility only; the full review workflow (approve / reject / create
+ * canonical Product) is 9F-5c. No actions here.
+ */
+export type AdminSellerRequestRow = {
+  id: string;
+  status: string;
+  name: string;
+  categoryName: string | null;
+  submittedAt: string | null;
+  updatedAt: string;
+};
+
+export async function listSellerProductRequestsForAdmin(
+  sellerId: string,
+  opts: { limit?: number } = {},
+  client: Client = prisma,
+): Promise<AdminSellerRequestRow[]> {
+  const rows = await client.sellerProductRequest.findMany({
+    where: { sellerId },
+    orderBy: [{ status: "asc" }, { updatedAt: "desc" }],
+    take: Math.min(opts.limit ?? 50, 100),
+    select: {
+      id: true,
+      status: true,
+      proposedName: true,
+      submittedAt: true,
+      updatedAt: true,
+      proposedCategory: { select: { name: true } },
+    },
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    status: r.status,
+    name: r.proposedName,
+    categoryName: r.proposedCategory?.name ?? null,
+    submittedAt: r.submittedAt?.toISOString() ?? null,
+    updatedAt: r.updatedAt.toISOString(),
+  }));
+}
+
 export async function sellerStatusCounts(client: Client = prisma): Promise<Record<string, number>> {
   const rows = await client.seller.groupBy({ by: ["status"], _count: { _all: true } });
   const out: Record<string, number> = { PENDING: 0, APPROVED: 0, SUSPENDED: 0, CLOSED: 0 };
