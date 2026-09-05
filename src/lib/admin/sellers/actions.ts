@@ -5,6 +5,12 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
+import { scheduleEmail } from "@/lib/email/schedule";
+import {
+  sendSellerAccountApproved,
+  sendSellerAccountSuspended,
+  sendSellerAccountClosed,
+} from "@/lib/email/notifications";
 import {
   createSeller,
   transitionSellerStatus,
@@ -117,7 +123,7 @@ export async function transitionSellerAction(
   if (!res.ok) return fromError(res);
 
   if (res.from !== res.to) {
-    await writeAudit({
+    const auditLogId = await writeAudit({
       actorUserId: admin.user.id,
       action: res.reactivate ? "seller.reactivated" : sellerTransitionAction(res.to),
       targetType: "seller",
@@ -125,6 +131,19 @@ export async function transitionSellerAction(
       summary: `${admin.user.email} moved seller ${res.displayName} ${res.from} → ${res.to}`,
       meta: { sellerId: res.sellerId, from: res.from, to: res.to },
     });
+
+    // Notify the seller — never blocking the response on SMTP delivery. The
+    // audit row's own id anchors the idempotency key (never `Seller.updatedAt`,
+    // which an unrelated config edit also bumps).
+    if (auditLogId) {
+      if (res.to === "APPROVED") {
+        scheduleEmail(() => sendSellerAccountApproved(res.sellerId, auditLogId));
+      } else if (res.to === "SUSPENDED") {
+        scheduleEmail(() => sendSellerAccountSuspended(res.sellerId, auditLogId));
+      } else if (res.to === "CLOSED") {
+        scheduleEmail(() => sendSellerAccountClosed(res.sellerId, auditLogId));
+      }
+    }
   }
 
   revalidateSeller(parsed.data.sellerId);

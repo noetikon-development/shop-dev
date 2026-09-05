@@ -33,6 +33,14 @@ import {
   renderSellerProductRequestApproved,
   renderSellerProductRequestRejected,
 } from "@/lib/email/templates/seller-product-request";
+import {
+  renderSellerAccountApproved,
+  renderSellerAccountSuspended,
+  renderSellerAccountClosed,
+  renderSellerProfileApproved,
+  renderSellerProfileRejected,
+  renderSellerProfileSubmitted,
+} from "@/lib/email/templates/seller-lifecycle";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -1327,6 +1335,44 @@ export async function retryEmailByLog(
       return sendSellerProductRequestRejected(requestId, { ...shared, outcome });
     }
 
+    // Seller account status emails (9F-6b). The key is
+    // `SELLER_ACCOUNT_<TO>:<sellerId>:<adminAuditLogId>` — the audit row id is
+    // an immutable per-transition anchor (never `Seller.updatedAt`, which any
+    // unrelated edit also bumps). The sender re-reads that exact audit row to
+    // tell a first approval from a SUSPENDED→APPROVED reactivation.
+    case "seller_account_approved":
+    case "seller_account_suspended":
+    case "seller_account_closed": {
+      const parts = log.idempotencyKey.split(":");
+      const sellerId = parts[1];
+      const auditLogId = parts[2];
+      if (!sellerId || !auditLogId) return { ok: false, status: "FAILED", error: "no_seller" };
+      const shared: SellerLifecycleEmailOpts = { retry: true, idempotencyKey: log.idempotencyKey, client: tx };
+      if (log.type === "seller_account_approved") return sendSellerAccountApproved(sellerId, auditLogId, shared);
+      if (log.type === "seller_account_suspended") return sendSellerAccountSuspended(sellerId, auditLogId, shared);
+      return sendSellerAccountClosed(sellerId, auditLogId, shared);
+    }
+
+    // Seller store-profile moderation emails (9F-6b). Approved/rejected key off
+    // `Seller.contentReviewedAt` (dedicated to review, unlike `updatedAt`) plus
+    // the resulting moderation state; submitted keys off `contentSubmittedAt`.
+    // Both are re-read from the request id embedded in the key.
+    case "seller_profile_approved": {
+      const sellerId = log.idempotencyKey.split(":")[1];
+      if (!sellerId) return { ok: false, status: "FAILED", error: "no_seller" };
+      return sendSellerProfileApproved(sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    case "seller_profile_rejected": {
+      const sellerId = log.idempotencyKey.split(":")[1];
+      if (!sellerId) return { ok: false, status: "FAILED", error: "no_seller" };
+      return sendSellerProfileRejected(sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    case "seller_profile_submitted": {
+      const sellerId = log.idempotencyKey.split(":")[1];
+      if (!sellerId) return { ok: false, status: "FAILED", error: "no_seller" };
+      return sendSellerProfileSubmitted(sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+
     default:
       // auth emails / P2 security notices / support (contact-form) emails /
       // return (P3) emails / refund_issued / refund_completed are not retryable
@@ -1562,6 +1608,307 @@ export async function sendSellerProductRequestRejected(
     );
   } catch (err) {
     console.error("[email] sendSellerProductRequestRejected", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller account + store-profile lifecycle notifications (Phase 9F-6b)
+//
+// Account (approved/suspended/closed) and profile-review (approved/rejected)
+// go to the seller — same recipient resolution as the product-request emails
+// (ACTIVE OWNER/MANAGER SellerUsers + Seller.notifyEmail, deduped). Profile
+// SUBMITTED goes to the Axiaro ops inbox instead — never the seller.
+// ---------------------------------------------------------------------------
+
+type SellerLifecycleEmailOpts = {
+  retry?: boolean;
+  idempotencyKey?: string;
+  client?: Prisma.TransactionClient;
+};
+
+type SellerLifecycleEmailContext = {
+  brand: string;
+  siteUrl: string;
+  sellerName: string;
+  recipients: string;
+  portalUrl: string;
+  settingsUrl: string;
+  contentReviewNote: string | null;
+};
+
+async function loadSellerLifecycleEmailContext(
+  sellerId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<SellerLifecycleEmailContext | null> {
+  const seller = await client.seller.findUnique({
+    where: { id: sellerId },
+    select: {
+      displayName: true,
+      notifyEmail: true,
+      contentReviewNote: true,
+      sellerUsers: {
+        where: { status: "ACTIVE", role: { in: ["OWNER", "MANAGER"] } },
+        select: { user: { select: { email: true } } },
+      },
+    },
+  });
+  if (!seller) return null;
+
+  const addrs = new Set<string>();
+  for (const su of seller.sellerUsers) {
+    const e = su.user.email?.trim().toLowerCase();
+    if (e && EMAIL_RE.test(e)) addrs.add(e);
+  }
+  const notify = seller.notifyEmail?.trim().toLowerCase();
+  if (notify && EMAIL_RE.test(notify)) addrs.add(notify);
+  if (addrs.size === 0) return null;
+
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  return {
+    brand,
+    siteUrl,
+    sellerName: seller.displayName,
+    recipients: [...addrs].join(", "),
+    portalUrl: `${siteUrl}/seller/login`,
+    settingsUrl: `${siteUrl}/seller/settings`,
+    contentReviewNote: seller.contentReviewNote,
+  };
+}
+
+/**
+ * Seller — account status changed. `auditLogId` is the `adminAuditLog` row the
+ * transition itself wrote (its id is the idempotency anchor, NOT
+ * `Seller.updatedAt` — an unrelated config edit also bumps that column and
+ * must never collide with or suppress a status-change email). Whether an
+ * APPROVED email is a first approval or a SUSPENDED→APPROVED reactivation is
+ * read back off that same audit row's `action` on every call (including
+ * retry) — never a caller-supplied flag — so retry reconstructs it exactly.
+ * Key: SELLER_ACCOUNT_APPROVED:<sellerId>:<auditLogId>.
+ */
+export async function sendSellerAccountApproved(
+  sellerId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { action: true } });
+    const reactivate = audit?.action === "seller.reactivated";
+
+    return renderAndDispatch(
+      {
+        type: "seller_account_approved",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_APPROVED:${sellerId}:${auditLogId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerAccountApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.portalUrl,
+          reactivate,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountApproved", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Seller — account suspended. Key: SELLER_ACCOUNT_SUSPENDED:<sellerId>:<auditLogId>. */
+export async function sendSellerAccountSuspended(
+  sellerId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_account_suspended",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_SUSPENDED:${sellerId}:${auditLogId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerAccountSuspended({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.portalUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountSuspended", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Seller — account closed (terminal). Key: SELLER_ACCOUNT_CLOSED:<sellerId>:<auditLogId>. */
+export async function sendSellerAccountClosed(
+  sellerId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_account_closed",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_CLOSED:${sellerId}:${auditLogId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerAccountClosed({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.portalUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountClosed", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Seller — store profile approved. Keyed on `Seller.contentReviewedAt` (set
+ * only by the review actions, unlike `updatedAt`) plus the resulting state, so
+ * a later re-review round can send again but a retry can't dupe.
+ * Key: SELLER_PROFILE_APPROVED:<sellerId>:<contentReviewedAt-ms>:APPROVED.
+ */
+export async function sendSellerProfileApproved(
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const row = await db.seller.findUnique({ where: { id: sellerId }, select: { contentReviewedAt: true } });
+    const reviewedAt = row?.contentReviewedAt ?? new Date();
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_profile_approved",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PROFILE_APPROVED:${sellerId}:${reviewedAt.getTime()}:APPROVED`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerProfileApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.settingsUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProfileApproved", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Seller — store profile sent back (PENDING → DRAFT) with a mandatory note.
+ * Key: SELLER_PROFILE_REJECTED:<sellerId>:<contentReviewedAt-ms>:DRAFT.
+ */
+export async function sendSellerProfileRejected(
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const row = await db.seller.findUnique({ where: { id: sellerId }, select: { contentReviewedAt: true } });
+    const reviewedAt = row?.contentReviewedAt ?? new Date();
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_profile_rejected",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PROFILE_REJECTED:${sellerId}:${reviewedAt.getTime()}:DRAFT`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerProfileRejected({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.settingsUrl,
+          reviewNote: ctx.contentReviewNote,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProfileRejected", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro OPERATIONS inbox — a seller's store profile is ready for review.
+ * NEVER sent to the seller. Keyed on `Seller.contentSubmittedAt` (dedicated to
+ * submission, set only by `submitSellerProfile`) — never `updatedAt`.
+ * Key: SELLER_PROFILE_SUBMITTED:<sellerId>:<contentSubmittedAt-ms>.
+ */
+export async function sendSellerProfileSubmitted(
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const seller = await db.seller.findUnique({
+      where: { id: sellerId },
+      select: { displayName: true, contentSubmittedAt: true },
+    });
+    if (!seller) return { ok: false, status: "FAILED", error: "no_seller" };
+    const submittedAt = seller.contentSubmittedAt ?? new Date();
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "seller_profile_submitted",
+        to,
+        from: SUPPORT_FROM,
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PROFILE_SUBMITTED:${sellerId}:${submittedAt.getTime()}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerProfileSubmitted({
+          brand,
+          siteUrl,
+          sellerName: seller.displayName,
+          reviewUrl: `${siteUrl}/admin/sellers/${sellerId}`,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProfileSubmitted", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

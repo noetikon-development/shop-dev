@@ -6,6 +6,8 @@ import { prisma } from "@/lib/prisma";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { cleanUserText } from "@/lib/ugc";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendSellerProfileApproved, sendSellerProfileRejected } from "@/lib/email/notifications";
 
 /**
  * Admin seller store-profile review (Phase 9F-4a).
@@ -74,6 +76,8 @@ export async function approveSellerContentAction(
     meta: { sellerId: seller.id, from: "PENDING", to: "APPROVED", note },
   });
 
+  scheduleEmail(() => sendSellerProfileApproved(seller.id));
+
   revalidatePath("/admin/sellers");
   revalidatePath(`/admin/sellers/${seller.id}`);
   revalidatePath("/seller/settings");
@@ -119,6 +123,8 @@ export async function rejectSellerContentAction(
     summary: `${admin.user.email} requested changes to ${seller.displayName}'s store profile`,
     meta: { sellerId: seller.id, from: "PENDING", to: "DRAFT", note },
   });
+
+  scheduleEmail(() => sendSellerProfileRejected(seller.id));
 
   revalidatePath("/admin/sellers");
   revalidatePath(`/admin/sellers/${seller.id}`);

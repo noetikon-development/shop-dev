@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
 import { writeAudit } from "@/lib/admin/audit";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendSellerProfileSubmitted } from "@/lib/email/notifications";
 import {
   updateSellerProfileDraft,
   updateSellerContact,
@@ -127,6 +129,10 @@ export async function submitSellerProfileAction(
     summary: `seller ${ctx.sellerName} submitted its store profile for review`,
     meta: { sellerId: ctx.sellerId, contentStatus: res.contentStatus },
   });
+
+  if (res.contentStatus === "PENDING") {
+    scheduleEmail(() => sendSellerProfileSubmitted(ctx.sellerId));
+  }
 
   revalidateSeller();
   return {

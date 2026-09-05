@@ -44,7 +44,9 @@ export type SellerProfileError =
   | { ok: false; code: "VALIDATION"; error: string }
   | { ok: false; code: "CONFLICT"; error: string };
 
-export type SellerProfileResult = { ok: true; contentStatus: SellerContentStatus } | SellerProfileError;
+export type SellerProfileResult =
+  | { ok: true; contentStatus: SellerContentStatus; contentSubmittedAt?: Date }
+  | SellerProfileError;
 
 const BIO_MAX = 1200;
 const POLICY_MAX = 2000;
@@ -319,11 +321,12 @@ export async function submitSellerProfile(
     if (current.contentStatus !== "DRAFT") {
       return { ok: true, contentStatus: current.contentStatus as SellerContentStatus };
     }
+    const submittedAt = new Date();
     await tx.seller.update({
       where: { id: ctx.sellerId },
-      data: { contentStatus: "PENDING", contentSubmittedAt: new Date(), contentReviewNote: null },
+      data: { contentStatus: "PENDING", contentSubmittedAt: submittedAt, contentReviewNote: null },
     });
-    return { ok: true, contentStatus: "PENDING" };
+    return { ok: true, contentStatus: "PENDING", contentSubmittedAt: submittedAt };
   };
 
   try {

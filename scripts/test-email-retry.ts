@@ -204,7 +204,9 @@ function staticTests() {
   // senders thread retry + accept an override key
   ok("senders · accept { retry?, idempotencyKey?, client? }", /type SellerRequestEmailOpts = \{[\s\S]{0,200}retry\?: boolean;[\s\S]{0,200}idempotencyKey\?: string;/.test(notifs));
   ok("senders · thread retry into renderAndDispatch meta", (notifs.match(/retry: opts\.retry/g) ?? []).length >= 3);
-  ok("senders · use the override key when given (opts.idempotencyKey ??)", (notifs.match(/opts\.idempotencyKey \?\?/g) ?? []).length === 3);
+  // >= 3 rather than === 3: 9F-6b (scripts/test-9f6b.ts) added 6 more senders
+  // using the identical `opts.idempotencyKey ??` override pattern.
+  ok("senders · use the override key when given (opts.idempotencyKey ??)", (notifs.match(/opts\.idempotencyKey \?\?/g) ?? []).length >= 3);
   ok("senders · reconstruct linked-vs-added from the audit log (no event data passed in)", /action: "seller_product_request\.linked"/.test(notifs));
   ok("senders · derive reviewedAt from the request row", /ctx\.reviewedAt \?\? new Date\(\)/.test(notifs));
 

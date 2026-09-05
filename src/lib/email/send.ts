@@ -50,7 +50,13 @@ export type EmailType =
   | "password_reset"
   | "seller_product_request_submitted"
   | "seller_product_request_approved"
-  | "seller_product_request_rejected";
+  | "seller_product_request_rejected"
+  | "seller_account_approved"
+  | "seller_account_suspended"
+  | "seller_account_closed"
+  | "seller_profile_submitted"
+  | "seller_profile_approved"
+  | "seller_profile_rejected";
 
 export type DispatchInput = {
   type: EmailType;

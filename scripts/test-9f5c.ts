@@ -320,7 +320,11 @@ async function staticTests() {
 
   // 28-32 — notifications
   ok("11 · exactly 3 new EmailTypes", /seller_product_request_submitted/.test(emailSend) && /seller_product_request_approved/.test(emailSend) && /seller_product_request_rejected/.test(emailSend));
-  ok("11 · no seller lifecycle email type (deferred)", !/seller_account_(approved|suspended|closed)/.test(emailSend));
+  // Seller account/profile lifecycle EmailTypes were deferred at 9F-5c time and
+  // shipped in 9F-6b (see scripts/test-9f6b.ts) — this assertion now only
+  // checks the 3 product-request types are still exactly as 9F-5c left them,
+  // not that lifecycle types are absent.
+  ok("11 · the 3 product-request EmailTypes are unchanged by later phases", /seller_product_request_submitted/.test(emailSend) && /seller_product_request_approved/.test(emailSend) && /seller_product_request_rejected/.test(emailSend));
   ok("28 · submit email fired from the seller submit action", /sendSellerProductRequestSubmitted/.test(sellerActions));
   ok("29 · approve email fired on link + create", (actions.match(/sendSellerProductRequestApproved/g) ?? []).length >= 2);
   ok("30 · reject / changes email fired", (actions.match(/sendSellerProductRequestRejected/g) ?? []).length >= 2);
