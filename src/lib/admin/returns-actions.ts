@@ -86,6 +86,15 @@ function appendStaffNote(
   return existing ? `${existing}\n${line}` : line;
 }
 
+/**
+ * Round to the nearest centavo, halves away from zero — same rule
+ * `checkout.ts` uses for the original commission calculation (9E-3B §15),
+ * duplicated locally so this file doesn't import from checkout's internals.
+ */
+function roundHalfUp(x: number): number {
+  return Math.sign(x) * Math.round(Math.abs(x));
+}
+
 function revalidateReturn(id: string, returnNumber?: string, orderNumber?: string) {
   revalidatePath("/admin/returns");
   revalidatePath(`/admin/returns/${id}`);
@@ -300,6 +309,47 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           offerByOrderItem.set(oi.id, {
             offerId: oi.offerId,
             sellerType: oi.offer?.seller.type ?? "FIRST_PARTY",
+          });
+        }
+      }
+
+      // 9F-8c — commission correction. The commission on a returned unit was
+      // earned on a sale that's now being refunded, so it's reduced by the
+      // returned units' snapshotted value regardless of restock eligibility
+      // (a damaged, non-resellable unit is still being refunded). Scoped per
+      // affected SellerOrder via `OrderItem.sellerOrderId` — a return's items
+      // are always all from the same parent Order, so today this is at most
+      // one SellerOrder, but the code doesn't assume that. Guarded by the
+      // SAME `restockedAt` set-once check above (already thrown before this
+      // point on a repeat), so this can never double-adjust. A legacy order
+      // item with no `sellerOrderId` contributes nothing (pre-marketplace,
+      // no commission was ever recorded for it).
+      if (orderItemIds.length > 0) {
+        const owners = await tx.orderItem.findMany({
+          where: { id: { in: orderItemIds } },
+          select: { id: true, sellerOrderId: true },
+        });
+        const sellerOrderByOrderItem = new Map(owners.map((oi) => [oi.id, oi.sellerOrderId]));
+        const returnedValueBySellerOrder = new Map<string, number>();
+        for (const l of lines) {
+          const sellerOrderId = l.item.orderItemId ? sellerOrderByOrderItem.get(l.item.orderItemId) : null;
+          if (!sellerOrderId) continue;
+          returnedValueBySellerOrder.set(
+            sellerOrderId,
+            (returnedValueBySellerOrder.get(sellerOrderId) ?? 0) + l.item.refundAmount,
+          );
+        }
+        for (const [sellerOrderId, returnedValue] of returnedValueBySellerOrder) {
+          if (returnedValue <= 0) continue;
+          const so = await tx.sellerOrder.findUnique({
+            where: { id: sellerOrderId },
+            select: { commissionAmount: true, commissionRate: true },
+          });
+          if (!so) continue;
+          const commissionAdjustment = roundHalfUp((returnedValue * so.commissionRate) / 10000);
+          await tx.sellerOrder.update({
+            where: { id: sellerOrderId },
+            data: { commissionAmount: Math.max(0, so.commissionAmount - commissionAdjustment) },
           });
         }
       }

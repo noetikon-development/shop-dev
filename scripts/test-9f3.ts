@@ -307,7 +307,16 @@ async function staticTests() {
   ok("I1 seller-return-repository never imports @/lib/inventory / calls adjustStock", !/@\/lib\/inventory|adjustStock\(/.test(repoCode));
   ok("I2 never writes Inventory / InventoryAdjustment", !/\b(tx|prisma|client)\.(inventory|inventoryAdjustment)\b/.test(repoCode));
   ok("I3 never writes Order.status / OrderEvent", !/\.order\.update|orderEvent\.create/.test(repoCode));
-  ok("I4 never writes a refund field", !/refundAmount:|refundMethod:|refundInitiatedAt:|paymentRefund/.test(repoCode));
+  // 9F-8c.1: a read-only `refundAmount: true` SELECT was added (to compute the
+  // commission correction) — that's a read of a pre-existing snapshot field,
+  // not a write. The rule this checks is "never WRITES a refund field", so the
+  // read-only select is explicitly allowed; any other refundAmount usage
+  // (i.e. not immediately followed by `true`, meaning it's a write) still
+  // fails this assertion, same as before.
+  ok(
+    "I4 never writes a refund field (a read-only refundAmount: true select is fine)",
+    !/refundAmount:(?!\s*true\b)|refundMethod:|refundInitiatedAt:|paymentRefund/.test(repoCode),
+  );
   ok("I5 restock goes through restoreOfferStock with reason RETURN", /restoreOfferStock\(/.test(repoCode) && /reason: "RETURN"/.test(repoCode));
   ok("I6 idempotency guard: status APPROVED + restockedAt null", /status: "APPROVED", restockedAt: null/.test(repoCode));
   ok("I7 mixed-seller return is refused", /MIXED_SELLER/.test(repoCode) && /orderItem\.sellerId !== ctx\.sellerId/.test(repoCode));

@@ -63,6 +63,8 @@
     "test:email-retry": "node --env-file=.env --conditions=react-server --import tsx scripts/test-email-retry.ts",
     "test:9f6b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f6b.ts",
     "test:9f7b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f7b.ts",
+    "test:9f8c": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c.ts",
+    "test:9f8c1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c1.ts",
     "seed:seller:sandbox": "node --env-file=.env --import tsx scripts/seed-seller-sandbox.ts",
     "db:dump-seed": "node --env-file=.env scripts/dump-seed-sql.mjs",
     "db:studio": "prisma studio"

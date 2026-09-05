@@ -416,10 +416,12 @@ export async function updateSellerOffer(
 /**
  * Move an Offer between the seller-controllable statuses.
  *
- * ALLOWED (9F-1): DRAFT ↔ INACTIVE, and either → ARCHIVED.
- * REFUSED: any transition to ACTIVE. A THIRD_PARTY offer going live is gated on
- * `marketplace.multiSellerCheckout` (false) and is a later phase; a FIRST_PARTY
- * offer is managed by the operator plane, not here.
+ * ALLOWED (9F-8c): DRAFT ↔ INACTIVE, either → ARCHIVED, and — ONLY when
+ * `marketplace.multiSellerCheckout` is `"true"` — DRAFT → ACTIVE and
+ * INACTIVE → ACTIVE. The gate check above remains the first line of defense;
+ * this map is the second, independent one (both must permit a transition to
+ * ACTIVE, matching the double-lock already documented in the 9F-8b/9F-8c
+ * audits). A FIRST_PARTY offer is managed by the operator plane, not here.
  */
 export async function setSellerOfferStatus(
   ctx: SellerContext,
@@ -451,9 +453,13 @@ export async function setSellerOfferStatus(
     if (offer.status === "ARCHIVED") {
       return { ok: false, code: "VALIDATION", error: "An archived offer can't be reactivated." };
     }
+    // The `next === "ACTIVE"` gate check above already ran and returned
+    // FORBIDDEN before reaching here if `marketplace.multiSellerCheckout` is
+    // not `"true"` — by the time this map is consulted for an ACTIVE
+    // destination, the gate has already passed.
     const allowed: Record<string, OfferStatus[]> = {
-      DRAFT: ["INACTIVE", "ARCHIVED"],
-      INACTIVE: ["DRAFT", "ARCHIVED"],
+      DRAFT: ["INACTIVE", "ARCHIVED", "ACTIVE"],
+      INACTIVE: ["DRAFT", "ARCHIVED", "ACTIVE"],
       ACTIVE: ["INACTIVE", "ARCHIVED"],
     };
     if (!(allowed[offer.status] ?? []).includes(next)) {

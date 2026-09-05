@@ -178,6 +178,17 @@ class StaleReturnError extends Error {}
 class ReceiptAbort extends Error {}
 
 /**
+ * Round to the nearest centavo, halves away from zero — the SAME rule
+ * `checkout.ts`'s creation-time commission calculation uses (9E-3B §15), and
+ * the SAME one `src/lib/admin/returns-actions.ts` duplicates for the admin
+ * receive path's commission correction (9F-8c). Duplicated locally so this
+ * file doesn't import from either of those.
+ */
+function roundHalfUp(x: number): number {
+  return Math.sign(x) * Math.round(Math.abs(x));
+}
+
+/**
  * Confirm physical receipt of a return that is ENTIRELY this seller's, advance it
  * `APPROVED → RECEIVED`, record per-line `restockQuantity` + `condition`, and
  * restore each restockable line through `restoreOfferStock(RETURN)`.
@@ -207,10 +218,12 @@ export async function sellerReceiveReturn(
             id: true,
             name: true,
             quantity: true,
+            refundAmount: true,
             orderItem: {
               select: {
                 sellerId: true,
                 offerId: true,
+                sellerOrderId: true,
                 offer: { select: { sellerId: true } },
               },
             },
@@ -292,6 +305,40 @@ export async function sellerReceiveReturn(
       data: { status: "RECEIVED", restockedAt: new Date() },
     });
     if (advanced.count === 0) throw new StaleReturnError();
+
+    // 1b. Commission correction (9F-8c.1 — same pattern as the admin receive
+    // path in `src/lib/admin/returns-actions.ts`, so there is only ever one
+    // commission-adjustment formula in the codebase). The commission on a
+    // returned unit was earned on a sale that's now being refunded, so it's
+    // reduced by the returned units' snapshotted value (`ReturnItem.refundAmount`
+    // == unitPrice × quantity) regardless of restock eligibility — a damaged,
+    // non-resellable unit is still being refunded. Every line here is already
+    // guaranteed to be `ctx.sellerId`'s own (the `foreign` check above), so
+    // this never touches another seller's SellerOrder. Sitting after the
+    // guard above (which already threw on a repeat), this can never
+    // double-adjust.
+    const returnedValueBySellerOrder = new Map<string, number>();
+    for (const it of ret.items) {
+      const sellerOrderId = it.orderItem.sellerOrderId;
+      if (!sellerOrderId) continue; // legacy line, pre-dates the marketplace — no commission was ever recorded
+      returnedValueBySellerOrder.set(
+        sellerOrderId,
+        (returnedValueBySellerOrder.get(sellerOrderId) ?? 0) + it.refundAmount,
+      );
+    }
+    for (const [sellerOrderId, returnedValue] of returnedValueBySellerOrder) {
+      if (returnedValue <= 0) continue;
+      const so = await tx.sellerOrder.findUnique({
+        where: { id: sellerOrderId },
+        select: { commissionAmount: true, commissionRate: true },
+      });
+      if (!so) continue;
+      const commissionAdjustment = roundHalfUp((returnedValue * so.commissionRate) / 10000);
+      await tx.sellerOrder.update({
+        where: { id: sellerOrderId },
+        data: { commissionAmount: Math.max(0, so.commissionAmount - commissionAdjustment) },
+      });
+    }
 
     // 2. Per-line: persist the assessment, then restock the resellable units.
     const restocked: { name: string; qty: number }[] = [];

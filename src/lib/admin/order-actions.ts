@@ -387,7 +387,10 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       if (toCancel.length > 0) {
         await tx.sellerOrder.updateMany({
           where: { id: { in: toCancel.map((s) => s.id) } },
-          data: { status: "CANCELLED", updatedAt: new Date() },
+          // 9F-8c: the sale this commission was earned on no longer exists —
+          // zero it in the same guarded write, so a repeat cancel attempt
+          // (which matches 0 rows above) can never re-zero or double-adjust.
+          data: { status: "CANCELLED", updatedAt: new Date(), commissionAmount: 0 },
         });
         cancelledSellerOrderIds = toCancel.map((s) => s.id);
       }
