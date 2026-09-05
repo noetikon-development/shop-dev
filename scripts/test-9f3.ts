@@ -331,11 +331,18 @@ async function staticTests() {
   ok("I11 no approve/reject/refund action in the seller returns surface", !/approveReturn|rejectReturn|initiateRefund|completeRefund/.test(actions));
 
   const orderActions = read("src/lib/admin/order-actions.ts");
+  // 9F-7b: the sync now finds the not-yet-CANCELLED rows first (so the
+  // affected seller(s) can be notified after commit), then updates exactly
+  // those ids — still status-guarded, still inside the same transaction.
   ok(
     "I12 cancelOrderAction syncs SellerOrder → CANCELLED (status-guarded, in-tx)",
-    /tx\.sellerOrder\.updateMany\(\{\s*where: \{ orderId, status: \{ not: "CANCELLED" \} \},\s*data: \{ status: "CANCELLED"/.test(
+    /tx\.sellerOrder\.findMany\(\{\s*where: \{ orderId, status: \{ not: "CANCELLED" \} \}/.test(
       orderActions.replace(/\n\s*/g, " "),
-    ),
+    ) &&
+      /tx\.sellerOrder\.updateMany\(\{\s*where: \{ id: \{ in: toCancel\.map/.test(
+        orderActions.replace(/\n\s*/g, " "),
+      ) &&
+      /data: \{ status: "CANCELLED"/.test(orderActions),
   );
 
   const nav = read("src/lib/seller/navigation.ts");

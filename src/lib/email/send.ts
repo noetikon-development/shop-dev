@@ -56,7 +56,12 @@ export type EmailType =
   | "seller_account_closed"
   | "seller_profile_submitted"
   | "seller_profile_approved"
-  | "seller_profile_rejected";
+  | "seller_profile_rejected"
+  | "order_received_ops"
+  | "seller_order_cancelled"
+  | "seller_return_received"
+  | "return_refund_initiated_ops"
+  | "return_refund_completed_ops";
 
 export type DispatchInput = {
   type: EmailType;

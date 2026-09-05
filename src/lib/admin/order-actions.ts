@@ -17,7 +17,7 @@ import {
   orderStatusLabel,
 } from "@/lib/orders/status";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderCancelled, sendOrderProcessing } from "@/lib/email/notifications";
+import { sendOrderCancelled, sendOrderProcessing, sendSellerOrderCancelled } from "@/lib/email/notifications";
 
 /**
  * Admin order mutations (Step 12; fulfilment milestones moved to
@@ -263,6 +263,7 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
   let restockedUnits = 0;
   let restockedLines = 0;
   let reversalPath: "offer-native" | "legacy" = "legacy";
+  let cancelledSellerOrderIds: string[] = [];
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -374,11 +375,22 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       //     parent order's SellerOrder(s) become CANCELLED so the seller sees
       //     the true state. Status-guarded so an already-CANCELLED / historic
       //     row is untouched. Does NOT alter Order.status semantics, events,
-      //     audit or email — those are handled above / below unchanged.
-      await tx.sellerOrder.updateMany({
+      //     audit or the CUSTOMER email — those are handled above / below
+      //     unchanged. (9F-7b: capture exactly which rows this flip touches so
+      //     the affected seller(s) can be notified after commit — never a
+      //     blind "notify every SellerOrder on this order", which would also
+      //     fire for ones already CANCELLED earlier.)
+      const toCancel = await tx.sellerOrder.findMany({
         where: { orderId, status: { not: "CANCELLED" } },
-        data: { status: "CANCELLED", updatedAt: new Date() },
+        select: { id: true },
       });
+      if (toCancel.length > 0) {
+        await tx.sellerOrder.updateMany({
+          where: { id: { in: toCancel.map((s) => s.id) } },
+          data: { status: "CANCELLED", updatedAt: new Date() },
+        });
+        cancelledSellerOrderIds = toCancel.map((s) => s.id);
+      }
 
       // 4. Timeline event.
       await tx.orderEvent.create({
@@ -420,6 +432,14 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
   // Cancellation notification — after the response; ORDER_CANCELLED:<orderId>
   // dedupes. It does NOT claim a refund (PayMongo / refunds are deferred).
   scheduleEmail(() => sendOrderCancelled(orderId, reason ?? null));
+
+  // Marketplace (9F-7b) — notify each seller whose SellerOrder this
+  // cancellation just cascaded to CANCELLED. One email per affected row,
+  // keyed on that row's own id (SELLER_ORDER_CANCELLED:<sellerOrderId>) —
+  // never Seller.updatedAt.
+  for (const sellerOrderId of cancelledSellerOrderIds) {
+    scheduleEmail(() => sendSellerOrderCancelled(sellerOrderId));
+  }
 
   return {
     ok: true,

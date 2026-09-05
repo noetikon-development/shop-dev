@@ -19,6 +19,10 @@ import {
   sendReturnRequested,
   sendReturnInbound,
   sendRefundIssued,
+  sendReturnRefundInitiatedOps,
+  sendReturnRefundCompletedOps,
+  sendSellerReturnReceived,
+  getReturnAffectedSellerIds,
 } from "@/lib/email/notifications";
 import {
   canTransitionReturn,
@@ -389,6 +393,15 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
 
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnReceived(ret.id));
+
+  // Marketplace (9F-7b) — notify each seller whose line(s) are part of this
+  // return. Admin-triggered only; the seller's own receipt confirmation
+  // (`sellerReceiveReturnAction`) does not duplicate this — it already knows.
+  const affectedSellerIds = await getReturnAffectedSellerIds(ret.id);
+  for (const sellerId of affectedSellerIds) {
+    scheduleEmail(() => sendSellerReturnReceived(ret.id, sellerId));
+  }
+
   return {
     ok: true,
     message:
@@ -529,6 +542,9 @@ export async function initiateRefundAction(input: unknown): Promise<ReturnAdminS
 
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnRefundInitiated(ret.id));
+  // Axiaro Operations companion (9F-7b) — bookkeeping-only refund path only;
+  // the PayMongo-routed `refund_issued` above stays untouched/dormant.
+  scheduleEmail(() => sendReturnRefundInitiatedOps(ret.id));
   return { ok: true, message: "Refund recorded (bookkeeping only).", returnId: ret.id };
 }
 
@@ -601,6 +617,8 @@ export async function completeRefundAction(input: unknown): Promise<ReturnAdminS
 
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnRefundCompleted(ret.id));
+  // Axiaro Operations companion (9F-7b) — bookkeeping-only refund path only.
+  scheduleEmail(() => sendReturnRefundCompletedOps(ret.id));
   return { ok: true, message: "Refund marked complete (bookkeeping only).", returnId: ret.id };
 }
 

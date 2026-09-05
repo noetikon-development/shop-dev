@@ -197,7 +197,10 @@ function staticTests() {
   // routing cases exist
   ok("routing · retryEmailByLog has the 3 seller_product_request cases", /case "seller_product_request_submitted":[\s\S]{0,400}case "seller_product_request_approved":[\s\S]{0,80}case "seller_product_request_rejected":/.test(notifs));
   ok("routing · original order/welcome/payment cases unchanged", /case "order_confirmation":[\s\S]*case "welcome":[\s\S]*case "payment_confirmation":/.test(notifs));
-  ok("routing · default branch still returns not_retryable", /\n\s*default:\s*\n[\s\S]{0,400}?error: "not_retryable"/.test(notifs) && (notifs.match(/error: "not_retryable"/g) ?? []).length === 1);
+  // Budget widened (400 -> 700 chars) for 9F-7b's longer default-branch
+  // comment (documents that the new _ops companions ARE retryable, unlike
+  // their sibling customer-facing types) — the retry semantics are unchanged.
+  ok("routing · default branch still returns not_retryable", /\n\s*default:\s*\n[\s\S]{0,700}?error: "not_retryable"/.test(notifs) && (notifs.match(/error: "not_retryable"/g) ?? []).length === 1);
   ok("routing · request id comes from the idempotency key, outcome from the key too", /log\.idempotencyKey\.split\(":"\)/.test(notifs) && /parts\[2\] === "changes_requested"/.test(notifs));
   ok("routing · retry passes the ORIGINAL key back (row reuse)", /idempotencyKey: log\.idempotencyKey/.test(notifs));
 

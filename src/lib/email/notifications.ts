@@ -41,6 +41,8 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps } from "@/lib/email/templates/ops-notifications";
+import { renderSellerOrderCancelled, renderSellerReturnReceived } from "@/lib/email/templates/seller-order-notifications";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -289,6 +291,61 @@ export async function sendOrderConfirmation(
     );
   } catch (err) {
     console.error("[email] sendOrderConfirmation", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro Operations — a new order was placed. Companion to
+ * `sendOrderConfirmation`, not a replacement — the customer email is
+ * unchanged. Goes to the ops inbox, never the customer.
+ * Key: ORDER_RECEIVED_OPS:<orderId>.
+ */
+export async function sendOrderReceivedOps(
+  orderId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const order = await db.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        email: true,
+        grandTotal: true,
+        placedAt: true,
+        items: { select: { id: true } },
+      },
+    });
+    if (!order) return { ok: false, status: "FAILED", error: "order_not_found" };
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "order_received_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `ORDER_RECEIVED_OPS:${order.id}`,
+        orderId: order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderOrderReceivedOps({
+          brand,
+          siteUrl,
+          orderNumber: order.orderNumber,
+          orderUrl: `${siteUrl}/admin/orders/${order.id}`,
+          customerEmail: order.email,
+          itemCount: order.items.length,
+          grandTotal: order.grandTotal,
+          placedAt: order.placedAt,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendOrderReceivedOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -1077,6 +1134,113 @@ export async function sendReturnRefundCompleted(returnId: string): Promise<Dispa
   }
 }
 
+/**
+ * Axiaro Operations — companion to `sendReturnRefundInitiated`. Covers ONLY
+ * the bookkeeping/admin refund path (no gateway, no Payment row) — the
+ * PayMongo-routed `refund_issued` / `refund_completed` (webhook.ts) stay
+ * dormant and untouched. Key: RETURN_REFUND_INITIATED_OPS:<id>.
+ */
+export async function sendReturnRefundInitiatedOps(
+  returnId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: {
+        id: true,
+        returnNumber: true,
+        refundAmount: true,
+        refundMethod: true,
+        order: { select: { id: true, orderNumber: true } },
+      },
+    });
+    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (ret.refundAmount == null) return { ok: false, status: "FAILED", error: "no_refund_amount" };
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "return_refund_initiated_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `RETURN_REFUND_INITIATED_OPS:${ret.id}`,
+        orderId: ret.order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderReturnRefundInitiatedOps({
+          brand,
+          siteUrl,
+          returnNumber: ret.returnNumber,
+          orderNumber: ret.order.orderNumber,
+          adminUrl: `${siteUrl}/admin/returns/${ret.id}`,
+          refundAmount: ret.refundAmount as number,
+          refundMethod: (ret.refundMethod ?? "").trim() || null,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendReturnRefundInitiatedOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro Operations — companion to `sendReturnRefundCompleted`. Same
+ * bookkeeping-only scope as `sendReturnRefundInitiatedOps`.
+ * Key: RETURN_REFUND_COMPLETED_OPS:<id>.
+ */
+export async function sendReturnRefundCompletedOps(
+  returnId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: {
+        id: true,
+        returnNumber: true,
+        refundAmount: true,
+        refundMethod: true,
+        refundReference: true,
+        order: { select: { id: true, orderNumber: true } },
+      },
+    });
+    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (ret.refundAmount == null) return { ok: false, status: "FAILED", error: "no_refund_amount" };
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "return_refund_completed_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `RETURN_REFUND_COMPLETED_OPS:${ret.id}`,
+        orderId: ret.order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderReturnRefundCompletedOps({
+          brand,
+          siteUrl,
+          returnNumber: ret.returnNumber,
+          orderNumber: ret.order.orderNumber,
+          adminUrl: `${siteUrl}/admin/returns/${ret.id}`,
+          refundAmount: ret.refundAmount as number,
+          refundMethod: (ret.refundMethod ?? "").trim() || null,
+          refundReference: ret.refundReference,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendReturnRefundCompletedOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Payments / PayMongo (Step 21 P4). DORMANT in Phase 4-A — no Payment /
 // PaymentRefund row can exist, so these are never called. Each loads the
@@ -1373,13 +1537,48 @@ export async function retryEmailByLog(
       return sendSellerProfileSubmitted(sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
     }
 
+    // Marketplace operations notifications (9F-7b). Order-scoped ones
+    // (order_received_ops, the two refund ops companions) are deterministic
+    // re-reads, same as order_confirmation / payment_confirmation above — no
+    // key override needed. The seller-scoped ones parse their id(s) back out
+    // of the key, exactly like the seller product-request / account cases.
+    case "order_received_ops":
+      return log.orderId ? sendOrderReceivedOps(log.orderId, { retry: true, client: tx }) : { ok: false, status: "FAILED", error: "no_order" };
+    case "return_refund_initiated_ops": {
+      const returnId = returnIdFromOpsKey(log.idempotencyKey);
+      return returnId ? sendReturnRefundInitiatedOps(returnId, { retry: true, client: tx }) : { ok: false, status: "FAILED", error: "no_return" };
+    }
+    case "return_refund_completed_ops": {
+      const returnId = returnIdFromOpsKey(log.idempotencyKey);
+      return returnId ? sendReturnRefundCompletedOps(returnId, { retry: true, client: tx }) : { ok: false, status: "FAILED", error: "no_return" };
+    }
+    case "seller_order_cancelled": {
+      const sellerOrderId = log.idempotencyKey.split(":")[1];
+      if (!sellerOrderId) return { ok: false, status: "FAILED", error: "no_seller_order" };
+      return sendSellerOrderCancelled(sellerOrderId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    case "seller_return_received": {
+      const parts = log.idempotencyKey.split(":");
+      const returnId = parts[1];
+      const sellerId = parts[2];
+      if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
+      return sendSellerReturnReceived(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+
     default:
       // auth emails / P2 security notices / support (contact-form) emails /
-      // return (P3) emails / refund_issued / refund_completed are not retryable
-      // here: they carry time-of-event content (or a single-use provider
-      // reference) that must not be regenerated and re-sent later.
+      // the CUSTOMER-facing return (P3) emails / refund_issued / the
+      // PayMongo-webhook refund_completed are not retryable here: they carry
+      // time-of-event content (or a single-use provider reference) that must
+      // not be regenerated and re-sent later. (Their new _ops companions
+      // above ARE retryable — same underlying ReturnRequest, deterministic.)
       return { ok: false, status: "FAILED", error: "not_retryable" };
   }
+}
+
+/** `RETURN_REFUND_(INITIATED|COMPLETED)_OPS:<returnId>` → `<returnId>`. */
+function returnIdFromOpsKey(key: string): string {
+  return key.split(":")[1] ?? "";
 }
 
 // ---------------------------------------------------------------------------
@@ -1909,6 +2108,137 @@ export async function sendSellerProfileSubmitted(
     );
   } catch (err) {
     console.error("[email] sendSellerProfileSubmitted", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller order / return notifications (Phase 9F-7b)
+//
+// Both are triggered by an ADMIN action taken on the seller's behalf (parent
+// order cancellation; an admin marking a return received) — reuses the exact
+// recipient resolution from the account/profile lifecycle emails above. Never
+// fired for the seller's OWN self-service actions (e.g. a seller confirming
+// their own return receipt already knows — see
+// `src/lib/seller/return-actions.ts`).
+// ---------------------------------------------------------------------------
+
+/**
+ * Seller — a parent order that included this seller's line(s) was cancelled
+ * (admin-initiated; there is no seller-initiated cancellation). Keyed on the
+ * `SellerOrder.id` itself — a stable, immutable per-line anchor. CANCELLED is
+ * terminal (`SELLER_ORDER_STATUS_TRANSITIONS.CANCELLED = []`) and the trigger
+ * only ever cascades a SellerOrder into CANCELLED once, so this key can never
+ * collide with a later unrelated change — never `Seller.updatedAt`.
+ * Key: SELLER_ORDER_CANCELLED:<sellerOrderId>.
+ */
+export async function sendSellerOrderCancelled(
+  sellerOrderId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const so = await db.sellerOrder.findUnique({
+      where: { id: sellerOrderId },
+      select: { id: true, sellerId: true, order: { select: { orderNumber: true } } },
+    });
+    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_order_cancelled",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_CANCELLED:${sellerOrderId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOrderCancelled({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: so.order.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderCancelled", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * The distinct seller ids (snapshotted on `OrderItem.sellerId` — never
+ * re-derived from a possibly-deleted `Offer`) whose lines are part of a
+ * return. Used by the RECEIVED trigger to know which sellers to notify.
+ */
+export async function getReturnAffectedSellerIds(
+  returnId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string[]> {
+  const rows = await client.returnItem.findMany({
+    where: { returnRequestId: returnId },
+    select: { orderItem: { select: { sellerId: true } } },
+  });
+  return [...new Set(rows.map((r) => r.orderItem.sellerId).filter((v): v is string => Boolean(v)))];
+}
+
+/**
+ * Seller — a return covering (at least) one of its lines was received back.
+ * Admin-triggered only (`markReceivedAction`) — the seller's OWN receipt
+ * confirmation (`sellerReceiveReturnAction`) does not call this, since the
+ * seller already knows. Keyed on `(returnId, sellerId)`: `ReturnRequest`
+ * status transitions are forward-only and guarded one-shot (same class of
+ * protection the sibling customer key `RETURN_RECEIVED:<id>` already relies
+ * on), so no extra timestamp is needed — never `Seller.updatedAt`.
+ * Key: SELLER_RETURN_RECEIVED:<returnId>:<sellerId>.
+ */
+export async function sendSellerReturnReceived(
+  returnId: string,
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: { id: true, returnNumber: true, order: { select: { orderNumber: true } } },
+    });
+    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    const items = await db.returnItem.findMany({
+      where: { returnRequestId: returnId, orderItem: { sellerId } },
+      select: { name: true, variantLabel: true, quantity: true },
+    });
+    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_return_received",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_RECEIVED:${returnId}:${sellerId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerReturnReceived({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          returnNumber: ret.returnNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          items,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerReturnReceived", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
