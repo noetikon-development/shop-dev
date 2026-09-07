@@ -50,6 +50,15 @@ export type VariantView = {
   stock: number;
   /** Reorder point of that same winning offer's `OfferInventory` (Phase 9D-D). */
   reorderPoint: number;
+  /**
+   * The winning offer's seller — carried through from the offers already loaded
+   * for the buy-box resolution (no extra query). `sellerType` is `"THIRD_PARTY"`
+   * only for a marketplace offer; `sellerName` is `Seller.displayName`. Both are
+   * `null` when there is no eligible winning offer. The PDP shows
+   * "Sold by {sellerName}" only for a THIRD_PARTY winner (UI-SELLER-INFO).
+   */
+  sellerType: "FIRST_PARTY" | "THIRD_PARTY" | null;
+  sellerName: string | null;
   status: string; // ACTIVE | ARCHIVED
   imageUrl: string | null;
   optionValueIds: string[];

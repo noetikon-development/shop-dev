@@ -272,6 +272,15 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           )}
         </div>
 
+        {/* UI-SELLER-INFO: marketplace attribution — only when the selected
+            variant's winning offer belongs to a third-party seller. Plain text,
+            no link (no public seller page). FIRST_PARTY shows nothing. */}
+        {matchedVariant?.sellerType === "THIRD_PARTY" && matchedVariant.sellerName && (
+          <p className="mt-2 text-meta font-medium uppercase tracking-wide text-ink-faint">
+            Sold by {matchedVariant.sellerName}
+          </p>
+        )}
+
         <p className="mt-4 text-pretty text-ink-soft">{product.shortDescription}</p>
 
         {/* Colour */}

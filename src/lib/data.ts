@@ -774,7 +774,10 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
               price: true,
               compareAtPrice: true,
               createdAt: true,
-              seller: { select: { type: true, status: true } },
+              // `displayName` (UI-SELLER-INFO): carried through to the PDP's
+              // "Sold by {seller}" line for a THIRD_PARTY winner. Same nested
+              // select — no extra query.
+              seller: { select: { type: true, status: true, displayName: true } },
               inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
             },
           },
@@ -820,13 +823,25 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     compareAtPrice: number | null;
     available: number;
     reorderPoint: number;
+    sellerType: "FIRST_PARTY" | "THIRD_PARTY" | null;
+    sellerName: string | null;
   } => {
     const win = resolveWinningOfferView(offers.map(fullCandidate));
+    // The winning offer's seller — looked up in the SAME already-loaded `offers`
+    // array (no extra query). `resolveWinningOfferView` is unchanged; we just
+    // resolve `win.offerId` back to its row here.
+    const winnerRow = win ? offers.find((o) => o.id === win.offerId) : undefined;
     return {
       price: win?.price ?? null,
       compareAtPrice: win?.compareAtPrice ?? null,
       available: win?.available ?? 0,
       reorderPoint: win?.reorderPoint ?? 0,
+      sellerType: winnerRow
+        ? winnerRow.seller.type === "FIRST_PARTY"
+          ? "FIRST_PARTY"
+          : "THIRD_PARTY"
+        : null,
+      sellerName: winnerRow?.seller.displayName ?? null,
     };
   };
 
@@ -910,6 +925,9 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         // Phase 9D-D: available units of the stock-bearing winning 1P Offer.
         stock: off.available,
         reorderPoint: off.reorderPoint,
+        // UI-SELLER-INFO: the winning offer's seller (from the same loaded rows).
+        sellerType: off.sellerType,
+        sellerName: off.sellerName,
         status: v.status,
         imageUrl: v.imageUrl,
         optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
