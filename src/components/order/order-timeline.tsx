@@ -22,6 +22,7 @@ export function OrderTimeline({
   events,
   pickup = false,
   sellerOrders = [],
+  paymentStatus,
 }: {
   status: string;
   events: Event[];
@@ -29,6 +30,10 @@ export function OrderTimeline({
   /** 9F-16B: reword the PROCESSING rung while a THIRD_PARTY SellerOrder is still
    *  awaiting the seller's "Accept order". Empty on the public tracking page. */
   sellerOrders?: SellerOrderInfo[];
+  /** 9F-21: the "Payment confirmed" rung is shown ONLY for an order that was
+   *  actually paid. A COD order (paid on delivery) never had a payment moment,
+   *  so the rung is dropped rather than rendered as a completed step. */
+  paymentStatus?: string;
 }) {
   if (status === "CANCELLED") {
     return (
@@ -50,7 +55,12 @@ export function OrderTimeline({
     );
   }
 
-  const flow: readonly string[] = pickup ? PICKUP_STATUS_FLOW : ORDER_STATUS_FLOW;
+  // 9F-21: the "PAID" rung belongs only to an order that was actually paid.
+  // COD orders (1P and 3P) advance to PROCESSING and beyond with no payment
+  // collected, so the rung is filtered out — never shown as a completed step.
+  const paid = paymentStatus === "PAID" || status === "PAID";
+  const baseFlow: readonly string[] = pickup ? PICKUP_STATUS_FLOW : ORDER_STATUS_FLOW;
+  const flow: readonly string[] = paid ? baseFlow : baseFlow.filter((s) => s !== "PAID");
   const currentIndex = flow.indexOf(status);
   const eventByStatus = new Map(events.map((e) => [e.status, e]));
   // 9F-16B: only the PROCESSING rung, only while a THIRD_PARTY SellerOrder is

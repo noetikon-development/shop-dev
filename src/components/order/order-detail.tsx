@@ -50,6 +50,7 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
               events={order.events}
               pickup={pickup}
               sellerOrders={order.sellerOrders}
+              paymentStatus={order.paymentStatus}
             />
           </div>
         </div>

@@ -1131,6 +1131,9 @@ export async function getPublicTracking(orderNumber: string, email: string) {
       orderNumber: true,
       email: true,
       status: true,
+      // 9F-21: a coarse enum (PENDING | PAID | REFUNDED | UNPAID) — not PII, price
+      // or address. Lets the timeline omit the "Payment confirmed" rung for COD.
+      paymentStatus: true,
       placedAt: true,
       shippingMethodCode: true,
       shippingMethodName: true,
