@@ -9,7 +9,7 @@ import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
 import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderConfirmation, sendOrderReceivedOps } from "@/lib/email/notifications";
+import { sendOrderConfirmation, sendOrderReceivedOps, sendSellerOrderReceived } from "@/lib/email/notifications";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import {
   getActiveShippingMethods,
@@ -844,6 +844,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     // Axiaro Operations companion notice (9F-7b) — same idempotency guarantee,
     // its own key (ORDER_RECEIVED_OPS:<orderId>), goes to the ops inbox only.
     scheduleEmail(() => sendOrderReceivedOps(created.id));
+    // Seller new-order notification (9F-14) — for a THIRD_PARTY order only, to
+    // the seller's own mailbox(es); a no-op for a FIRST_PARTY (Axiaro) order.
+    // Key SELLER_ORDER_RECEIVED:<orderId> → exactly one per order.
+    scheduleEmail(() => sendSellerOrderReceived(created.id));
 
     return { ok: true, orderNumber: created.orderNumber, duplicate: false };
   } catch (err) {

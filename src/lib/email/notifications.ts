@@ -42,7 +42,7 @@ import {
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
 import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps } from "@/lib/email/templates/ops-notifications";
-import { renderSellerOrderCancelled, renderSellerReturnReceived } from "@/lib/email/templates/seller-order-notifications";
+import { renderSellerOrderCancelled, renderSellerReturnReceived, renderSellerOrderReceived } from "@/lib/email/templates/seller-order-notifications";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -346,6 +346,109 @@ export async function sendOrderReceivedOps(
     );
   } catch (err) {
     console.error("[email] sendOrderReceivedOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller new-order notification — SELLER_ORDER_RECEIVED:<orderId>  (9F-14)
+//
+// One email per order to the THIRD_PARTY seller who must fulfil it — the
+// missing counterpart of the customer `order_confirmation` + Axiaro
+// `order_received_ops` fired at checkout. FIRST_PARTY (Axiaro's own) orders are
+// skipped: Axiaro already gets `order_received_ops`. Recipients are the seller's
+// ACTIVE OWNER/MANAGER members + `Seller.notifyEmail` (the 9F-6b/9F-7b audience).
+// Carries only fulfilment data — never the customer's email / account name /
+// billing / order grand total.
+// ---------------------------------------------------------------------------
+
+/** Customer-facing label for a stored `Order.paymentMethod`. COD orders store
+ *  "NONE" (no online method) — the seller is paid on the payout basis, NOT on
+ *  receipt, so the label must make the COD nature explicit. */
+function paymentMethodLabel(method: string): string {
+  switch (method) {
+    case "COD":
+    case "NONE":
+      return "Cash on Delivery (COD)";
+    case "CARD":
+      return "Card (paid online)";
+    case "GCASH":
+      return "GCash (paid online)";
+    default:
+      return method || "Cash on Delivery (COD)";
+  }
+}
+
+export async function sendSellerOrderReceived(
+  orderId: string,
+  opts: { retry?: boolean; idempotencyKey?: string; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const order = await db.order.findUnique({
+      where: { id: orderId },
+      select: {
+        id: true,
+        orderNumber: true,
+        paymentMethod: true,
+        shippingAddress: true,
+        sellerOrders: {
+          select: {
+            id: true,
+            sellerId: true,
+            sellerType: true,
+            merchandiseSubtotal: true,
+            discountAllocated: true,
+            shippingFee: true,
+            total: true,
+            items: {
+              select: { name: true, variantLabel: true, quantity: true, unitPrice: true, lineTotal: true },
+              orderBy: { id: "asc" },
+            },
+          },
+        },
+      },
+    });
+    if (!order) return { ok: false, status: "FAILED", error: "order_not_found" };
+    const so = order.sellerOrders[0];
+    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    // 1P (Axiaro-fulfilled) orders: Axiaro already got `order_received_ops`.
+    if (so.sellerType !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
+    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+
+    const shipTo = safeParse<Record<string, unknown> | null>(order.shippingAddress, null);
+
+    return renderAndDispatch(
+      {
+        type: "seller_order_received",
+        to: ctx.recipients,
+        from: ORDERS_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${order.id}`,
+        orderId: order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOrderReceived({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: order.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
+          items: so.items,
+          merchandiseSubtotal: so.merchandiseSubtotal,
+          discountAllocated: so.discountAllocated,
+          shippingFee: so.shippingFee,
+          payoutBasis: so.total,
+          paymentMethodLabel: paymentMethodLabel(order.paymentMethod),
+          shipTo,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderReceived", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -1544,6 +1647,10 @@ export async function retryEmailByLog(
     // of the key, exactly like the seller product-request / account cases.
     case "order_received_ops":
       return log.orderId ? sendOrderReceivedOps(log.orderId, { retry: true, client: tx }) : { ok: false, status: "FAILED", error: "no_order" };
+    case "seller_order_received":
+      return log.orderId
+        ? sendSellerOrderReceived(log.orderId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx })
+        : { ok: false, status: "FAILED", error: "no_order" };
     case "return_refund_initiated_ops": {
       const returnId = returnIdFromOpsKey(log.idempotencyKey);
       return returnId ? sendReturnRefundInitiatedOps(returnId, { retry: true, client: tx }) : { ok: false, status: "FAILED", error: "no_return" };

@@ -203,7 +203,7 @@ export type ParentOrderRollup = {
 };
 
 export type SellerOrderMutationResult =
-  | { ok: true; status: SellerOrderStatus; parentOrder?: ParentOrderRollup }
+  | { ok: true; status: SellerOrderStatus; from: SellerOrderStatus; parentOrder?: ParentOrderRollup }
   | SellerOrderRepoError;
 
 /** SellerOrder statuses that count as "shipped or beyond" for the SHIPPED rollup. */
@@ -410,7 +410,7 @@ export async function advanceSellerOrderStatus(
       parentOrder = (await rollUpParentOrder(tx, sellerOrderId, to)) ?? undefined;
     }
 
-    return { ok: true, status: to, parentOrder };
+    return { ok: true, status: to, from: so.status as SellerOrderStatus, parentOrder };
   };
 
   try {

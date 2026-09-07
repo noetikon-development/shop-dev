@@ -11,6 +11,7 @@ import {
 import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendOrderShipped, sendOrderDelivered } from "@/lib/email/notifications";
+import { sellerAdvanceLabels } from "@/lib/marketplace/seller-order-status";
 
 /**
  * `/seller/orders` server actions (Phase 9F-2).
@@ -80,15 +81,10 @@ export async function advanceSellerOrderAction(
     scheduleEmail(() => (rolledTo === "SHIPPED" ? sendOrderShipped(id) : sendOrderDelivered(id)));
   }
 
-  const label =
-    parsed.data.to === "PROCESSING"
-      ? "moved back to preparing"
-      : parsed.data.to === "READY_TO_SHIP"
-        ? "marked ready to ship"
-        : parsed.data.to === "SHIPPED"
-          ? "marked shipped"
-          : "marked delivered";
-  return { ok: true, message: `Order ${label}.` };
+  // 9F-14: "accepted" when this was PENDING_PAYMENT → PROCESSING, not the
+  // ambiguous "moved back to preparing".
+  const { done } = sellerAdvanceLabels(res.from, parsed.data.to);
+  return { ok: true, message: `Order ${done}.` };
 }
 
 // ---------------------------------------------------------------------------

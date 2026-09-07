@@ -108,6 +108,28 @@ export function sellerOrderStatusLabel(status: string): string {
   return LABELS[status] ?? status;
 }
 
+/**
+ * Seller-facing labels for a fulfilment transition button + its success toast
+ * (9F-14). The button text depends on BOTH ends of the move, not the target
+ * alone: `PENDING_PAYMENT → PROCESSING` is the seller ACCEPTING the order, while
+ * `READY_TO_SHIP → PROCESSING` is un-readying it — the same target, opposite
+ * meaning. `primary` marks the button as the main forward action.
+ */
+export function sellerAdvanceLabels(
+  from: string,
+  to: string,
+): { button: string; done: string; primary: boolean } {
+  if (to === "PROCESSING") {
+    return from === "PENDING_PAYMENT"
+      ? { button: "Accept order", done: "accepted", primary: true }
+      : { button: "Move back to preparing", done: "moved back to preparing", primary: false };
+  }
+  if (to === "READY_TO_SHIP") return { button: "Mark ready to ship", done: "marked ready to ship", primary: true };
+  if (to === "SHIPPED") return { button: "Mark shipped", done: "marked shipped", primary: true };
+  if (to === "DELIVERED") return { button: "Mark delivered", done: "marked delivered", primary: true };
+  return { button: `Move to ${sellerOrderStatusLabel(to)}`, done: `moved to ${sellerOrderStatusLabel(to).toLowerCase()}`, primary: true };
+}
+
 type BadgeTone = "neutral" | "success" | "warning" | "danger" | "info";
 
 export function sellerOrderStatusTone(status: string): BadgeTone {

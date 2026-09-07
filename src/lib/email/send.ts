@@ -58,6 +58,7 @@ export type EmailType =
   | "seller_profile_approved"
   | "seller_profile_rejected"
   | "order_received_ops"
+  | "seller_order_received"
   | "seller_order_cancelled"
   | "seller_return_received"
   | "return_refund_initiated_ops"

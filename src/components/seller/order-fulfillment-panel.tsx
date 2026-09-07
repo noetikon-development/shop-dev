@@ -8,7 +8,7 @@ import {
   type SellerOrderActionState,
 } from "@/lib/seller/order-actions";
 import { FormField, Select, Modal, notify, usePersistentAction } from "@/components/seller/ui";
-import { sellerOrderStatusLabel } from "@/lib/marketplace/seller-order-status";
+import { sellerOrderStatusLabel, sellerAdvanceLabels } from "@/lib/marketplace/seller-order-status";
 import { COURIERS } from "@/lib/orders/couriers";
 
 type ShipmentView = {
@@ -58,24 +58,21 @@ export function OrderFulfillmentPanel({
       {/* --- status controls --- */}
       {allowedMoves.length > 0 && (
         <div className="flex flex-wrap gap-2">
-          {allowedMoves.map((to) => (
-            <button
-              key={to}
-              type="button"
-              disabled={advance.pending}
-              onClick={() => move(to)}
-              className={to === "PROCESSING" ? "btn btn-outline py-2 text-sm" : "btn btn-primary py-2 text-sm"}
-            >
-              {advance.pending && <Loader2 size={13} className="animate-spin" />}
-              {to === "PROCESSING"
-                ? "Move back to preparing"
-                : to === "READY_TO_SHIP"
-                  ? "Mark ready to ship"
-                  : to === "SHIPPED"
-                    ? "Mark shipped"
-                    : "Mark delivered"}
-            </button>
-          ))}
+          {allowedMoves.map((to) => {
+            const { button, primary } = sellerAdvanceLabels(status, to);
+            return (
+              <button
+                key={to}
+                type="button"
+                disabled={advance.pending}
+                onClick={() => move(to)}
+                className={primary ? "btn btn-primary py-2 text-sm" : "btn btn-outline py-2 text-sm"}
+              >
+                {advance.pending && <Loader2 size={13} className="animate-spin" />}
+                {button}
+              </button>
+            );
+          })}
         </div>
       )}
       {terminal && (
