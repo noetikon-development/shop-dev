@@ -9,8 +9,16 @@ import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
 import { resolveLineImageUrl, colourValueIdOf } from "@/lib/line-image";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderConfirmation, sendOrderReceivedOps, sendSellerOrderReceived } from "@/lib/email/notifications";
+import {
+  sendOrderConfirmation,
+  sendOrderReceivedOps,
+  sendSellerOrderReceived,
+  sendOrderProcessing,
+} from "@/lib/email/notifications";
 import { getPaymentsConfig } from "@/lib/payments/config";
+import { writeAudit } from "@/lib/admin/audit";
+import { shouldAutoConfirmAtCheckout } from "@/lib/orders/status";
+import { ORDER_STATUS_META } from "@/lib/constants";
 import {
   getActiveShippingMethods,
   getFreeShippingThreshold,
@@ -569,6 +577,16 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   // `const` alias so the closure below keeps the narrowing.
   const soSeller = seller;
 
+  // 9F-15B: a THIRD_PARTY pay-on-delivery order has no payment step to clear —
+  // auto-confirm the parent Order at checkout (PENDING_PAYMENT → PROCESSING) so
+  // the seller can Accept it straight away. Every order this function creates is
+  // COD (`paymentMethod` "NONE"); a future online order confirms via its payment
+  // webhook. FIRST_PARTY orders keep the manual admin "Confirm order" flow.
+  const autoConfirmParent = shouldAutoConfirmAtCheckout({
+    sellerType: soSeller.type,
+    paymentMethod: "NONE",
+  });
+
   // 4. Server-authoritative totals. `subtotal` is Σ (bound Offer.price × qty).
   //    The shipping fee is the ACTIVE method's current DB rate (after the
   //    store-wide free-shipping rule) — never a browser value.
@@ -709,7 +727,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           cartId: cart.id,
           email: user.email,
           phone: shipAddr.phone,
-          status: "PENDING_PAYMENT",
+          // 9F-15B: THIRD_PARTY COD orders are auto-confirmed at creation so the
+          // seller can Accept them immediately. paymentMethod / paymentStatus
+          // are NOT touched — COD is still collected on delivery.
+          status: autoConfirmParent ? "PROCESSING" : "PENDING_PAYMENT",
           paymentMethod: "NONE",
           paymentStatus: "PENDING",
           subtotal,
@@ -738,6 +759,17 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
                 title: "Order placed",
                 detail: "We’ve received your order. Payment is arranged on delivery.",
               },
+              // 9F-15B: the auto-confirm milestone — same OrderEvent the admin
+              // "Confirm order" action writes (title / detail from ORDER_STATUS_META).
+              ...(autoConfirmParent
+                ? [
+                    {
+                      status: "PROCESSING",
+                      title: "Preparing your order",
+                      detail: ORDER_STATUS_META.PROCESSING?.description ?? null,
+                    },
+                  ]
+                : []),
             ],
           },
         },
@@ -848,6 +880,29 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     // the seller's own mailbox(es); a no-op for a FIRST_PARTY (Axiaro) order.
     // Key SELLER_ORDER_RECEIVED:<orderId> → exactly one per order.
     scheduleEmail(() => sendSellerOrderReceived(created.id));
+
+    // 9F-15B: a THIRD_PARTY COD order was auto-confirmed above — record the
+    // `order.confirmed` audit row (system actor, best-effort — same posture as
+    // confirmOrderAction) and send the existing "preparing your order" email
+    // (key ORDER_PROCESSING:<orderId>, so it can never duplicate).
+    if (autoConfirmParent) {
+      await writeAudit({
+        actorUserId: null,
+        action: "order.confirmed",
+        targetType: "order",
+        targetId: created.id,
+        summary: `Order ${created.orderNumber} auto-confirmed (third-party pay-on-delivery): PENDING_PAYMENT → PROCESSING`,
+        meta: {
+          orderNumber: created.orderNumber,
+          from: "PENDING_PAYMENT",
+          to: "PROCESSING",
+          paymentMethod: "NONE",
+          trigger: "checkout_3p_cod_autoconfirm",
+          sellerId: soSeller.id,
+        },
+      });
+      scheduleEmail(() => sendOrderProcessing(created.id));
+    }
 
     return { ok: true, orderNumber: created.orderNumber, duplicate: false };
   } catch (err) {

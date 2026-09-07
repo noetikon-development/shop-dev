@@ -143,6 +143,25 @@ export function isConfirmablePendingPayment(from: string): boolean {
   return from === "PENDING_PAYMENT";
 }
 
+/**
+ * True when a freshly-placed order should be auto-confirmed at checkout
+ * (PENDING_PAYMENT → PROCESSING) with NO admin step — a THIRD_PARTY (marketplace)
+ * order paid on delivery. There is no payment to clear, so making the seller
+ * wait for a manual Axiaro confirmation just blocks fulfilment (9F-15B).
+ *
+ * FIRST_PARTY orders keep the manual "Confirm order" flow (Axiaro confirms its
+ * own). An online-paid order is confirmed by its payment webhook, never here —
+ * hence the explicit COD (`paymentMethod` "NONE"/"COD") requirement.
+ *
+ * This is the same relaxation `canTransition(..., { codConfirm: true })` allows
+ * for `confirmOrderAction`; it does NOT touch payment status/method and never
+ * implies money changed hands.
+ */
+export function shouldAutoConfirmAtCheckout(opts: { sellerType: string; paymentMethod: string }): boolean {
+  const cod = opts.paymentMethod === "NONE" || opts.paymentMethod === "COD";
+  return opts.sellerType === "THIRD_PARTY" && cod;
+}
+
 export function isCancellable(from: string): boolean {
   return isOrderStatus(from) && CANCELLABLE_STATUSES.includes(from);
 }
