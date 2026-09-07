@@ -778,6 +778,10 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
               // "Sold by {seller}" line for a THIRD_PARTY winner. Same nested
               // select — no extra query.
               seller: { select: { type: true, status: true, displayName: true } },
+              // `condition` (UI-PDP-CONDITION): the winning offer's listing
+              // condition, shown in the PDP seller-information block. Same
+              // nested select — no extra query.
+              condition: true,
               inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
             },
           },
@@ -825,11 +829,12 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     reorderPoint: number;
     sellerType: "FIRST_PARTY" | "THIRD_PARTY" | null;
     sellerName: string | null;
+    offerCondition: string | null;
   } => {
     const win = resolveWinningOfferView(offers.map(fullCandidate));
-    // The winning offer's seller — looked up in the SAME already-loaded `offers`
-    // array (no extra query). `resolveWinningOfferView` is unchanged; we just
-    // resolve `win.offerId` back to its row here.
+    // The winning offer's seller + condition — looked up in the SAME
+    // already-loaded `offers` array (no extra query). `resolveWinningOfferView`
+    // is unchanged; we just resolve `win.offerId` back to its row here.
     const winnerRow = win ? offers.find((o) => o.id === win.offerId) : undefined;
     return {
       price: win?.price ?? null,
@@ -842,6 +847,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
           : "THIRD_PARTY"
         : null,
       sellerName: winnerRow?.seller.displayName ?? null,
+      offerCondition: winnerRow?.condition ?? null,
     };
   };
 
@@ -928,6 +934,8 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         // UI-SELLER-INFO: the winning offer's seller (from the same loaded rows).
         sellerType: off.sellerType,
         sellerName: off.sellerName,
+        // UI-PDP-CONDITION: the winning offer's listing condition (same row).
+        offerCondition: off.offerCondition,
         status: v.status,
         imageUrl: v.imageUrl,
         optionValueIds: v.optionValues.map((ov) => ov.optionValueId),

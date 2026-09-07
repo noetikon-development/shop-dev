@@ -42,14 +42,14 @@ function staticTests() {
   ok("data · no import of offer-resolver / getWinningOffer added", !/offer-resolver|getWinningOffer/.test(data));
   ok("data · resolveWinningOfferView is unchanged (still the only resolver used, no new signature)", /const win = resolveWinningOfferView\(offers\.map\(fullCandidate\)\);/.test(data));
 
-  // UI (UI-SELLER-INFO-2: compact seller-information block)
-  ok("ui · seller block rendered only inside a THIRD_PARTY guard", /matchedVariant\?\.sellerType === "THIRD_PARTY" && matchedVariant\.sellerName && \(\s*\n\s*<dl /.test(viewer));
+  // UI (UI-SELLER-INFO-2 + UI-PDP-CONDITION: block renders for BOTH seller types)
+  ok("ui · seller block renders for any winning offer (not THIRD_PARTY-only)", /\{matchedVariant\?\.sellerType && matchedVariant\.sellerName && \(\s*\n\s*<dl /.test(viewer) && !/sellerType === "THIRD_PARTY" && matchedVariant\.sellerName && \(\s*\n\s*<dl/.test(viewer));
   ok("ui · block carries 'Sold by' → sellerName", /<dt className="shrink-0 text-ink-faint">Sold by<\/dt>\s*\n\s*<dd className="text-right font-medium text-ink">\{matchedVariant\.sellerName\}<\/dd>/.test(viewer));
   ok("ui · block carries 'Payment' → Secure checkout", /<dt className="shrink-0 text-ink-faint">Payment<\/dt>\s*\n\s*<dd className="text-right text-ink-soft">Secure checkout<\/dd>/.test(viewer));
-  ok("ui · block carries 'Customer service' → SITE.name", /<dt className="shrink-0 text-ink-faint">Customer service<\/dt>\s*\n\s*<dd className="text-right text-ink-soft">\{SITE\.name\}<\/dd>/.test(viewer));
+  ok("ui · 'Customer service' → seller for THIRD_PARTY, SITE.name for FIRST_PARTY", /Customer service<\/dt>[\s\S]{0,160}matchedVariant\.sellerType === "THIRD_PARTY"\s*\n?\s*\? \(matchedVariant\.sellerName \?\? SITE\.name\)\s*\n?\s*: SITE\.name/.test(viewer));
   ok("ui · placed directly under the price block, above the short description", viewer.indexOf('size="lg"') < viewer.indexOf(">Sold by</dt>") && viewer.indexOf(">Sold by</dt>") < viewer.indexOf("{product.shortDescription}"));
-  ok("ui · plain text — no <Link>/<a> in the seller block", !/>Sold by<\/dt>[\s\S]{0,400}<(Link|a )/.test(viewer));
-  ok("ui · no rating/badge/logo/location/response/sales stats invented in the block", !/>Sold by<\/dt>[\s\S]{0,400}(rating|badge|logo|location|reviews|response rate|positive feedback|items sold|since \d)/i.test(viewer));
+  ok("ui · plain text — no <Link>/<a> in the seller block", !/>Sold by<\/dt>[\s\S]{0,600}<(Link|a )/.test(viewer));
+  ok("ui · no rating/badge/logo/location/response/sales stats invented in the block", !/>Sold by<\/dt>[\s\S]{0,600}(rating|badge|logo|location|reviews|response rate|positive feedback|items sold|since \d)/i.test(viewer));
   ok("ui · SITE constant imported (no magic 'Axiaro' string literal in the block)", /import \{ SITE \} from "@\/lib\/constants";/.test(viewer) && !/>Axiaro</.test(viewer));
 
   // Scope guards
@@ -116,7 +116,7 @@ async function dbTests() {
   const smallR = resolveVariantSeller(smallOffers as PdpOffer[]);
   ok("2 · a size with no eligible offer → sellerType/sellerName null (no line rendered)", smallR.sellerType === null && smallR.sellerName === null && smallR.price === null, JSON.stringify(smallR));
 
-  // ── FIRST_PARTY control — data carried, UI renders nothing ──────────────
+  // ── FIRST_PARTY — data carried, and the block now renders too ───────────
   const fp = await prisma.product.findFirst({
     where: { slug: "street-low-sneaker", status: "ACTIVE" },
     select: { variants: { where: { status: "ACTIVE" }, select: { sku: true, offers: { select: PDP_OFFER_SELECT } } } },
@@ -124,7 +124,7 @@ async function dbTests() {
   ok("3 · a FIRST_PARTY product resolves", fp !== null);
   const fpResolved = (fp?.variants ?? []).map((v) => resolveVariantSeller(v.offers as PdpOffer[])).filter((r) => r.price != null);
   ok("3 · every winning FIRST_PARTY variant → sellerType FIRST_PARTY", fpResolved.length > 0 && fpResolved.every((r) => r.sellerType === "FIRST_PARTY"), JSON.stringify(fpResolved));
-  ok("3 · sellerName 'Axiaro' is carried, but the PDP THIRD_PARTY guard renders nothing", fpResolved.every((r) => r.sellerName === "Axiaro"));
+  ok("3 · sellerName 'Axiaro' is carried → PDP block shows 'Sold by Axiaro'", fpResolved.every((r) => r.sellerName === "Axiaro"));
 }
 
 async function main() {

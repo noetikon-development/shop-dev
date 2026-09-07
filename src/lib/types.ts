@@ -59,6 +59,14 @@ export type VariantView = {
    */
   sellerType: "FIRST_PARTY" | "THIRD_PARTY" | null;
   sellerName: string | null;
+  /**
+   * The winning offer's listing condition (`Offer.condition`: NEW | REFURBISHED
+   * | USED_LIKE_NEW | USED_GOOD) — carried from the same already-loaded offer
+   * row as the seller above (no extra query). `null` when there is no eligible
+   * winning offer. Rendered via `conditionLabel()` in the PDP seller-information
+   * block (UI-PDP-CONDITION).
+   */
+  offerCondition: string | null;
   status: string; // ACTIVE | ARCHIVED
   imageUrl: string | null;
   optionValueIds: string[];

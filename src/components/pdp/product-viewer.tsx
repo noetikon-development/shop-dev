@@ -17,6 +17,7 @@ import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { matchVariant, hasPurchasableVariant, solePurchasableVariant } from "@/lib/variant-match";
 import { isPhotoRef } from "@/lib/art-ref";
 import { SITE } from "@/lib/constants";
+import { conditionLabel } from "@/lib/seller/format";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -284,24 +285,38 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           )}
         </div>
 
-        {/* UI-SELLER-INFO-2: compact marketplace seller-information block — only
-            when the selected variant's winning offer belongs to a third-party
-            seller. Every value is data already on the page or a site constant;
-            no seller ratings / counts / location / badges. No public seller
-            page, so no link. FIRST_PARTY shows nothing (block omitted entirely). */}
-        {matchedVariant?.sellerType === "THIRD_PARTY" && matchedVariant.sellerName && (
+        {/* UI-SELLER-INFO-2 / UI-PDP-CONDITION: compact seller-information block.
+            Renders for BOTH FIRST_PARTY and THIRD_PARTY once a winning offer is
+            resolved for the selected variant. Every value is data already on the
+            page or a site constant — no ratings / counts / location / badges,
+            no public seller page so no link. Nothing shows before a variant is
+            selected or when no offer wins. Customer service is the seller for a
+            third-party listing, Axiaro for first-party. */}
+        {matchedVariant?.sellerType && matchedVariant.sellerName && (
           <dl className="mt-4 space-y-1.5 rounded-md border border-line bg-surface-sunken/40 p-4 text-sm">
             <div className="flex items-baseline justify-between gap-4">
               <dt className="shrink-0 text-ink-faint">Sold by</dt>
               <dd className="text-right font-medium text-ink">{matchedVariant.sellerName}</dd>
             </div>
+            {matchedVariant.offerCondition && (
+              <div className="flex items-baseline justify-between gap-4">
+                <dt className="shrink-0 text-ink-faint">Condition</dt>
+                <dd className="text-right text-ink-soft">
+                  {conditionLabel(matchedVariant.offerCondition)}
+                </dd>
+              </div>
+            )}
             <div className="flex items-baseline justify-between gap-4">
               <dt className="shrink-0 text-ink-faint">Payment</dt>
               <dd className="text-right text-ink-soft">Secure checkout</dd>
             </div>
             <div className="flex items-baseline justify-between gap-4">
               <dt className="shrink-0 text-ink-faint">Customer service</dt>
-              <dd className="text-right text-ink-soft">{SITE.name}</dd>
+              <dd className="text-right text-ink-soft">
+                {matchedVariant.sellerType === "THIRD_PARTY"
+                  ? (matchedVariant.sellerName ?? SITE.name)
+                  : SITE.name}
+              </dd>
             </div>
           </dl>
         )}
