@@ -346,6 +346,9 @@ const cartForOrder = {
           price: true,
           compareAtPrice: true,
           variantId: true,
+          // 9F-22: snapshotted onto each OrderItem so order/email records survive
+          // a later Offer.condition edit. Never re-picked — this is the bound offer.
+          condition: true,
           seller: {
             select: {
               id: true,
@@ -494,6 +497,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     unitPrice: number;
     quantity: number;
     lineTotal: number;
+    condition: string;
   }[] = [];
 
   for (const item of cart.items) {
@@ -552,6 +556,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       unitPrice: o.price, // the BOUND Offer price — the authoritative checkout price
       quantity: item.quantity,
       lineTotal: o.price * item.quantity,
+      condition: o.condition, // 9F-22 snapshot — the bound offer's condition
     });
   }
 
@@ -821,6 +826,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           unitPrice: l.unitPrice,
           quantity: l.quantity,
           lineTotal: l.lineTotal,
+          // 9F-22: faithful snapshot of the bound Offer's condition at purchase
+          // time (incl. "NEW"). Display code shows a condition line only when this
+          // is a non-NEW value; nothing re-picks the offer.
+          condition: l.condition,
         })),
       });
 

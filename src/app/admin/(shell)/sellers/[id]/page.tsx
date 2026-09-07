@@ -9,6 +9,7 @@ import {
   listSellerProductRequestsForAdmin,
 } from "@/lib/admin/sellers/repository";
 import { sellerStatusLabel, sellerStatusTone } from "@/lib/admin/sellers/lifecycle";
+import { conditionLabel } from "@/lib/seller/format";
 import { countryName } from "@/lib/countries";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
 import { PageHeader, Card, StatusBadge } from "@/components/admin/ui";
@@ -131,7 +132,7 @@ export default async function AdminSellerDetailPage({
                           <span className="block text-ink-faint">{o.optionLabel}</span>
                         </td>
                         <td className="px-4 py-2 font-mono text-ink-soft">{o.sellerSku ?? o.variantSku}</td>
-                        <td className="px-4 py-2 text-ink-soft">{o.condition}</td>
+                        <td className="px-4 py-2 text-ink-soft">{conditionLabel(o.condition)}</td>
                         <td className="px-4 py-2 text-right tabular-nums text-ink-soft">
                           ₱{(o.price / 100).toLocaleString()}
                         </td>

@@ -7,6 +7,7 @@ import { buttonClasses } from "@/components/ui/button";
 import { ORDER_STATUS_META, PAYMENT_METHODS } from "@/lib/constants";
 import { orderStatusTone } from "@/lib/orders/status";
 import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
+import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { formatPrice, formatDate } from "@/lib/utils";
 import type { OrderView } from "@/lib/data";
 
@@ -67,6 +68,9 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
                   <p className="text-sm font-medium">{it.name}</p>
                   {it.variantLabel && (
                     <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>
+                  )}
+                  {isNoteworthyCondition(it.condition) && (
+                    <p className="mt-0.5 text-meta text-ink-soft">Condition: {conditionLabel(it.condition!)}</p>
                   )}
                   <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
                 </div>

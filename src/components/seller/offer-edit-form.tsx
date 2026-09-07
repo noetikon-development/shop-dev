@@ -5,9 +5,12 @@ import { Loader2 } from "lucide-react";
 import { updateOfferAction, type SellerActionState } from "@/lib/seller/offer-actions";
 import { FormField, Select, notify, usePersistentAction } from "@/components/seller/ui";
 
+import { conditionLabel } from "@/lib/seller/format";
+
 const CONDITIONS = [
   { value: "NEW", label: "New" },
   { value: "REFURBISHED", label: "Refurbished" },
+  { value: "OPEN_BOX", label: "Open box" },
   { value: "USED_LIKE_NEW", label: "Used — like new" },
   { value: "USED_GOOD", label: "Used — good" },
 ];
@@ -18,6 +21,7 @@ export function OfferEditForm({
   compareAtPrice,
   sellerSku,
   condition,
+  status,
   handlingTimeDays,
 }: {
   offerId: string;
@@ -25,8 +29,12 @@ export function OfferEditForm({
   compareAtPrice: number | null;
   sellerSku: string | null;
   condition: string;
+  /** 9F-22: an ACTIVE listing's condition is locked — the seller must set it
+   *  inactive first. Undefined (older callers) keeps the field editable. */
+  status?: string;
   handlingTimeDays: number;
 }) {
+  const conditionLocked = status === "ACTIVE";
   const { state, onSubmit, pending } = usePersistentAction<SellerActionState>(updateOfferAction, {});
   const fe = state.fieldErrors ?? {};
 
@@ -61,14 +69,26 @@ export function OfferEditForm({
       </div>
 
       <div className="grid gap-4 sm:grid-cols-3">
-        <FormField label="Condition" htmlFor="condition" error={fe.condition}>
-          <Select id="condition" name="condition" defaultValue={condition}>
-            {CONDITIONS.map((c) => (
-              <option key={c.value} value={c.value}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
+        <FormField
+          label="Condition"
+          htmlFor="condition"
+          error={fe.condition}
+          hint={conditionLocked ? "Set this listing inactive to change the condition." : undefined}
+        >
+          {conditionLocked ? (
+            <>
+              <input type="hidden" name="condition" value={condition} />
+              <p className="field flex items-center text-sm text-ink-soft">{conditionLabel(condition)}</p>
+            </>
+          ) : (
+            <Select id="condition" name="condition" defaultValue={condition}>
+              {CONDITIONS.map((c) => (
+                <option key={c.value} value={c.value}>
+                  {c.label}
+                </option>
+              ))}
+            </Select>
+          )}
         </FormField>
         <FormField label="Your SKU" htmlFor="sellerSku" error={fe.sellerSku}>
           <input id="sellerSku" name="sellerSku" maxLength={64} defaultValue={sellerSku ?? ""} className="field text-sm" />

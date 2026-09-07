@@ -68,7 +68,7 @@ export type SellerSettingsView = {
   contentReviewNote: string | null;
 };
 
-export type OfferCondition = "NEW" | "REFURBISHED" | "USED_LIKE_NEW" | "USED_GOOD";
+export type OfferCondition = "NEW" | "REFURBISHED" | "OPEN_BOX" | "USED_LIKE_NEW" | "USED_GOOD";
 export type OfferStatus = "DRAFT" | "ACTIVE" | "INACTIVE" | "ARCHIVED";
 export type FulfillmentType = "SELLER_FULFILLED" | "PLATFORM_FULFILLED";
 

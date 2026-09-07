@@ -769,6 +769,11 @@ model OrderItem {
   unitPrice    Int
   quantity     Int
   lineTotal    Int
+  // 9F-22: the bound Offer's condition at purchase time — a historical snapshot
+  // (incl. "NEW") so order/email display and records survive a later
+  // Offer.condition edit or a deleted Offer. NULL only for pre-9F-22 lines.
+  // Display code shows a condition line only when this is a non-NEW value.
+  condition    String?
 
   // Marketplace snapshot (Phase 9E-3C-1). NULLABLE during the additive
   // migration; the 9E-3C-1 backfill populates them for every historical line
@@ -1307,7 +1312,7 @@ model Offer {
   // NULLs as distinct, so a seller may leave it unset). The catalog identifier
   // stays Variant.sku, which is untouched.
   sellerSku        String?
-  condition        String   @default("NEW") // NEW | REFURBISHED | USED_LIKE_NEW | USED_GOOD
+  condition        String   @default("NEW") // NEW | REFURBISHED | OPEN_BOX | USED_LIKE_NEW | USED_GOOD
   status           String   @default("DRAFT") // DRAFT | ACTIVE | INACTIVE | ARCHIVED
   // SELLER_FULFILLED only at launch. PLATFORM_FULFILLED is a reserved future
   // value and must not be used in Phase 9C.

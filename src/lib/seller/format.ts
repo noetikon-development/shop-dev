@@ -14,12 +14,18 @@ export function offerStatusTone(status: string) {
 const CONDITION_LABEL: Record<string, string> = {
   NEW: "New",
   REFURBISHED: "Refurbished",
+  OPEN_BOX: "Open box",
   USED_LIKE_NEW: "Used — like new",
   USED_GOOD: "Used — good",
 };
 
 export function conditionLabel(condition: string) {
   return CONDITION_LABEL[condition] ?? condition;
+}
+
+/** True for a real, non-"New" condition — the gate for showing a condition line/chip. */
+export function isNoteworthyCondition(condition: string | null | undefined): boolean {
+  return Boolean(condition) && condition !== "NEW";
 }
 
 export function pesos(centavos: number): string {

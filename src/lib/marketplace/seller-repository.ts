@@ -47,7 +47,7 @@ export type SellerRepoError =
   | { ok: false; code: "INVARIANT"; error: string };
 
 const OFFER_STATUSES = ["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"] as const;
-const OFFER_CONDITIONS = ["NEW", "REFURBISHED", "USED_LIKE_NEW", "USED_GOOD"] as const;
+const OFFER_CONDITIONS = ["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"] as const;
 type OfferStatus = (typeof OFFER_STATUSES)[number];
 type OfferCondition = (typeof OFFER_CONDITIONS)[number];
 
@@ -384,6 +384,17 @@ export async function updateSellerOffer(
     if (patch.condition !== undefined && patch.condition !== offer.condition) {
       if (!(OFFER_CONDITIONS as readonly string[]).includes(patch.condition)) {
         return { ok: false, code: "VALIDATION", error: "Unknown condition." };
+      }
+      // 9F-22: the condition of a customer-visible (ACTIVE) offer must not change
+      // under a shopper who may have it in the buy box / cart. Require the seller
+      // to take it INACTIVE first. DRAFT / INACTIVE may change freely; ARCHIVED
+      // is already blocked from any edit above.
+      if (offer.status === "ACTIVE") {
+        return {
+          ok: false,
+          code: "VALIDATION",
+          error: "Make this listing inactive before changing its condition.",
+        };
       }
       const dupe = await tx.offer.findUnique({
         where: {

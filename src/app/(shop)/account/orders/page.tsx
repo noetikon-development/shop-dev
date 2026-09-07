@@ -7,6 +7,7 @@ import { ProductImage } from "@/components/product-image";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import { orderStatusTone } from "@/lib/orders/status";
 import { formatPrice, formatDate } from "@/lib/utils";
+import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -60,7 +61,13 @@ export default async function OrdersPage() {
                   ))}
                 </div>
                 <p className="min-w-0 flex-1 truncate text-meta text-ink-soft">
-                  {o.items.map((it) => it.name).join(", ")}
+                  {o.items
+                    .map((it) =>
+                      isNoteworthyCondition(it.condition)
+                        ? `${it.name} (${conditionLabel(it.condition!)})`
+                        : it.name,
+                    )
+                    .join(", ")}
                 </p>
                 <Link
                   href={`/account/orders/${o.orderNumber}`}

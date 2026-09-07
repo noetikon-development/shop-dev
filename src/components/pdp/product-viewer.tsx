@@ -17,7 +17,7 @@ import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { matchVariant, hasPurchasableVariant, solePurchasableVariant } from "@/lib/variant-match";
 import { isPhotoRef } from "@/lib/art-ref";
 import { SITE } from "@/lib/constants";
-import { conditionLabel } from "@/lib/seller/format";
+import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -298,11 +298,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
               <dt className="shrink-0 text-ink-faint">Sold by</dt>
               <dd className="text-right font-medium text-ink">{matchedVariant.sellerName}</dd>
             </div>
-            {matchedVariant.offerCondition && (
+            {isNoteworthyCondition(matchedVariant.offerCondition) && (
               <div className="flex items-baseline justify-between gap-4">
                 <dt className="shrink-0 text-ink-faint">Condition</dt>
-                <dd className="text-right text-ink-soft">
-                  {conditionLabel(matchedVariant.offerCondition)}
+                <dd className="text-right font-medium text-ink">
+                  {conditionLabel(matchedVariant.offerCondition!)}
                 </dd>
               </div>
             )}

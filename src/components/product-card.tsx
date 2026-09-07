@@ -11,6 +11,7 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useCart } from "@/lib/cart-store";
 import { cn, compactNumber } from "@/lib/utils";
+import { conditionLabel } from "@/lib/seller/format";
 import type { ProductCardView } from "@/lib/types";
 
 export function ProductCard({
@@ -135,6 +136,12 @@ export function ProductCard({
           </Link>
         </h3>
         <p className="mt-1 line-clamp-1 text-meta text-ink-faint">{product.shortDescription}</p>
+
+        {product.condition && (
+          <span className="mt-1.5 inline-flex w-fit rounded-full border border-line-strong px-2 py-0.5 text-micro font-medium text-ink-soft">
+            {conditionLabel(product.condition)}
+          </span>
+        )}
 
         <div className="mt-2.5 flex items-center gap-2">
           <Stars value={product.ratingAvg} size={13} showNumber={false} />

@@ -132,6 +132,8 @@ const cardSelect = {
           price: true,
           compareAtPrice: true,
           createdAt: true,
+          // 9F-22: the winning offer's condition — a non-NEW chip on the card.
+          condition: true,
           seller: { select: { type: true, status: true } },
           inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
         },
@@ -146,6 +148,7 @@ type CardOfferRow = {
   price: number;
   compareAtPrice: number | null;
   createdAt: Date;
+  condition: string;
   seller: { type: string; status: string };
   inventory: { quantity: number; reserved: number; reorderPoint: number } | null;
 };
@@ -236,6 +239,36 @@ function cardPricing(p: CardRow): { price: number; compareAtPrice: number | null
   return { price: pricing.minPrice, compareAtPrice: pricing.minCompareAtPrice, priceFrom: pricing.isFrom };
 }
 
+/**
+ * 9F-22: the condition to badge on the card — the condition of the product's
+ * cheapest winning offer, but ONLY when it is non-NEW. Uses the SAME shared
+ * `resolveWinningOfferView` rule as the PDP / cart (no change to `rankOffers`),
+ * over already-loaded rows (no extra query). `null` → no chip (the NEW norm).
+ */
+function cardCondition(variants: { offers: CardOfferRow[] }[]): string | null {
+  let cheapest: { price: number; condition: string } | null = null;
+  for (const v of variants) {
+    const candidates: FullOfferCandidate[] = v.offers.map((o) => ({
+      offerId: o.id,
+      sellerId: "",
+      sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+      sellerStatus: o.seller.status as FullOfferCandidate["sellerStatus"],
+      offerStatus: o.status as FullOfferCandidate["offerStatus"],
+      available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+      reorderPoint: o.inventory?.reorderPoint ?? 0,
+      price: o.price,
+      compareAtPrice: o.compareAtPrice,
+      createdAt: o.createdAt,
+    }));
+    const win = resolveWinningOfferView(candidates);
+    if (!win) continue;
+    const row = v.offers.find((o) => o.id === win.offerId);
+    if (!row) continue;
+    if (!cheapest || win.price < cheapest.price) cheapest = { price: win.price, condition: row.condition };
+  }
+  return cheapest && cheapest.condition !== "NEW" ? cheapest.condition : null;
+}
+
 function toCard(p: CardRow): ProductCardView {
   const img = p.images[0] ?? { url: "art:accessory:" + p.slug, alt: p.name };
   const swatches = (p.options[0]?.values ?? [])
@@ -243,6 +276,7 @@ function toCard(p: CardRow): ProductCardView {
     .filter((h): h is string => Boolean(h));
   const { inStock, stockStatus } = cardStock(p.variants);
   const { price, compareAtPrice, priceFrom } = cardPricing(p);
+  const condition = cardCondition(p.variants);
   return {
     id: p.id,
     slug: p.slug,
@@ -264,6 +298,7 @@ function toCard(p: CardRow): ProductCardView {
     colorSwatches: swatches,
     inStock,
     stockStatus,
+    condition,
     defaultVariantId: p.variants.length === 1 ? p.variants[0].id : null,
     createdAt: p.createdAt.toISOString(),
   };
@@ -552,6 +587,7 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
                 price: true,
                 compareAtPrice: true,
                 createdAt: true,
+                condition: true,
                 seller: { select: { type: true, status: true } },
               },
             },
@@ -871,6 +907,18 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     console.error(msg);
   }
 
+  // 9F-22: the card-level condition chip — the cheapest resolved winner's
+  // condition, ONLY when non-NEW. Per-variant condition is on variants[].
+  const pdpCondition = (() => {
+    let cheapest: { price: number; condition: string | null } | null = null;
+    for (const v of activeVariants) {
+      const r = resolvedByVariant.get(v.id)!;
+      if (r.price == null) continue;
+      if (!cheapest || r.price < cheapest.price) cheapest = { price: r.price, condition: r.offerCondition };
+    }
+    return cheapest && cheapest.condition && cheapest.condition !== "NEW" ? cheapest.condition : null;
+  })();
+
   return {
     id: p.id,
     slug: p.slug,
@@ -911,6 +959,7 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
         return stockStatusFromAvailable(r.available, r.reorderPoint);
       }),
     ),
+    condition: pdpCondition,
     defaultVariantId: activeVariants.length === 1 ? activeVariants[0].id : null,
     totalStock,
     createdAt: p.createdAt.toISOString(),

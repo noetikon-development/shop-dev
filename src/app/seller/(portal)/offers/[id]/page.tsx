@@ -48,6 +48,7 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
                 compareAtPrice={offer.compareAtPrice}
                 sellerSku={offer.sellerSku}
                 condition={offer.condition}
+                status={offer.status}
                 handlingTimeDays={offer.handlingTimeDays}
               />
             ) : (

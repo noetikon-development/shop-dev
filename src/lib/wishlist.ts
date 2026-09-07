@@ -186,6 +186,9 @@ export async function loadWishlist(userId: string): Promise<WishlistCard[]> {
       colorSwatches: swatches,
       inStock,
       stockStatus,
+      // 9F-22: the wishlist card doesn't compute a winning-offer condition
+      // (minor surface, not in the phase scope) — no condition chip here.
+      condition: null,
       defaultVariantId: available && p.variants.length === 1 ? p.variants[0].id : null,
       createdAt: p.createdAt.toISOString(),
       available,

@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/site-url";
 import { getStoreBrand } from "@/lib/site-settings";
 import { courierLabel, isStorePickupCode } from "@/lib/orders/couriers";
+import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { dispatchEmail, recordEmailFailure, type DispatchResult, type EmailType } from "@/lib/email/send";
@@ -574,7 +575,7 @@ export async function sendSellerOrderReceived(
             shippingFee: true,
             total: true,
             items: {
-              select: { name: true, variantLabel: true, quantity: true, unitPrice: true, lineTotal: true },
+              select: { name: true, variantLabel: true, quantity: true, unitPrice: true, lineTotal: true, condition: true },
               orderBy: { id: "asc" },
             },
           },
@@ -617,7 +618,17 @@ export async function sendSellerOrderReceived(
           orderNumber: order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
           orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
-          items: so.items,
+          // 9F-22: fold a "Condition: …" line under a non-NEW item; NEW items
+          // are byte-identical to before (no line, no shared-helper change).
+          items: so.items.map((i) => ({
+            name: i.name,
+            variantLabel: isNoteworthyCondition(i.condition)
+              ? [i.variantLabel, `Condition: ${conditionLabel(i.condition!)}`].filter(Boolean).join(" · ")
+              : i.variantLabel,
+            quantity: i.quantity,
+            unitPrice: i.unitPrice,
+            lineTotal: i.lineTotal,
+          })),
           merchandiseSubtotal: so.merchandiseSubtotal,
           discountAllocated: so.discountAllocated,
           shippingFee: so.shippingFee,
