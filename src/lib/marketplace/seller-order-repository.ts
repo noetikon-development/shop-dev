@@ -7,7 +7,15 @@ import {
   shipmentStatusForSellerOrder,
   type SellerOrderStatus,
 } from "@/lib/marketplace/seller-order-status";
-import { getCourier, isCourierCode, isSafeTrackingUrl, buildTrackingUrl } from "@/lib/orders/couriers";
+import {
+  getCourier,
+  isCourierCode,
+  isSafeTrackingUrl,
+  buildTrackingUrl,
+  courierLabel,
+} from "@/lib/orders/couriers";
+import { canTransition } from "@/lib/orders/status";
+import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -21,10 +29,21 @@ import type { SellerContext } from "@/lib/marketplace/types";
  * write transaction with a status-guarded `updateMany` (0 rows ⇒ someone else
  * moved it ⇒ abort).
  *
- * 9F-2 NEVER touches: `Order.status`, `OrderEvent`, the parent order's
- * courier/tracking columns, `Inventory` / `InventoryAdjustment` / `Variant.stock`,
- * `OfferInventory`, payments, settlement. It only writes `SellerOrder.status`
- * and `Shipment`.
+ * NEVER touches: `Inventory` / `InventoryAdjustment` / `Variant.stock`,
+ * `OfferInventory`, payments, settlement.
+ *
+ * Phase 9F-12b adds ONE scoped exception: when a seller advances a SellerOrder
+ * to SHIPPED / DELIVERED and EVERY SellerOrder on the parent Order has reached
+ * that same milestone, the parent customer-facing `Order` is rolled forward
+ * inside the same transaction (`Order.status` + courier/tracking snapshot +
+ * `shippedAt` / `deliveredAt` + one `OrderEvent`). The seller-actor audit row is
+ * written AFTER the transaction commits (best-effort, like the 1P path); the
+ * customer notification (existing `sendOrderShipped` / `sendOrderDelivered`,
+ * idempotency-keyed) and page revalidation are fired by the caller. Payment
+ * status/method are never touched — a COD order ships and delivers while still
+ * `paymentStatus = PENDING` (payment is collected on delivery). The FIRST_PARTY /
+ * admin fulfilment path is unchanged and never reaches this code (Axiaro has no
+ * seller session).
  * ─────────────────────────────────────────────────────────────────────────────
  */
 
@@ -172,7 +191,148 @@ export async function getSellerOrderForSeller(
 // Writes — ownership + status re-checked inside the transaction
 // ---------------------------------------------------------------------------
 
-export type SellerOrderMutationResult = { ok: true; status: SellerOrderStatus } | SellerOrderRepoError;
+/**
+ * When a seller status change rolls the customer-facing parent Order forward
+ * (9F-12b), this describes it so the caller can revalidate the storefront pages
+ * and fire the existing customer notification.
+ */
+export type ParentOrderRollup = {
+  id: string;
+  orderNumber: string;
+  rolledTo: "SHIPPED" | "DELIVERED";
+};
+
+export type SellerOrderMutationResult =
+  | { ok: true; status: SellerOrderStatus; parentOrder?: ParentOrderRollup }
+  | SellerOrderRepoError;
+
+/** SellerOrder statuses that count as "shipped or beyond" for the SHIPPED rollup. */
+const SHIPPED_OR_BEYOND: ReadonlySet<string> = new Set(["SHIPPED", "DELIVERED"]);
+
+/**
+ * The audit entry for a seller-driven parent-Order rollup (9F-12b). Pure — the
+ * actor is ALWAYS the authenticated seller user (`ctx.userId`), and the entry is
+ * written by `advanceSellerOrderStatus` AFTER the rollup transaction commits
+ * (best-effort, exactly like the 1P admin fulfilment audit — a logging failure
+ * must never poison the transition).
+ */
+export function rollupAuditInput(
+  ctx: Pick<SellerContext, "userId" | "sellerId" | "sellerName">,
+  rollup: ParentOrderRollup,
+  sellerOrderId: string,
+): AuditInput {
+  const verb = rollup.rolledTo === "SHIPPED" ? "shipped" : "delivered";
+  return {
+    actorUserId: ctx.userId,
+    action: rollup.rolledTo === "SHIPPED" ? "order.shipped" : "order.delivered",
+    targetType: "order",
+    targetId: rollup.id,
+    summary: `Seller ${ctx.sellerName} advanced order ${rollup.orderNumber} to ${rollup.rolledTo} — all seller orders ${verb}`,
+    meta: {
+      orderNumber: rollup.orderNumber,
+      to: rollup.rolledTo,
+      trigger: "seller_rollup",
+      sellerOrderId,
+      actorSellerId: ctx.sellerId,
+    },
+  };
+}
+
+/**
+ * Roll the customer-facing parent `Order` forward when every `SellerOrder` on it
+ * has reached the milestone the current seller just moved to (9F-12b).
+ *
+ *   - SHIPPED   → parent `PROCESSING → SHIPPED` (only from PROCESSING), copying
+ *                 the seller's OWN Shipment carrier/tracking onto the Order and
+ *                 stamping `shippedAt`. No second Shipment is created.
+ *   - DELIVERED → parent `SHIPPED | OUT_FOR_DELIVERY → DELIVERED`, stamping
+ *                 `deliveredAt` (the settlement return-window anchor).
+ *
+ * All-or-nothing: if ANY SellerOrder is not yet at the target, or the parent is
+ * not in the expected state, this is a no-op (returns null). No `PARTIALLY_*`
+ * status. Payment fields are NEVER touched (a COD order ships/delivers while
+ * still `paymentStatus = PENDING`). Runs inside the caller's tx so the parent
+ * transition and its `OrderEvent` commit atomically with the SellerOrder move.
+ * The audit row + customer notification are fired by the caller AFTER commit.
+ * Returns null (not an error) when nothing was rolled — the seller's own
+ * transition still succeeds.
+ */
+async function rollUpParentOrder(
+  tx: Prisma.TransactionClient,
+  sellerOrderId: string,
+  sellerTo: "SHIPPED" | "DELIVERED",
+): Promise<ParentOrderRollup | null> {
+  const so = await tx.sellerOrder.findUnique({
+    where: { id: sellerOrderId },
+    select: {
+      shipments: {
+        select: { carrier: true, carrierName: true, trackingNumber: true, trackingUrl: true },
+      },
+      order: {
+        select: {
+          id: true,
+          orderNumber: true,
+          status: true,
+          sellerOrders: { select: { status: true } },
+        },
+      },
+    },
+  });
+  if (!so) return null;
+  const order = so.order;
+
+  if (sellerTo === "SHIPPED") {
+    // Every SellerOrder shipped or beyond, and the parent still in PROCESSING.
+    if (!order.sellerOrders.every((s) => SHIPPED_OR_BEYOND.has(s.status))) return null;
+    if (order.status !== "PROCESSING" || !canTransition("PROCESSING", "SHIPPED")) return null;
+
+    const ship = so.shipments[0] ?? null;
+    const res = await tx.order.updateMany({
+      where: { id: order.id, status: "PROCESSING" },
+      data: {
+        status: "SHIPPED",
+        shippedAt: new Date(),
+        courier: ship?.carrier ?? null,
+        courierName: ship?.carrierName ?? null,
+        trackingNumber: ship?.trackingNumber ?? null,
+        trackingUrl: ship?.trackingUrl ?? null,
+        updatedAt: new Date(),
+      },
+    });
+    if (res.count === 0) return null; // lost the race — someone else moved it
+
+    const detail =
+      [
+        ship ? courierLabel(ship.carrier, ship.carrierName) : null,
+        ship?.trackingNumber ? `Tracking ${ship.trackingNumber}` : null,
+      ]
+        .filter(Boolean)
+        .join(" · ") || null;
+    await tx.orderEvent.create({
+      data: { orderId: order.id, status: "SHIPPED", title: "Order shipped", detail },
+    });
+    return { id: order.id, orderNumber: order.orderNumber, rolledTo: "SHIPPED" };
+  }
+
+  // DELIVERED — every SellerOrder delivered, parent in a shipped state.
+  if (!order.sellerOrders.every((s) => s.status === "DELIVERED")) return null;
+  if (
+    (order.status !== "SHIPPED" && order.status !== "OUT_FOR_DELIVERY") ||
+    !canTransition(order.status, "DELIVERED")
+  ) {
+    return null;
+  }
+  const res = await tx.order.updateMany({
+    where: { id: order.id, status: { in: ["SHIPPED", "OUT_FOR_DELIVERY"] } },
+    data: { status: "DELIVERED", deliveredAt: new Date(), updatedAt: new Date() },
+  });
+  if (res.count === 0) return null;
+
+  await tx.orderEvent.create({
+    data: { orderId: order.id, status: "DELIVERED", title: "Delivered", detail: null },
+  });
+  return { id: order.id, orderNumber: order.orderNumber, rolledTo: "DELIVERED" };
+}
 
 /**
  * Advance a SellerOrder along its own fulfilment machine. Guards:
@@ -181,8 +341,11 @@ export type SellerOrderMutationResult = { ok: true; status: SellerOrderStatus } 
  *   - the transition is a declared forward move (or the READY_TO_SHIP→PROCESSING un-ready)
  *   - SHIPPED requires a shippable Shipment (carrier set + tracking present unless
  *     the carrier needs none)
- * On SHIPPED / DELIVERED the seller's own Shipment rows are stamped to match.
- * `Order.status` / `OrderEvent` are NOT touched.
+ * On SHIPPED / DELIVERED the seller's own Shipment rows are stamped to match, and
+ * — when EVERY SellerOrder on the parent has reached that milestone — the parent
+ * customer `Order` is rolled forward too (9F-12b; see `rollUpParentOrder`). The
+ * success result then carries `parentOrder` so the caller can revalidate the
+ * storefront and send the existing customer notification.
  */
 export async function advanceSellerOrderStatus(
   ctx: SellerContext,
@@ -240,12 +403,27 @@ export async function advanceSellerOrderStatus(
       await tx.shipment.updateMany({ where: { sellerOrderId }, data: stamp });
     }
 
-    return { ok: true, status: to };
+    // 9F-12b: once every SellerOrder on this order has reached SHIPPED / DELIVERED,
+    // roll the customer-facing parent Order forward in the same transaction.
+    let parentOrder: ParentOrderRollup | undefined;
+    if (to === "SHIPPED" || to === "DELIVERED") {
+      parentOrder = (await rollUpParentOrder(tx, sellerOrderId, to)) ?? undefined;
+    }
+
+    return { ok: true, status: to, parentOrder };
   };
 
   try {
     if (externalTx) return await run(externalTx);
-    return await prisma.$transaction(run);
+    const result = await prisma.$transaction(run);
+    // 9F-12b: record the seller as the actor for a parent-Order rollup — AFTER
+    // the transaction commits. Best-effort (writeAudit never throws); a logging
+    // failure must not undo a committed transition. The caller sends the
+    // customer notification + revalidates the storefront.
+    if (result.ok && result.parentOrder) {
+      await writeAudit(rollupAuditInput(ctx, result.parentOrder, sellerOrderId));
+    }
+    return result;
   } catch (err) {
     console.error("[seller-order-repository] advanceSellerOrderStatus failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not update the order." };

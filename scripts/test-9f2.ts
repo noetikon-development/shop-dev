@@ -244,11 +244,36 @@ async function dbTests() {
         true,
       );
 
-      // ---- F: 1P / order.status / events untouched ----
-      const parent = await tx.order.findUnique({ where: { id: oa.orderId }, select: { status: true } });
-      ok("F1 parent Order.status unchanged by seller fulfilment", parent?.status === "PROCESSING", parent?.status);
-      const eventsNow = await tx.orderEvent.count();
-      ok("F2 no OrderEvent rows created", eventsNow === orderEventsBefore, `${orderEventsBefore} → ${eventsNow}`);
+      // ---- F: 9F-12b parent rollup — a single-SellerOrder 3P order rolls forward ----
+      // `oa` has exactly one SellerOrder; it was taken SHIPPED (C2) then DELIVERED
+      // (C4), so the parent Order must have rolled PROCESSING → SHIPPED → DELIVERED
+      // with the seller's own carrier/tracking copied on. `ob` was never advanced.
+      const parent = await tx.order.findUnique({
+        where: { id: oa.orderId },
+        select: { status: true, shippedAt: true, deliveredAt: true, courier: true, trackingNumber: true },
+      });
+      ok(
+        "F1 single-SellerOrder 3P order rolled forward to DELIVERED with the seller",
+        parent?.status === "DELIVERED" &&
+          !!parent?.shippedAt &&
+          !!parent?.deliveredAt &&
+          parent?.courier === "LBC" &&
+          parent?.trackingNumber === "TRK123",
+        JSON.stringify(parent),
+      );
+      const parentB = await tx.order.findUnique({ where: { id: ob.orderId }, select: { status: true } });
+      ok("F2 an order whose SellerOrder was never advanced stays PROCESSING", parentB?.status === "PROCESSING");
+      const oaEvents = await tx.orderEvent.findMany({ where: { orderId: oa.orderId }, select: { status: true, title: true } });
+      ok(
+        "F2b rollup created a SHIPPED + a DELIVERED OrderEvent for the rolled order",
+        oaEvents.some((e) => e.status === "SHIPPED" && e.title === "Order shipped") &&
+          oaEvents.some((e) => e.status === "DELIVERED" && e.title === "Delivered"),
+        JSON.stringify(oaEvents),
+      );
+      ok("F2c the un-advanced order got no OrderEvent", (await tx.orderEvent.count({ where: { orderId: ob.orderId } })) === 0);
+      // payment untouched — COD stays pending through ship + deliver
+      const parentPay = await tx.order.findUnique({ where: { id: oa.orderId }, select: { paymentStatus: true, paymentMethod: true } });
+      ok("F2d rollup never touches paymentStatus / paymentMethod", parentPay?.paymentStatus === "UNPAID" || parentPay?.paymentStatus === "PENDING");
 
       throw new Rollback();
     });
@@ -267,8 +292,14 @@ async function dbTests() {
 async function staticTests() {
   const repo = read("src/lib/marketplace/seller-order-repository.ts");
   ok(
-    "G1 seller-order-repository never writes Order.status / OrderEvent",
-    !/tx\.order\.update|prisma\.order\.update|orderEvent\.create|tx\.order\.updateMany/.test(repo),
+    "G1 seller-order-repository writes Order.status / OrderEvent ONLY through the guarded 9F-12b parent rollup",
+    /async function rollUpParentOrder\(/.test(repo) &&
+      // the single Order write is an id + status-guarded updateMany inside the rollup
+      /tx\.order\.updateMany\(\{\s*\n?\s*where: \{ id: order\.id, status:/.test(repo) &&
+      !/prisma\.order\.update/.test(repo) &&
+      // every orderEvent.create sits after the rollup helper's definition
+      repo.split("orderEvent.create").length - 1 === 2 &&
+      repo.indexOf("orderEvent.create") > repo.indexOf("async function rollUpParentOrder"),
   );
   const repoCode = repo
     .split("\n")

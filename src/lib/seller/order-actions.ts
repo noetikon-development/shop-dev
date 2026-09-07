@@ -8,6 +8,9 @@ import {
   saveSellerShipment,
   type SellerOrderRepoError,
 } from "@/lib/marketplace/seller-order-repository";
+import { revalidateOrderPaths } from "@/lib/admin/order-cache";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendOrderShipped, sendOrderDelivered } from "@/lib/email/notifications";
 
 /**
  * `/seller/orders` server actions (Phase 9F-2).
@@ -17,8 +20,12 @@ import {
  * its transaction. A seller can only ever move its own SellerOrder and edit a
  * Shipment on its own SellerOrder.
  *
- * These never touch `Order.status`, `OrderEvent`, the customer timeline,
- * inventory, payments, or settlement, and never revalidate the storefront.
+ * These never touch inventory, payments, or settlement. Phase 9F-12b: when a
+ * seller status change rolls the customer-facing parent Order forward (every
+ * SellerOrder on it reached the same milestone), this layer revalidates the
+ * storefront order pages and fires the existing customer notification — the
+ * `Order` / `OrderEvent` / audit writes themselves happen atomically inside the
+ * repository transaction.
  */
 
 export type SellerOrderActionState = {
@@ -62,6 +69,17 @@ export async function advanceSellerOrderAction(
   if (!res.ok) return fromRepoError(res);
 
   revalidate(parsed.data.sellerOrderId);
+
+  // 9F-12b: the repository rolled the parent customer Order forward because every
+  // SellerOrder on it reached this milestone. Refresh the customer-facing pages
+  // and send the existing customer notification (idempotency-keyed, so a repeated
+  // seller transition can never send it twice). COD payment status is untouched.
+  if (res.parentOrder) {
+    revalidateOrderPaths(res.parentOrder.orderNumber, res.parentOrder.id);
+    const { id, rolledTo } = res.parentOrder;
+    scheduleEmail(() => (rolledTo === "SHIPPED" ? sendOrderShipped(id) : sendOrderDelivered(id)));
+  }
+
   const label =
     parsed.data.to === "PROCESSING"
       ? "moved back to preparing"
