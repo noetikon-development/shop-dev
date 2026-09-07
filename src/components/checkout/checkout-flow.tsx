@@ -292,10 +292,12 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               )}
             </div>
           ) : (
-            <p className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm text-ink-soft">
-              <span className="font-medium text-ink">You’ll pay on delivery.</span> Place your order
-              now — our team confirms it and arranges payment before dispatch.
-            </p>
+            <div className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm">
+              <span className="block font-medium text-ink">Cash on Delivery (COD)</span>
+              <span className="block text-meta text-ink-faint">
+                Pay when your order is delivered.
+              </span>
+            </div>
           )}
           <Field label="Order note" className="mt-4">
             {(control) => (
