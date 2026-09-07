@@ -264,6 +264,14 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
   let restockedLines = 0;
   let reversalPath: "offer-native" | "legacy" = "legacy";
   let cancelledSellerOrderIds: string[] = [];
+  // 9F-20 — post-settlement clawbacks accrued below, written as dedicated
+  // `seller.settlement.clawback_accrued` audit rows AFTER commit.
+  const clawbackEvents: {
+    sellerOrderId: string;
+    sellerId: string;
+    clawbackDelta: number;
+    newOutstandingClawback: number;
+  }[] = [];
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -382,7 +390,14 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       //     fire for ones already CANCELLED earlier.)
       const toCancel = await tx.sellerOrder.findMany({
         where: { orderId, status: { not: "CANCELLED" } },
-        select: { id: true, total: true, commissionAmount: true, settlementId: true },
+        select: {
+          id: true,
+          total: true,
+          commissionAmount: true,
+          settlementId: true,
+          settlementClawbackAmount: true,
+          sellerId: true,
+        },
       });
       if (toCancel.length > 0) {
         // 9F-8c: the sale this commission was earned on no longer exists —
@@ -403,6 +418,7 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
         // differs by order.
         for (const so of toCancel) {
           if (so.settlementId === null) continue;
+          const delta = Math.max(0, so.total - so.commissionAmount);
           await tx.sellerOrder.update({
             where: { id: so.id },
             data: {
@@ -410,9 +426,17 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
               updatedAt: new Date(),
               commissionAmount: 0,
               settlementStatus: "CLAWED_BACK",
-              settlementClawbackAmount: { increment: Math.max(0, so.total - so.commissionAmount) },
+              settlementClawbackAmount: { increment: delta },
             },
           });
+          if (delta > 0) {
+            clawbackEvents.push({
+              sellerOrderId: so.id,
+              sellerId: so.sellerId,
+              clawbackDelta: delta,
+              newOutstandingClawback: so.settlementClawbackAmount + delta,
+            });
+          }
         }
         cancelledSellerOrderIds = toCancel.map((s) => s.id);
       }
@@ -450,6 +474,29 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       reason: reason || null,
     },
   });
+
+  // 9F-20 — dedicated audit for every actual post-settlement clawback accrual
+  // (REQUIRED ops signal). Best-effort, post-commit; no customer PII.
+  for (const ev of clawbackEvents) {
+    await writeAudit({
+      actorUserId: admin.user.id,
+      action: "seller.settlement.clawback_accrued",
+      targetType: "seller_order",
+      targetId: ev.sellerOrderId,
+      summary:
+        `cancellation of order ${order.orderNumber} clawed back ` +
+        `${ev.clawbackDelta} centavos from seller ${ev.sellerId}`,
+      meta: {
+        sellerOrderId: ev.sellerOrderId,
+        orderId,
+        sellerId: ev.sellerId,
+        returnId: null,
+        cancellationReference: order.orderNumber,
+        clawbackDelta: ev.clawbackDelta,
+        newOutstandingClawback: ev.newOutstandingClawback,
+      },
+    });
+  }
 
   revalidateOrderPaths(order.orderNumber, orderId);
   revalidateTag("products", "max"); // availability + bestseller changed

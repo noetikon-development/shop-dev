@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendSellerSettlementRecorded } from "@/lib/email/notifications";
 import { recordSettlement } from "@/lib/admin/settlements";
 
 /**
@@ -77,6 +79,11 @@ export async function recordSettlementAction(
   revalidatePath("/admin/seller-orders");
   revalidatePath("/seller/settlements");
   revalidatePath("/admin/audit");
+
+  // 9F-20 — notify the seller their settlement was recorded. Post-commit,
+  // non-blocking; bookkeeping-only copy. Key SETTLEMENT_RECORDED:<settlementId>
+  // dedupes, and 9F-18 raises the ops failure alert if the send fails.
+  scheduleEmail(() => sendSellerSettlementRecorded(res.settlementId));
 
   return { ok: true, message: "Settlement recorded.", settlementId: res.settlementId };
 }

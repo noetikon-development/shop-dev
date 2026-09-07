@@ -44,7 +44,13 @@ import {
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
 import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps } from "@/lib/email/templates/ops-notifications";
-import { renderSellerOrderCancelled, renderSellerReturnReceived, renderSellerOrderReceived } from "@/lib/email/templates/seller-order-notifications";
+import {
+  renderSellerOrderCancelled,
+  renderSellerReturnReceived,
+  renderSellerOrderReceived,
+  renderSellerSettlementRecorded,
+  type ClawbackNote,
+} from "@/lib/email/templates/seller-order-notifications";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -1850,6 +1856,14 @@ export async function retryEmailByLog(
       if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
       return sendSellerReturnReceived(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
     }
+    case "seller_settlement_recorded": {
+      // Key: SETTLEMENT_RECORDED:<settlementId>. Deterministic re-read of the
+      // SellerSettlement row — the ORIGINAL key is passed back so the retry
+      // reuses the same EmailLog row (never a second row, never a second send).
+      const settlementId = log.idempotencyKey.split(":")[1];
+      if (!settlementId) return { ok: false, status: "FAILED", error: "no_settlement" };
+      return sendSellerSettlementRecorded(settlementId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
 
     default:
       // auth emails / P2 security notices / support (contact-form) emails /
@@ -2502,6 +2516,14 @@ export async function sendSellerOrderCancelled(
         client: opts.client,
       });
 
+    // 9F-20: if this cancellation clawed back an already-settled order, add the
+    // bookkeeping line. `null` (the norm) → the email is byte-for-byte unchanged.
+    const clawback = await clawbackNoteFor(db, {
+      sellerOrderIds: [sellerOrderId],
+      returnId: null,
+      sellerId: so.sellerId,
+    });
+
     return renderAndDispatch(
       {
         type: "seller_order_cancelled",
@@ -2518,6 +2540,7 @@ export async function sendSellerOrderCancelled(
           sellerName: ctx.sellerName,
           orderNumber: so.order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          clawback,
         }),
     );
   } catch (err) {
@@ -2574,9 +2597,19 @@ export async function sendSellerReturnReceived(
       });
     const items = await db.returnItem.findMany({
       where: { returnRequestId: returnId, orderItem: { sellerId } },
-      select: { name: true, variantLabel: true, quantity: true },
+      select: {
+        name: true,
+        variantLabel: true,
+        quantity: true,
+        orderItem: { select: { sellerOrderId: true } },
+      },
     });
     if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+
+    // 9F-20: if this return clawed back an already-settled order, add the
+    // bookkeeping line. `null` (the norm) → the email is byte-for-byte unchanged.
+    const soIds = [...new Set(items.map((i) => i.orderItem?.sellerOrderId).filter((v): v is string => !!v))];
+    const clawback = await clawbackNoteFor(db, { sellerOrderIds: soIds, returnId, sellerId });
 
     return renderAndDispatch(
       {
@@ -2596,11 +2629,131 @@ export async function sendSellerReturnReceived(
           returnNumber: ret.returnNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
           returnsUrl: `${ctx.siteUrl}/seller/returns`,
-          items,
+          items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+          clawback,
         }),
     );
   } catch (err) {
     console.error("[email] sendSellerReturnReceived", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller settlement + clawback notifications (Phase 9F-20)
+// ---------------------------------------------------------------------------
+
+/**
+ * 9F-20 — total clawback (centavos) for ONE clawback event, read back from the
+ * durable `seller.settlement.clawback_accrued` audit rows the accrual sites
+ * write post-commit. Deterministic and retry-safe (the audit rows persist);
+ * returns `null` when nothing was clawed back (the common case) or when the
+ * audit write did not land — the seller email then renders exactly as before.
+ *
+ *   returnId set   → the post-settlement return path (match on meta.returnId)
+ *   returnId null  → the post-settlement cancellation path (match on meta.returnId == null)
+ */
+async function clawbackNoteFor(
+  db: Prisma.TransactionClient | typeof prisma,
+  match: { sellerOrderIds: string[]; returnId: string | null; sellerId: string },
+): Promise<ClawbackNote> {
+  if (match.sellerOrderIds.length === 0) return null;
+  const rows = await db.adminAuditLog.findMany({
+    where: {
+      action: "seller.settlement.clawback_accrued",
+      targetType: "seller_order",
+      targetId: { in: match.sellerOrderIds },
+    },
+    select: { meta: true },
+  });
+  let total = 0;
+  for (const r of rows) {
+    let m: Record<string, unknown>;
+    try {
+      m = JSON.parse(r.meta ?? "{}") as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    if (m.sellerId !== match.sellerId) continue;
+    if (match.returnId ? m.returnId !== match.returnId : m.returnId != null) continue;
+    if (typeof m.clawbackDelta === "number") total += m.clawbackDelta;
+  }
+  if (total <= 0) return null;
+  return { amount: total, reason: match.returnId ? "return" : "cancellation" };
+}
+
+/**
+ * Seller — Axiaro recorded a bookkeeping settlement covering this THIRD_PARTY
+ * seller's delivered, return-window-elapsed orders (plus any outstanding
+ * clawbacks netted in). One email per `SellerSettlement`. Bookkeeping only — the
+ * copy never implies Axiaro/PayMongo moved money; an admin-entered external
+ * payment method/reference is shown as "how it was paid outside the platform".
+ * Amounts come straight off the `SellerSettlement` row (9F-19 locked formula,
+ * recomputed server-side by `recordSettlement`).
+ * Key: SETTLEMENT_RECORDED:<settlementId>.
+ */
+export async function sendSellerSettlementRecorded(
+  settlementId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const s = await db.sellerSettlement.findUnique({
+      where: { id: settlementId },
+      select: {
+        id: true,
+        sellerId: true,
+        grossReceivable: true,
+        commissionAmount: true,
+        clawbackAmount: true,
+        netAmount: true,
+        orderCount: true,
+        clawbackCount: true,
+        paidAt: true,
+        paymentMethod: true,
+        paymentReference: true,
+        note: true,
+      },
+    });
+    if (!s) return { ok: false, status: "FAILED", error: "settlement_not_found" };
+    const ctx = await loadSellerLifecycleEmailContext(s.sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_settlement_recorded",
+        idempotencyKey: opts.idempotencyKey ?? `SETTLEMENT_RECORDED:${s.id}`,
+        subject: "Settlement recorded — seller notification",
+        client: opts.client,
+      });
+
+    return renderAndDispatch(
+      {
+        type: "seller_settlement_recorded",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SETTLEMENT_RECORDED:${s.id}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerSettlementRecorded({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          settlementUrl: `${ctx.siteUrl}/seller/settlements/${s.id}`,
+          paidAt: s.paidAt ? s.paidAt.toISOString().slice(0, 10) : null,
+          grossReceivable: s.grossReceivable,
+          commissionAmount: s.commissionAmount,
+          clawbackAmount: s.clawbackAmount,
+          netAmount: s.netAmount,
+          orderCount: s.orderCount,
+          clawbackCount: s.clawbackCount,
+          paymentMethod: s.paymentMethod,
+          paymentReference: s.paymentReference,
+          note: s.note,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerSettlementRecorded", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

@@ -173,10 +173,11 @@ function staticTests() {
   ok("record · netAmount MAY be <= 0 (no floor)", /netAmount: preview\.netAmount, \/\/ MAY be <= 0/.test(adminRepo));
 
   // Clawback in the 3 paths
-  ok("clawback · cancelOrderAction claws back total - commissionAmount for settled SellerOrders", /if \(so\.settlementId === null\) continue;[\s\S]{0,400}settlementStatus: "CLAWED_BACK",\s*settlementClawbackAmount: \{ increment: Math\.max\(0, so\.total - so\.commissionAmount\) \}/.test(orderActions));
+  // 9F-20 extracted the increment into `const delta = …` so the same value can be recorded on the clawback audit — the formula is unchanged.
+  ok("clawback · cancelOrderAction claws back total - commissionAmount for settled SellerOrders", /if \(so\.settlementId === null\) continue;\s*\n\s*const delta = Math\.max\(0, so\.total - so\.commissionAmount\);[\s\S]{0,400}settlementStatus: "CLAWED_BACK",\s*settlementClawbackAmount: \{ increment: delta \}/.test(orderActions));
   ok("clawback · cancelOrderAction keeps the 9F-8c zero-commission behaviour for UNSETTLED orders", /const unsettledIds = toCancel\.filter\(\(s\) => s\.settlementId === null\)[\s\S]{0,220}data: \{ status: "CANCELLED", updatedAt: new Date\(\), commissionAmount: 0 \}/.test(orderActions));
-  ok("clawback · admin receiveReturnAction claws back returnedValue - commissionAdjustment for settled orders", /if \(so\.settlementId !== null\) \{\s*data\.settlementStatus = "CLAWED_BACK";\s*data\.settlementClawbackAmount = \{ increment: Math\.max\(0, returnedValue - commissionAdjustment\) \}/.test(returnsActions));
-  ok("clawback · seller sellerReceiveReturn uses the IDENTICAL clawback rule", /if \(so\.settlementId !== null\) \{\s*data\.settlementStatus = "CLAWED_BACK";\s*data\.settlementClawbackAmount = \{ increment: Math\.max\(0, returnedValue - commissionAdjustment\) \}/.test(sellerReturnRepo));
+  ok("clawback · admin receiveReturnAction claws back returnedValue - commissionAdjustment for settled orders", /if \(so\.settlementId !== null\) \{\s*const delta = Math\.max\(0, returnedValue - commissionAdjustment\);\s*data\.settlementStatus = "CLAWED_BACK";\s*data\.settlementClawbackAmount = \{ increment: delta \}/.test(returnsActions));
+  ok("clawback · seller sellerReceiveReturn uses the IDENTICAL clawback rule", /if \(so\.settlementId !== null\) \{\s*const delta = Math\.max\(0, returnedValue - commissionAdjustment\);\s*data\.settlementStatus = "CLAWED_BACK";\s*data\.settlementClawbackAmount = \{ increment: delta \}/.test(sellerReturnRepo));
 
   // Seller isolation
   ok("isolation · seller repo scopes every query on ctx.sellerId", (sellerRepo.match(/ctx\.sellerId/g) ?? []).length >= 3);

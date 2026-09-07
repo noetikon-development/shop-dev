@@ -163,13 +163,24 @@ export type SellerReceiptLine = {
   condition: string;
 };
 
+/** 9F-20 — a post-settlement clawback accrued by the seller's own receipt. */
+export type SellerReturnClawback = {
+  sellerOrderId: string;
+  sellerId: string;
+  clawbackDelta: number;
+  newOutstandingClawback: number;
+};
+
 export type SellerReceiveReturnResult =
   | {
       ok: true;
+      returnId: string;
+      orderId: string;
       returnNumber: string;
       orderNumber: string;
       restocked: { name: string; qty: number }[];
       restockedUnits: number;
+      clawbacks: SellerReturnClawback[];
     }
   | SellerReturnRepoError;
 
@@ -211,7 +222,7 @@ export async function sellerReceiveReturn(
         returnNumber: true,
         status: true,
         restockedAt: true,
-        order: { select: { orderNumber: true } },
+        order: { select: { id: true, orderNumber: true } },
         items: {
           orderBy: { id: "asc" },
           select: {
@@ -326,11 +337,18 @@ export async function sellerReceiveReturn(
         (returnedValueBySellerOrder.get(sellerOrderId) ?? 0) + it.refundAmount,
       );
     }
+    const clawbacks: SellerReturnClawback[] = [];
     for (const [sellerOrderId, returnedValue] of returnedValueBySellerOrder) {
       if (returnedValue <= 0) continue;
       const so = await tx.sellerOrder.findUnique({
         where: { id: sellerOrderId },
-        select: { commissionAmount: true, commissionRate: true, settlementId: true },
+        select: {
+          commissionAmount: true,
+          commissionRate: true,
+          settlementId: true,
+          settlementClawbackAmount: true,
+          sellerId: true,
+        },
       });
       if (!so) continue;
       const commissionAdjustment = roundHalfUp((returnedValue * so.commissionRate) / 10000);
@@ -342,8 +360,17 @@ export async function sellerReceiveReturn(
       // being reversed) must be recovered from the seller — accrued for the
       // next statement, no money moved. Same rule as the admin receive path.
       if (so.settlementId !== null) {
+        const delta = Math.max(0, returnedValue - commissionAdjustment);
         data.settlementStatus = "CLAWED_BACK";
-        data.settlementClawbackAmount = { increment: Math.max(0, returnedValue - commissionAdjustment) };
+        data.settlementClawbackAmount = { increment: delta };
+        if (delta > 0) {
+          clawbacks.push({
+            sellerOrderId,
+            sellerId: so.sellerId,
+            clawbackDelta: delta,
+            newOutstandingClawback: so.settlementClawbackAmount + delta,
+          });
+        }
       }
       await tx.sellerOrder.update({ where: { id: sellerOrderId }, data });
     }
@@ -381,10 +408,13 @@ export async function sellerReceiveReturn(
 
     return {
       ok: true,
+      returnId: ret.id,
+      orderId: ret.order.id,
       returnNumber: ret.returnNumber,
       orderNumber: ret.order.orderNumber,
       restocked,
       restockedUnits: restocked.reduce((n, r) => n + r.qty, 0),
+      clawbacks,
     };
   };
 

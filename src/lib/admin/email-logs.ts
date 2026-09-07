@@ -35,6 +35,7 @@ export const EMAIL_TYPES = [
   "email_verification",
   "password_reset",
   "email_failure_alert_ops",
+  "seller_settlement_recorded",
 ] as const;
 
 export const EMAIL_STATUSES = ["PENDING", "SENDING", "SENT", "FAILED", "SKIPPED"] as const;

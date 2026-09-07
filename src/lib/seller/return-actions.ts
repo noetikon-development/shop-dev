@@ -113,6 +113,28 @@ export async function sellerReceiveReturnAction(
     },
   });
 
+  // 9F-20 — dedicated audit for every actual post-settlement clawback the
+  // seller's own receipt accrued (REQUIRED ops signal). Best-effort, post-commit.
+  for (const cb of res.clawbacks) {
+    await writeAudit({
+      actorUserId: ctx.userId,
+      action: "seller.settlement.clawback_accrued",
+      targetType: "seller_order",
+      targetId: cb.sellerOrderId,
+      summary:
+        `seller receipt of return ${res.returnNumber} (order ${res.orderNumber}) clawed back ` +
+        `${cb.clawbackDelta} centavos from seller ${cb.sellerId}`,
+      meta: {
+        sellerOrderId: cb.sellerOrderId,
+        orderId: res.orderId,
+        sellerId: cb.sellerId,
+        returnId: res.returnId,
+        clawbackDelta: cb.clawbackDelta,
+        newOutstandingClawback: cb.newOutstandingClawback,
+      },
+    });
+  }
+
   // Same customer-facing email the admin RECEIVED transition sends — the
   // customer return flow is unchanged.
   scheduleEmail(() => sendReturnReceived(parsed.data.returnId));

@@ -275,6 +275,14 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
   const restocked: { name: string; qty: number }[] = [];
   const skippedRestock: string[] = [];
   let restockPath: "offer-native" | "legacy" = "legacy";
+  // 9F-20 — post-settlement clawbacks accrued in the transaction below, written
+  // as dedicated `seller.settlement.clawback_accrued` audit rows AFTER commit.
+  const clawbackEvents: {
+    sellerOrderId: string;
+    sellerId: string;
+    clawbackDelta: number;
+    newOutstandingClawback: number;
+  }[] = [];
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -343,7 +351,13 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           if (returnedValue <= 0) continue;
           const so = await tx.sellerOrder.findUnique({
             where: { id: sellerOrderId },
-            select: { commissionAmount: true, commissionRate: true, settlementId: true },
+            select: {
+              commissionAmount: true,
+              commissionRate: true,
+              settlementId: true,
+              settlementClawbackAmount: true,
+              sellerId: true,
+            },
           });
           if (!so) continue;
           const commissionAdjustment = roundHalfUp((returnedValue * so.commissionRate) / 10000);
@@ -355,8 +369,17 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           // commission being reversed) must be recovered from the seller —
           // accrued for the next statement, no money moved.
           if (so.settlementId !== null) {
+            const delta = Math.max(0, returnedValue - commissionAdjustment);
             data.settlementStatus = "CLAWED_BACK";
-            data.settlementClawbackAmount = { increment: Math.max(0, returnedValue - commissionAdjustment) };
+            data.settlementClawbackAmount = { increment: delta };
+            if (delta > 0) {
+              clawbackEvents.push({
+                sellerOrderId,
+                sellerId: so.sellerId,
+                clawbackDelta: delta,
+                newOutstandingClawback: so.settlementClawbackAmount + delta,
+              });
+            }
           }
           await tx.sellerOrder.update({ where: { id: sellerOrderId }, data });
         }
@@ -449,12 +472,36 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
     },
   });
 
+  // 9F-20 — dedicated audit for every actual post-settlement clawback accrual
+  // (REQUIRED ops signal). Best-effort, post-commit; no customer PII.
+  for (const ev of clawbackEvents) {
+    await writeAudit({
+      actorUserId: admin.user.id,
+      action: "seller.settlement.clawback_accrued",
+      targetType: "seller_order",
+      targetId: ev.sellerOrderId,
+      summary:
+        `return ${ret.returnNumber} (order ${ret.order.orderNumber}) clawed back ` +
+        `${ev.clawbackDelta} centavos from seller ${ev.sellerId}`,
+      meta: {
+        sellerOrderId: ev.sellerOrderId,
+        orderId: ret.order.id,
+        sellerId: ev.sellerId,
+        returnId: ret.id,
+        clawbackDelta: ev.clawbackDelta,
+        newOutstandingClawback: ev.newOutstandingClawback,
+      },
+    });
+  }
+
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnReceived(ret.id));
 
   // Marketplace (9F-7b) — notify each seller whose line(s) are part of this
   // return. Admin-triggered only; the seller's own receipt confirmation
   // (`sellerReceiveReturnAction`) does not duplicate this — it already knows.
+  // 9F-20: the seller email re-reads the clawback audit rows above and folds a
+  // bookkeeping line in when this return clawed an already-settled order back.
   const affectedSellerIds = await getReturnAffectedSellerIds(ret.id);
   for (const sellerId of affectedSellerIds) {
     scheduleEmail(() => sendSellerReturnReceived(ret.id, sellerId));

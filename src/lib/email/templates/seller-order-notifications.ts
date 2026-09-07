@@ -102,13 +102,48 @@ export function renderSellerOrderReceived(
   };
 }
 
-export function renderSellerOrderCancelled(d: SellerOrderBase) {
+/**
+ * 9F-20 — a single line describing a post-settlement clawback, when the order
+ * this email is about had already been included in a paid settlement. Purely
+ * bookkeeping: nothing has been withdrawn; the amount is netted off the seller's
+ * NEXT settlement. `null` (the common case) leaves the email unchanged.
+ */
+export type ClawbackNote = { amount: number; reason: "return" | "cancellation" } | null;
+
+function clawbackHtml(c: NonNullable<ClawbackNote>): string {
+  const why =
+    c.reason === "return"
+      ? "was returned after this order had already been settled"
+      : "was cancelled after this order had already been settled";
+  return (
+    infoBox(
+      kvRow("Already settled", "Yes") +
+        kvRow("Amount to recover", `− ${peso(c.amount)}`, { strong: true, last: true }),
+    ) +
+    paragraph(
+      `Because part of this order ${why}, ${peso(c.amount)} will be deducted from your next settlement. ` +
+        `No money has been withdrawn — this is a bookkeeping adjustment only. You can see it under “Outstanding clawbacks” in the Seller Portal.`,
+    )
+  );
+}
+function clawbackText(c: NonNullable<ClawbackNote>): string[] {
+  return [
+    ``,
+    `Already settled: yes`,
+    `Amount to recover from your next settlement: -${peso(c.amount)}`,
+    `No money has been withdrawn — this is a bookkeeping adjustment only.`,
+  ];
+}
+
+export function renderSellerOrderCancelled(d: SellerOrderBase & { clawback?: ClawbackNote }) {
   const subject = `Order ${d.orderNumber} was cancelled`;
+  const c = d.clawback ?? null;
   const body = `
     ${heading("An order was cancelled")}
     ${paragraph(`Order ${d.orderNumber}, which included items from ${d.sellerName}, was cancelled.`)}
     ${infoBox(kvRow("Order", d.orderNumber) + kvRow("Status", "Cancelled", { last: true }))}
     ${paragraph("No further action is needed on this order — any reserved stock has already been returned to your available inventory.")}
+    ${c ? clawbackHtml(c) : ""}
     ${button("View your orders", d.ordersUrl)}
   `;
   return {
@@ -120,6 +155,7 @@ export function renderSellerOrderCancelled(d: SellerOrderBase) {
       `Order ${d.orderNumber}, which included items from ${d.sellerName}, was cancelled.`,
       ``,
       "No further action is needed on this order — any reserved stock has already been returned to your available inventory.",
+      ...(c ? clawbackText(c) : []),
       ``,
       `Your orders: ${d.ordersUrl}`,
       ...textFooter(d.brand, d.siteUrl, `You're receiving this because you manage a seller account on ${d.brand}.`),
@@ -132,10 +168,12 @@ export function renderSellerReturnReceived(
     returnNumber: string;
     returnsUrl: string;
     items: { name: string; variantLabel: string | null; quantity: number }[];
+    clawback?: ClawbackNote;
   },
 ) {
   const subject = `Return received: ${d.returnNumber} (order ${d.orderNumber})`;
   const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const c = d.clawback ?? null;
   const body = `
     ${heading("A return was received")}
     ${paragraph(`Axiaro received the returned item(s) from order ${d.orderNumber} for ${d.sellerName}.`)}
@@ -144,6 +182,7 @@ export function renderSellerReturnReceived(
         kvRow("Order", d.orderNumber) +
         kvRow("Items", itemLines.join("; ") || "—", { last: true }),
     )}
+    ${c ? clawbackHtml(c) : ""}
     ${button("View your returns", d.returnsUrl)}
   `;
   return {
@@ -157,9 +196,101 @@ export function renderSellerReturnReceived(
       `Return: ${d.returnNumber}`,
       `Order: ${d.orderNumber}`,
       `Items: ${itemLines.join("; ") || "—"}`,
+      ...(c ? clawbackText(c) : []),
       ``,
       `Your returns: ${d.returnsUrl}`,
       ...textFooter(d.brand, d.siteUrl, `You're receiving this because you manage a seller account on ${d.brand}.`),
+    ]),
+  };
+}
+
+/**
+ * 9F-20 — a bookkeeping settlement was recorded for this THIRD_PARTY seller.
+ *
+ * IMPORTANT: this describes a RECORD Axiaro entered, not an electronic transfer.
+ * Axiaro does not move money through the platform. If the admin entered an
+ * external payment method / reference, that is shown as "how it was paid" — but
+ * the email must never imply Axiaro/PayMongo deposited funds.
+ *
+ * Amounts use the LOCKED 9F-19 formula, all recomputed server-side on the
+ * SellerSettlement row:
+ *   grossReceivable  = Σ SellerOrder.total
+ *   commissionAmount = Σ SellerOrder.commissionAmount
+ *   receivableSubtotal = grossReceivable - commissionAmount
+ *   clawbackAmount   = Σ outstanding clawbacks reconciled in this batch
+ *   netAmount        = receivableSubtotal - clawbackAmount   (may be <= 0)
+ *
+ * No customer data, no other seller's data, no SellerOrder ids, no raw
+ * settlement id in prose — the id appears only inside the deep-link URL.
+ */
+export function renderSellerSettlementRecorded(d: {
+  brand: string;
+  siteUrl: string;
+  sellerName: string;
+  settlementUrl: string;
+  paidAt: string | null;
+  grossReceivable: number;
+  commissionAmount: number;
+  clawbackAmount: number;
+  netAmount: number;
+  orderCount: number;
+  clawbackCount: number;
+  paymentMethod: string | null;
+  paymentReference: string | null;
+  note: string | null;
+}) {
+  const subject = `Settlement recorded — ${peso(d.netAmount)}`;
+  const receivableSubtotal = d.grossReceivable - d.commissionAmount;
+  const money =
+    kvRow("Orders settled", String(d.orderCount)) +
+    kvRow("Gross receivable", peso(d.grossReceivable)) +
+    kvRow("Commission", `− ${peso(d.commissionAmount)}`) +
+    kvRow("Receivable subtotal", peso(receivableSubtotal)) +
+    (d.clawbackCount > 0
+      ? kvRow(`Clawbacks (${d.clawbackCount})`, `− ${peso(d.clawbackAmount)}`)
+      : "") +
+    kvRow("Net settlement", peso(d.netAmount), { strong: true, last: true });
+  const paidRows =
+    (d.paidAt ? kvRow("Payment date", d.paidAt) : "") +
+    (d.paymentMethod ? kvRow("Paid via", d.paymentMethod) : "") +
+    (d.paymentReference ? kvRow("Reference", d.paymentReference, { last: true }) : "");
+  const body = `
+    ${heading("Axiaro has recorded a settlement")}
+    ${paragraph(`Axiaro has recorded a seller settlement for ${d.sellerName}. This is a bookkeeping record of what Axiaro owes you for the orders listed below — it is not an electronic transfer through the platform.`)}
+    ${infoBox(money)}
+    ${paidRows ? `${paragraph("Payment recorded by Axiaro (made outside the platform — bank transfer, GCash or cash):")}${infoBox(paidRows)}` : paragraph("No external payment details were entered with this record.")}
+    ${d.note ? paragraph(`Note from Axiaro: ${d.note}`) : ""}
+    ${d.netAmount <= 0 ? paragraph("The net amount for this period is zero or negative because outstanding clawbacks met or exceeded the receivable. Nothing is owed to you this cycle.") : ""}
+    ${button("View this settlement", d.settlementUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "Axiaro has recorded a settlement",
+      ``,
+      `Axiaro has recorded a seller settlement for ${d.sellerName}. This is a bookkeeping record of what Axiaro owes you — not an electronic transfer through the platform.`,
+      ``,
+      `Orders settled: ${d.orderCount}`,
+      `Gross receivable: ${peso(d.grossReceivable)}`,
+      `Commission: -${peso(d.commissionAmount)}`,
+      `Receivable subtotal: ${peso(receivableSubtotal)}`,
+      ...(d.clawbackCount > 0 ? [`Clawbacks (${d.clawbackCount}): -${peso(d.clawbackAmount)}`] : []),
+      `Net settlement: ${peso(d.netAmount)}`,
+      ``,
+      ...(paidRows
+        ? [
+            "Payment recorded by Axiaro (made outside the platform — bank transfer, GCash or cash):",
+            ...(d.paidAt ? [`Payment date: ${d.paidAt}`] : []),
+            ...(d.paymentMethod ? [`Paid via: ${d.paymentMethod}`] : []),
+            ...(d.paymentReference ? [`Reference: ${d.paymentReference}`] : []),
+          ]
+        : ["No external payment details were entered with this record."]),
+      ...(d.note ? [``, `Note from Axiaro: ${d.note}`] : []),
+      ``,
+      `View this settlement: ${d.settlementUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
     ]),
   };
 }

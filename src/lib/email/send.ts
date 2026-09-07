@@ -61,6 +61,8 @@ export type EmailType =
   | "seller_order_received"
   | "seller_order_cancelled"
   | "seller_return_received"
+  // 9F-20 — bookkeeping settlement recorded for a THIRD_PARTY seller.
+  | "seller_settlement_recorded"
   | "return_refund_initiated_ops"
   | "return_refund_completed_ops"
   // 9F-18 — Ops alert raised when another transactional email FAILED / SKIPPED.

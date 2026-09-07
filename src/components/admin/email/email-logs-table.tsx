@@ -35,6 +35,7 @@ const TYPE_LABEL: Record<string, string> = {
   email_verification: "Email verification",
   password_reset: "Password reset",
   email_failure_alert_ops: "Delivery-failure alert",
+  seller_settlement_recorded: "Settlement recorded",
 };
 
 const STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "danger" | "info"> = {
