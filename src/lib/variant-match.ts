@@ -63,6 +63,25 @@ export function hasPurchasableVariant<V extends MatchVariant>(
 }
 
 /**
+ * The single purchasable (ACTIVE, in-stock) Variant when a product has EXACTLY
+ * one, otherwise `null`. `stock` is the winning offer's availability (9D-D), so
+ * this is seller-blind — it works the same for a 1P or a marketplace winner.
+ *
+ * The PDP uses this to auto-select that lone variant on load, so its price,
+ * seller and stock state resolve without the shopper first clicking an option.
+ * With 0 or 2+ purchasable variants it returns `null` and the shopper chooses.
+ */
+export function solePurchasableVariant<V extends MatchVariant>(variants: V[]): V | null {
+  let found: V | null = null;
+  for (const v of variants) {
+    if (v.status !== "ACTIVE" || v.stock <= 0) continue;
+    if (found) return null; // more than one — shopper must choose
+    found = v;
+  }
+  return found;
+}
+
+/**
  * Does ANY Variant (any status, any stock) include every id in
  * `requiredValueIds`? Distinguishes "this combination is sold but out of stock"
  * from "this combination does not exist".

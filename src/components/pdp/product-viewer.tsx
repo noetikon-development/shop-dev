@@ -14,7 +14,7 @@ import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button } from "@/components/ui/button";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
-import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
+import { matchVariant, hasPurchasableVariant, solePurchasableVariant } from "@/lib/variant-match";
 import { isPhotoRef } from "@/lib/art-ref";
 import { SITE } from "@/lib/constants";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
@@ -33,6 +33,17 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const [selected, setSelected] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     if (colourOption?.values[0]) init[colourOption.id] = colourOption.values[0].id;
+    // Auto-select the sole purchasable variant, when there is exactly one, so
+    // the PDP shows its price / seller / stock on load instead of waiting for a
+    // first click. No effect with 0 or 2+ purchasable variants. Uses only the
+    // already-loaded variant/option data — no extra query.
+    const sole = solePurchasableVariant(product.variants);
+    if (sole) {
+      for (const valueId of sole.optionValueIds) {
+        const opt = product.options.find((o) => o.values.some((val) => val.id === valueId));
+        if (opt) init[opt.id] = valueId;
+      }
+    }
     return init;
   });
   const [qty, setQty] = useState(1);
