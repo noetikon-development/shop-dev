@@ -1101,6 +1101,10 @@ export async function getOrderByNumber(orderNumber: string) {
     include: {
       items: true,
       events: { orderBy: { createdAt: "asc" } },
+      // 9F-16B: read-only — lets the customer timeline reword the PROCESSING
+      // rung while a THIRD_PARTY SellerOrder is still awaiting the seller's
+      // "Accept order". No customer PII; no other SellerOrder fields.
+      sellerOrders: { select: { sellerType: true, status: true, sellerName: true } },
     },
   });
   if (!order) return null;

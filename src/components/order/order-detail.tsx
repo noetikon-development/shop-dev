@@ -45,7 +45,12 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
           </div>
 
           <div className="mt-6">
-            <OrderTimeline status={order.status} events={order.events} pickup={pickup} />
+            <OrderTimeline
+              status={order.status}
+              events={order.events}
+              pickup={pickup}
+              sellerOrders={order.sellerOrders}
+            />
           </div>
         </div>
 

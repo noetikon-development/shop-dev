@@ -1,6 +1,9 @@
 import { Check } from "lucide-react";
 import { ORDER_STATUS_FLOW, ORDER_STATUS_META } from "@/lib/constants";
+import { processingRungOverride } from "@/lib/orders/status";
 import { formatDate, cn } from "@/lib/utils";
+
+type SellerOrderInfo = { sellerType: string; status: string; sellerName: string };
 
 type Event = {
   status: string;
@@ -18,10 +21,14 @@ export function OrderTimeline({
   status,
   events,
   pickup = false,
+  sellerOrders = [],
 }: {
   status: string;
   events: Event[];
   pickup?: boolean;
+  /** 9F-16B: reword the PROCESSING rung while a THIRD_PARTY SellerOrder is still
+   *  awaiting the seller's "Accept order". Empty on the public tracking page. */
+  sellerOrders?: SellerOrderInfo[];
 }) {
   if (status === "CANCELLED") {
     return (
@@ -46,6 +53,9 @@ export function OrderTimeline({
   const flow: readonly string[] = pickup ? PICKUP_STATUS_FLOW : ORDER_STATUS_FLOW;
   const currentIndex = flow.indexOf(status);
   const eventByStatus = new Map(events.map((e) => [e.status, e]));
+  // 9F-16B: only the PROCESSING rung, only while a THIRD_PARTY SellerOrder is
+  // still PENDING_PAYMENT (seller hasn't accepted). null otherwise → default copy.
+  const procOverride = processingRungOverride(status, sellerOrders);
 
   return (
     <ol className="relative space-y-6">
@@ -54,6 +64,7 @@ export function OrderTimeline({
         const done = i <= currentIndex;
         const active = i === currentIndex;
         const ev = eventByStatus.get(s);
+        const override = s === "PROCESSING" ? procOverride : null;
         return (
           <li key={s} className="relative flex gap-4 pl-1">
             {i < flow.length - 1 && (
@@ -75,16 +86,18 @@ export function OrderTimeline({
             </span>
             <div className="pb-1">
               <p className={cn("text-sm font-medium", done ? "text-ink" : "text-ink-faint")}>
-                {ev?.title ?? meta.label}
+                {override?.title ?? ev?.title ?? meta.label}
               </p>
               <p className="text-xs text-ink-faint">
-                {ev
-                  ? [ev.location, formatDate(ev.createdAt, { hour: "numeric", minute: "2-digit" })]
-                      .filter(Boolean)
-                      .join(" · ")
-                  : meta.description}
+                {override
+                  ? override.description
+                  : ev
+                    ? [ev.location, formatDate(ev.createdAt, { hour: "numeric", minute: "2-digit" })]
+                        .filter(Boolean)
+                        .join(" · ")
+                    : meta.description}
               </p>
-              {ev?.detail && <p className="mt-1 text-xs text-ink-soft">{ev.detail}</p>}
+              {!override && ev?.detail && <p className="mt-1 text-xs text-ink-soft">{ev.detail}</p>}
             </div>
           </li>
         );

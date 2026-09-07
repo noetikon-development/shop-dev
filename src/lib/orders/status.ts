@@ -162,6 +162,35 @@ export function shouldAutoConfirmAtCheckout(opts: { sellerType: string; paymentM
   return opts.sellerType === "THIRD_PARTY" && cod;
 }
 
+/**
+ * Customer-facing override for the PROCESSING timeline rung (9F-16B).
+ *
+ * A THIRD_PARTY order auto-confirmed at checkout (9F-15B) sits at
+ * `Order.status = PROCESSING` while its SellerOrder is still `PENDING_PAYMENT` —
+ * the seller has not clicked "Accept order", so the default "Your order is being
+ * packed" copy is untrue. In that window the rung reads "Order received / Sent
+ * to {seller} …" instead. Once the seller accepts (SellerOrder.status leaves
+ * PENDING_PAYMENT) this returns `null` and the existing copy applies again.
+ * FIRST_PARTY orders always get `null`.
+ *
+ * Presentation only — reads `SellerOrder.status`, never writes it, and never
+ * touches `Order.status`.
+ */
+export function processingRungOverride(
+  orderStatus: string,
+  sellerOrders: { sellerType: string; status: string; sellerName: string }[],
+): { title: string; description: string } | null {
+  if (orderStatus !== "PROCESSING") return null;
+  const awaitingAcceptance = sellerOrders.find(
+    (so) => so.sellerType === "THIRD_PARTY" && so.status === "PENDING_PAYMENT",
+  );
+  if (!awaitingAcceptance) return null;
+  return {
+    title: "Order received",
+    description: `Sent to ${awaitingAcceptance.sellerName} — they’ll confirm and prepare your order`,
+  };
+}
+
 export function isCancellable(from: string): boolean {
   return isOrderStatus(from) && CANCELLABLE_STATUSES.includes(from);
 }
