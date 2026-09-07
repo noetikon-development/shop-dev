@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
 import { matchVariant, hasPurchasableVariant } from "@/lib/variant-match";
 import { isPhotoRef } from "@/lib/art-ref";
+import { SITE } from "@/lib/constants";
 import type { GalleryImage, ProductDetailView } from "@/lib/types";
 
 export function ProductViewer({ product }: { product: ProductDetailView }) {
@@ -272,13 +273,26 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           )}
         </div>
 
-        {/* UI-SELLER-INFO: marketplace attribution — only when the selected
-            variant's winning offer belongs to a third-party seller. Plain text,
-            no link (no public seller page). FIRST_PARTY shows nothing. */}
+        {/* UI-SELLER-INFO-2: compact marketplace seller-information block — only
+            when the selected variant's winning offer belongs to a third-party
+            seller. Every value is data already on the page or a site constant;
+            no seller ratings / counts / location / badges. No public seller
+            page, so no link. FIRST_PARTY shows nothing (block omitted entirely). */}
         {matchedVariant?.sellerType === "THIRD_PARTY" && matchedVariant.sellerName && (
-          <p className="mt-2 text-meta font-medium uppercase tracking-wide text-ink-faint">
-            Sold by {matchedVariant.sellerName}
-          </p>
+          <dl className="mt-4 space-y-1.5 rounded-md border border-line bg-surface-sunken/40 p-4 text-sm">
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="shrink-0 text-ink-faint">Sold by</dt>
+              <dd className="text-right font-medium text-ink">{matchedVariant.sellerName}</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="shrink-0 text-ink-faint">Payment</dt>
+              <dd className="text-right text-ink-soft">Secure checkout</dd>
+            </div>
+            <div className="flex items-baseline justify-between gap-4">
+              <dt className="shrink-0 text-ink-faint">Customer service</dt>
+              <dd className="text-right text-ink-soft">{SITE.name}</dd>
+            </div>
+          </dl>
         )}
 
         <p className="mt-4 text-pretty text-ink-soft">{product.shortDescription}</p>

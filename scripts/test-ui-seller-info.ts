@@ -1,5 +1,6 @@
 /**
- * PHASE UI-SELLER-INFO — PDP "Sold by {seller}" for THIRD_PARTY winning offers.
+ * PHASE UI-SELLER-INFO / UI-SELLER-INFO-2 — PDP marketplace seller-information
+ * block for THIRD_PARTY winning offers (Sold by / Payment / Customer service).
  *
  * Read-only. Calls the real cached PDP resolver against committed data (the
  * live 9F-9 pilot: Style Avenue's Linen Blend Relaxed Shirt Medium is ACTIVE)
@@ -41,11 +42,15 @@ function staticTests() {
   ok("data · no import of offer-resolver / getWinningOffer added", !/offer-resolver|getWinningOffer/.test(data));
   ok("data · resolveWinningOfferView is unchanged (still the only resolver used, no new signature)", /const win = resolveWinningOfferView\(offers\.map\(fullCandidate\)\);/.test(data));
 
-  // UI
-  ok("ui · 'Sold by {sellerName}' rendered only inside a THIRD_PARTY guard", /matchedVariant\?\.sellerType === "THIRD_PARTY" && matchedVariant\.sellerName && \(\s*\n\s*<p className="mt-2 text-meta font-medium uppercase tracking-wide text-ink-faint">\s*\n\s*Sold by \{matchedVariant\.sellerName\}/.test(viewer));
-  ok("ui · placed directly under the price block", viewer.indexOf('size="lg"') < viewer.indexOf("Sold by {matchedVariant.sellerName}") && viewer.indexOf("Sold by {matchedVariant.sellerName}") < viewer.indexOf("{product.shortDescription}"));
-  ok("ui · plain text — no <Link>/<a> around the seller name", !/Sold by[\s\S]{0,80}<(Link|a )/.test(viewer));
-  ok("ui · no rating/badge/logo/location/stats added near the seller line", !/Sold by[\s\S]{0,200}(rating|badge|logo|location|reviews|positive|since)/i.test(viewer));
+  // UI (UI-SELLER-INFO-2: compact seller-information block)
+  ok("ui · seller block rendered only inside a THIRD_PARTY guard", /matchedVariant\?\.sellerType === "THIRD_PARTY" && matchedVariant\.sellerName && \(\s*\n\s*<dl /.test(viewer));
+  ok("ui · block carries 'Sold by' → sellerName", /<dt className="shrink-0 text-ink-faint">Sold by<\/dt>\s*\n\s*<dd className="text-right font-medium text-ink">\{matchedVariant\.sellerName\}<\/dd>/.test(viewer));
+  ok("ui · block carries 'Payment' → Secure checkout", /<dt className="shrink-0 text-ink-faint">Payment<\/dt>\s*\n\s*<dd className="text-right text-ink-soft">Secure checkout<\/dd>/.test(viewer));
+  ok("ui · block carries 'Customer service' → SITE.name", /<dt className="shrink-0 text-ink-faint">Customer service<\/dt>\s*\n\s*<dd className="text-right text-ink-soft">\{SITE\.name\}<\/dd>/.test(viewer));
+  ok("ui · placed directly under the price block, above the short description", viewer.indexOf('size="lg"') < viewer.indexOf(">Sold by</dt>") && viewer.indexOf(">Sold by</dt>") < viewer.indexOf("{product.shortDescription}"));
+  ok("ui · plain text — no <Link>/<a> in the seller block", !/>Sold by<\/dt>[\s\S]{0,400}<(Link|a )/.test(viewer));
+  ok("ui · no rating/badge/logo/location/response/sales stats invented in the block", !/>Sold by<\/dt>[\s\S]{0,400}(rating|badge|logo|location|reviews|response rate|positive feedback|items sold|since \d)/i.test(viewer));
+  ok("ui · SITE constant imported (no magic 'Axiaro' string literal in the block)", /import \{ SITE \} from "@\/lib\/constants";/.test(viewer) && !/>Axiaro</.test(viewer));
 
   // Scope guards
   ok("scope · cart unchanged (still its own Sold-by, not touched here)", !/UI-SELLER-INFO/.test(read("src/components/cart/cart-drawer.tsx")) && !/UI-SELLER-INFO/.test(read("src/lib/cart.ts")));
