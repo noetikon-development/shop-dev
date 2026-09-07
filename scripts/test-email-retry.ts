@@ -200,7 +200,8 @@ function staticTests() {
   // Budget widened (400 -> 700 chars) for 9F-7b's longer default-branch
   // comment (documents that the new _ops companions ARE retryable, unlike
   // their sibling customer-facing types) — the retry semantics are unchanged.
-  ok("routing · default branch still returns not_retryable", /\n\s*default:\s*\n[\s\S]{0,700}?error: "not_retryable"/.test(notifs) && (notifs.match(/error: "not_retryable"/g) ?? []).length === 1);
+  // 9F-18 added an explicit `case "email_failure_alert_ops": … not_retryable` — the default branch is unchanged, the literal now appears twice.
+  ok("routing · default branch still returns not_retryable", /\n\s*default:\s*\n[\s\S]{0,700}?error: "not_retryable"/.test(notifs) && (notifs.match(/error: "not_retryable"/g) ?? []).length === 2);
   ok("routing · request id comes from the idempotency key, outcome from the key too", /log\.idempotencyKey\.split\(":"\)/.test(notifs) && /parts\[2\] === "changes_requested"/.test(notifs));
   ok("routing · retry passes the ORIGINAL key back (row reuse)", /idempotencyKey: log\.idempotencyKey/.test(notifs));
 

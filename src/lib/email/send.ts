@@ -62,7 +62,9 @@ export type EmailType =
   | "seller_order_cancelled"
   | "seller_return_received"
   | "return_refund_initiated_ops"
-  | "return_refund_completed_ops";
+  | "return_refund_completed_ops"
+  // 9F-18 — Ops alert raised when another transactional email FAILED / SKIPPED.
+  | "email_failure_alert_ops";
 
 export type DispatchInput = {
   type: EmailType;
@@ -117,6 +119,8 @@ export async function recordEmailFailure(input: {
   to: string;
   idempotencyKey: string;
   error: string;
+  /** Safe, PII-free subject for the row. Defaults to the render-failure sentinel. */
+  subject?: string;
   userId?: string | null;
   orderId?: string | null;
   client?: Prisma.TransactionClient;
@@ -129,7 +133,7 @@ export async function recordEmailFailure(input: {
         {
           type: input.type,
           recipient: input.to,
-          subject: "(message not generated — template render failed)",
+          subject: (input.subject ?? "(message not generated — template render failed)").slice(0, 500),
           idempotencyKey: input.idempotencyKey,
           status: "FAILED",
           error,

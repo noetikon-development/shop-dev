@@ -55,6 +55,71 @@ export function renderOrderReceivedOps(d: {
   };
 }
 
+/**
+ * Ops alert — another transactional email FAILED or was SKIPPED for a delivery
+ * reason (9F-18). Carries only operational metadata already held on the failed
+ * `EmailLog` row: no customer/seller name, address, phone, full email, payout
+ * figures, order totals, tokens, or the failed message body.
+ */
+export function renderEmailFailureAlertOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  emailType: string;
+  failureStatus: string;
+  errorReason: string;
+  emailLogId: string;
+  recipientMasked: string;
+  subject: string;
+  orderNumber: string | null;
+  attempts: number;
+  failedAt: Date;
+}) {
+  const subject = `⚠ Email delivery failed — ${d.emailType}`;
+  const when = `${d.failedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const rows =
+    kvRow("Email type", d.emailType) +
+    kvRow("Result", d.failureStatus) +
+    kvRow("Reason", d.errorReason) +
+    kvRow("Recipient", d.recipientMasked) +
+    kvRow("Message subject", d.subject) +
+    (d.orderNumber ? kvRow("Order", d.orderNumber) : "") +
+    kvRow("Attempts", String(d.attempts)) +
+    kvRow("EmailLog ID", d.emailLogId) +
+    kvRow("Recorded", when, { last: true });
+  const body = `
+    ${heading("A transactional email was not delivered")}
+    ${paragraph(`Axiaro's email subsystem recorded a ${d.failureStatus} result for a ${d.emailType} message — the recipient did not receive it.`)}
+    ${infoBox(rows)}
+    ${paragraph("Open the email log, resolve the underlying cause, then use Retry on that row.")}
+    ${button("Open the email log", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A transactional email was not delivered",
+      ``,
+      `Axiaro's email subsystem recorded a ${d.failureStatus} result for a ${d.emailType} message — the recipient did not receive it.`,
+      ``,
+      `Email type: ${d.emailType}`,
+      `Result: ${d.failureStatus}`,
+      `Reason: ${d.errorReason}`,
+      `Recipient: ${d.recipientMasked}`,
+      `Message subject: ${d.subject}`,
+      ...(d.orderNumber ? [`Order: ${d.orderNumber}`] : []),
+      `Attempts: ${d.attempts}`,
+      `EmailLog ID: ${d.emailLogId}`,
+      `Recorded: ${when}`,
+      ``,
+      "Open the email log, resolve the underlying cause, then use Retry on that row.",
+      ``,
+      `Open the email log: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
+
 type RefundOpsBase = {
   brand: string;
   siteUrl: string;

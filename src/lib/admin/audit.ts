@@ -1,4 +1,5 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
 export type AuditInput = {
@@ -19,9 +20,12 @@ export type AuditInput = {
  * idempotency key, which must identify THIS specific transition and never
  * collide with a later, unrelated edit to the same row (9F-6b).
  */
-export async function writeAudit(input: AuditInput): Promise<string | null> {
+export async function writeAudit(
+  input: AuditInput,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<string | null> {
   try {
-    const row = await prisma.adminAuditLog.create({
+    const row = await client.adminAuditLog.create({
       data: {
         actorUserId: input.actorUserId ?? null,
         action: input.action,

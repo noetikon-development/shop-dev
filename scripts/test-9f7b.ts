@@ -70,7 +70,8 @@ function staticTests() {
   }
 
   ok("routing · all 5 new retry cases present", /case "order_received_ops":/.test(notifs) && /case "seller_order_cancelled":/.test(notifs) && /case "seller_return_received":/.test(notifs) && /case "return_refund_initiated_ops":/.test(notifs) && /case "return_refund_completed_ops":/.test(notifs));
-  ok("routing · default branch still returns not_retryable exactly once", (notifs.match(/error: "not_retryable"/g) ?? []).length === 1);
+  // 9F-18 added an explicit `case "email_failure_alert_ops": … not_retryable` alongside the default branch.
+  ok("routing · not_retryable appears exactly twice (default branch + email_failure_alert_ops)", (notifs.match(/error: "not_retryable"/g) ?? []).length === 2);
 
   // idempotency anchors
   ok("idempotency · new order (ops) keys off orderId only, same anchor as order_confirmation", /ORDER_RECEIVED_OPS:\$\{order\.id\}/.test(notifs));
@@ -271,8 +272,11 @@ async function dbTests() {
         select: { id: true },
       });
       const r6 = await sendSellerOrderCancelled(lonelySO.id, { client: tx });
-      ok("6 · no resolvable recipient → FAILED/no_recipient, no row", r6.ok === false && r6.error === "no_recipient");
-      ok("6 · no row written for a no-recipient send", (await tx.emailLog.findUnique({ where: { idempotencyKey: `SELLER_ORDER_CANCELLED:${lonelySO.id}` } })) === null);
+      ok("6 · no resolvable recipient → FAILED/no_recipient", r6.ok === false && r6.error === "no_recipient");
+      // 9F-18 Class E: a no-recipient seller send now writes a FAILED row (was: no row) so the
+      // shared delivery-failure alert can surface it. Still exactly one row, dedupe-safe on retry.
+      const r6row = await tx.emailLog.findUnique({ where: { idempotencyKey: `SELLER_ORDER_CANCELLED:${lonelySO.id}` } });
+      ok("6 · a FAILED/no_recipient EmailLog row is now written", !!r6row && r6row.status === "FAILED" && r6row.error === "no_recipient" && r6row.recipient === "(no recipient resolved)");
 
       // ── 7 — an unrelated existing type stays not_retryable (unaffected) ──
       const eOther = await tx.emailLog.create({

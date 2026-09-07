@@ -100,7 +100,8 @@ function staticTests() {
   // retryEmailByLog cases for all 6
   ok("routing · account cases present", /case "seller_account_approved":[\s\S]{0,60}case "seller_account_suspended":[\s\S]{0,60}case "seller_account_closed":/.test(notifs));
   ok("routing · profile cases present", /case "seller_profile_approved":/.test(notifs) && /case "seller_profile_rejected":/.test(notifs) && /case "seller_profile_submitted":/.test(notifs));
-  ok("routing · default branch still returns not_retryable exactly once", (notifs.match(/error: "not_retryable"/g) ?? []).length === 1);
+  // 9F-18 added an explicit `case "email_failure_alert_ops": … not_retryable` alongside the default branch.
+  ok("routing · not_retryable appears exactly twice (default branch + email_failure_alert_ops)", (notifs.match(/error: "not_retryable"/g) ?? []).length === 2);
   ok("routing · retry passes the ORIGINAL key back for the new types too", (notifs.match(/idempotencyKey: log\.idempotencyKey/g) ?? []).length >= 2);
 
   // idempotency anchors — audit log id for account events, NEVER Seller.updatedAt
@@ -290,8 +291,11 @@ async function dbTests() {
       });
       const a5 = await seedAudit(tx, "seller.approved", lonelySeller.id, "PENDING", "APPROVED");
       const rLonely = await sendSellerAccountApproved(lonelySeller.id, a5.id, { client: tx });
-      ok("12 · no resolvable recipient → FAILED/no_recipient, no EmailLog row created", rLonely.ok === false && rLonely.error === "no_recipient");
-      ok("12 · no row written for a no-recipient send", (await tx.emailLog.findUnique({ where: { idempotencyKey: `SELLER_ACCOUNT_APPROVED:${lonelySeller.id}:${a5.id}` } })) === null);
+      ok("12 · no resolvable recipient → FAILED/no_recipient", rLonely.ok === false && rLonely.error === "no_recipient");
+      // 9F-18 Class E: a no-recipient seller send now writes a FAILED row (was: no row) so the
+      // shared delivery-failure alert can surface it.
+      const lonelyRow = await tx.emailLog.findUnique({ where: { idempotencyKey: `SELLER_ACCOUNT_APPROVED:${lonelySeller.id}:${a5.id}` } });
+      ok("12 · a FAILED/no_recipient EmailLog row is now written", !!lonelyRow && lonelyRow.status === "FAILED" && lonelyRow.error === "no_recipient" && lonelyRow.recipient === "(no recipient resolved)");
 
       throw new Rollback();
     }, { timeout: 40_000, maxWait: 12_000 });

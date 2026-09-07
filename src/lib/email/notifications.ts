@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { getSiteUrl } from "@/lib/site-url";
 import { getStoreBrand } from "@/lib/site-settings";
 import { courierLabel, isStorePickupCode } from "@/lib/orders/couriers";
+import { writeAudit } from "@/lib/admin/audit";
+import { scheduleEmail } from "@/lib/email/schedule";
 import { dispatchEmail, recordEmailFailure, type DispatchResult, type EmailType } from "@/lib/email/send";
 import { renderOrderConfirmation } from "@/lib/email/templates/order-confirmation";
 import { renderOrderProcessing } from "@/lib/email/templates/order-processing";
@@ -41,7 +43,7 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps } from "@/lib/email/templates/ops-notifications";
 import { renderSellerOrderCancelled, renderSellerReturnReceived, renderSellerOrderReceived } from "@/lib/email/templates/seller-order-notifications";
 import { returnReasonLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
@@ -217,7 +219,7 @@ async function renderAndDispatch(
     msg = build();
   } catch (err) {
     setEmailFooterContext({});
-    return recordEmailFailure({
+    const failed = await recordEmailFailure({
       type: meta.type,
       to: meta.to,
       idempotencyKey: meta.idempotencyKey,
@@ -226,9 +228,173 @@ async function renderAndDispatch(
       client: meta.client,
       error: `render_failed: ${err instanceof Error ? err.message : String(err)}`,
     });
+    maybeScheduleEmailFailureAlert(meta, failed);
+    return failed;
   }
   setEmailFooterContext({});
-  return dispatchEmail({ ...meta, ...msg });
+  const result = await dispatchEmail({ ...meta, ...msg });
+  maybeScheduleEmailFailureAlert(meta, result);
+  return result;
+}
+
+/**
+ * 9F-18 — when a transactional email FAILS or is SKIPPED for a delivery reason,
+ * raise exactly one Ops alert (an audit row + one email) so the failure is not
+ * silent. The alert flows through this same `renderAndDispatch`, so the guards
+ * below (and, inside `sendEmailFailureAlertOps`, the `email_mode_log` /
+ * non-production `smtp_not_configured` filters) are what stop it recursing.
+ *
+ *  - never for the alert type itself → no infinite loop
+ *  - never on an admin-initiated retry (`meta.retry`) → the admin sees the result
+ *  - never from a test transaction (`meta.client`) → no real alert from tests
+ *
+ * `dispatchEmail`'s SKIPPED result carries no `error`, so the alert sender
+ * re-reads the row to tell `email_mode_log` from `smtp_not_configured`.
+ */
+function maybeScheduleEmailFailureAlert(meta: DispatchMeta, result: DispatchResult): void {
+  if (result.status !== "FAILED" && result.status !== "SKIPPED") return;
+  if (meta.type === "email_failure_alert_ops") return;
+  if (meta.retry) return;
+  if (meta.client) return;
+  scheduleEmail(() => sendEmailFailureAlertOps(meta.idempotencyKey));
+}
+
+/**
+ * 9F-18 Class E — a seller notification whose recipient set resolved empty.
+ * Previously this returned FAILED with NO `EmailLog` row at all (a silent,
+ * invisible failure). Now it writes a FAILED row keyed on the notification's own
+ * idempotency key — dedupe-safe on retry via `recordEmailFailure`'s
+ * `skipDuplicates` — and routes it through the same Ops alert path. Does not
+ * touch successful recipient resolution.
+ */
+async function failNoRecipient(meta: {
+  type: EmailType;
+  idempotencyKey: string;
+  subject: string;
+  orderId?: string | null;
+  userId?: string | null;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  const failed = await recordEmailFailure({
+    type: meta.type,
+    to: "(no recipient resolved)",
+    idempotencyKey: meta.idempotencyKey,
+    subject: meta.subject,
+    orderId: meta.orderId ?? null,
+    userId: meta.userId ?? null,
+    client: meta.client,
+    error: "no_recipient",
+  });
+  if (!meta.client) scheduleEmail(() => sendEmailFailureAlertOps(meta.idempotencyKey));
+  return failed;
+}
+
+/** True on a Vercel production deployment (never on preview / local / tests). */
+function isProductionRuntime(): boolean {
+  return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
+}
+
+/**
+ * 9F-18 — Ops alert for a FAILED / SKIPPED transactional email. Identified by
+ * the FAILED notification's own idempotency key (unique on `EmailLog`). Writes a
+ * durable `email.delivery_failed` audit row FIRST (the non-email administrative
+ * signal, present even when SMTP itself is down), then sends one alert email to
+ * the ops inbox. Its own idempotency key is `EMAIL_FAILURE_ALERT:<failedLogId>`
+ * so a given failure can raise at most one alert. Recursion is impossible: this
+ * message is `email_failure_alert_ops`, which `maybeScheduleEmailFailureAlert`
+ * always skips. Not retryable from `/admin/email`.
+ */
+export async function sendEmailFailureAlertOps(
+  failedIdempotencyKey: string,
+  opts: { client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const row = await db.emailLog.findUnique({
+      where: { idempotencyKey: failedIdempotencyKey },
+      select: {
+        id: true,
+        type: true,
+        status: true,
+        error: true,
+        recipient: true,
+        subject: true,
+        orderId: true,
+        attempts: true,
+        updatedAt: true,
+      },
+    });
+    if (!row) return { ok: false, status: "FAILED", error: "log_not_found" };
+    // Recursion guard — an alert never alerts on itself.
+    if (row.type === "email_failure_alert_ops") return { ok: true, deduped: true, status: "DEDUPED" };
+    // Only genuine non-delivery outcomes.
+    if (row.status !== "FAILED" && row.status !== "SKIPPED") return { ok: true, deduped: true, status: "DEDUPED" };
+    // `EMAIL_MODE=log` is a deliberate operator switch, not a failure.
+    if (row.error === "email_mode_log") return { ok: true, skipped: true, status: "SKIPPED" };
+    // A missing SMTP config only matters on the production deployment.
+    if (row.status === "SKIPPED" && row.error === "smtp_not_configured" && !isProductionRuntime()) {
+      return { ok: true, skipped: true, status: "SKIPPED" };
+    }
+    // At most one alert (audit row + email) per failed notification, ever.
+    const alertKey = `EMAIL_FAILURE_ALERT:${row.id}`;
+    const priorAlert = await db.emailLog.findUnique({ where: { idempotencyKey: alertKey }, select: { id: true } });
+    if (priorAlert) return { ok: true, deduped: true, status: "DEDUPED" };
+
+    const recipientMasked = maskEmail(row.recipient);
+    const orderNumber = row.orderId
+      ? (await db.order.findUnique({ where: { id: row.orderId }, select: { orderNumber: true } }))?.orderNumber ?? null
+      : null;
+
+    // Non-email administrative signal — ALWAYS, before the email attempt, so the
+    // failure is recorded even if the alert email itself cannot be delivered.
+    await writeAudit(
+      {
+        actorUserId: null,
+        action: "email.delivery_failed",
+        targetType: "email_log",
+        targetId: row.id,
+        summary: `${row.type} to ${recipientMasked} — ${row.status.toLowerCase()}`,
+        meta: {
+          type: row.type,
+          status: row.status,
+          error: row.error ?? null,
+          recipientMasked,
+          orderId: row.orderId ?? null,
+        },
+      },
+      opts.client,
+    );
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    return renderAndDispatch(
+      {
+        type: "email_failure_alert_ops",
+        to,
+        from: SECURITY_FROM,
+        idempotencyKey: alertKey,
+        orderId: row.orderId,
+        client: opts.client,
+      },
+      () =>
+        renderEmailFailureAlertOps({
+          brand,
+          siteUrl,
+          adminUrl: `${siteUrl}/admin/email`,
+          emailType: row.type,
+          failureStatus: row.status,
+          errorReason: row.error ?? "(none recorded)",
+          emailLogId: row.id,
+          recipientMasked,
+          subject: row.subject,
+          orderNumber,
+          attempts: row.attempts,
+          failedAt: row.updatedAt,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendEmailFailureAlertOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
 }
 
 const ORDER_INCLUDE = {
@@ -416,7 +582,14 @@ export async function sendSellerOrderReceived(
     if (so.sellerType !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
 
     const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_order_received",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${order.id}`,
+        subject: `New order ${order.orderNumber} — seller notification`,
+        orderId: order.id,
+        client: opts.client,
+      });
 
     const shipTo = safeParse<Record<string, unknown> | null>(order.shippingAddress, null);
 
@@ -1561,6 +1734,12 @@ export async function retryEmailByLog(
   const tx = client === prisma ? undefined : (client as Prisma.TransactionClient);
 
   switch (log.type) {
+    // 9F-18 — the delivery-failure alert carries time-of-event content and must
+    // never be regenerated. If the underlying failure persists it re-alerts on
+    // the next automatic attempt; the admin acts from the ORIGINAL failed row.
+    case "email_failure_alert_ops":
+      return { ok: false, status: "FAILED", error: "not_retryable" };
+
     case "order_confirmation":
       return log.orderId ? sendOrderConfirmation(log.orderId, { retry: true }) : { ok: false, status: "FAILED", error: "no_order" };
     case "order_processing":
@@ -1779,7 +1958,13 @@ export async function sendSellerProductRequestSubmitted(
 ): Promise<DispatchResult> {
   try {
     const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_product_request_submitted",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_SUBMITTED:${requestId}`,
+        subject: "Product request received — seller notification",
+        client: opts.client,
+      });
     return renderAndDispatch(
       {
         type: "seller_product_request_submitted",
@@ -1819,7 +2004,19 @@ export async function sendSellerProductRequestApproved(
   try {
     const db = opts.client ?? prisma;
     const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx) {
+      const r = await db.sellerProductRequest.findUnique({
+        where: { id: requestId },
+        select: { reviewedAt: true },
+      });
+      const ms = (r?.reviewedAt ?? new Date(0)).getTime();
+      return failNoRecipient({
+        type: "seller_product_request_approved",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_APPROVED:${requestId}:${ms}`,
+        subject: "Product request approved — seller notification",
+        client: opts.client,
+      });
+    }
 
     const reviewedAt = ctx.reviewedAt ?? new Date();
     const linked =
@@ -1885,7 +2082,21 @@ export async function sendSellerProductRequestRejected(
 ): Promise<DispatchResult> {
   try {
     const ctx = await loadSellerRequestEmailContext(requestId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx) {
+      const r = await (opts.client ?? prisma).sellerProductRequest.findUnique({
+        where: { id: requestId },
+        select: { reviewedAt: true, status: true },
+      });
+      const branchOutcome = opts.outcome ?? (r?.status === "REJECTED" ? "rejected" : "changes_requested");
+      const ms = (r?.reviewedAt ?? new Date(0)).getTime();
+      return failNoRecipient({
+        type: "seller_product_request_rejected",
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_REJECTED:${requestId}:${branchOutcome}:${ms}`,
+        subject: "Product request update — seller notification",
+        client: opts.client,
+      });
+    }
 
     const outcome = opts.outcome ?? (ctx.status === "REJECTED" ? "rejected" : "changes_requested");
     const reviewedAt = ctx.reviewedAt ?? new Date();
@@ -2000,7 +2211,13 @@ export async function sendSellerAccountApproved(
   try {
     const db = opts.client ?? prisma;
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_account_approved",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_APPROVED:${sellerId}:${auditLogId}`,
+        subject: "Seller account update — notification",
+        client: opts.client,
+      });
     const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { action: true } });
     const reactivate = audit?.action === "seller.reactivated";
 
@@ -2036,7 +2253,13 @@ export async function sendSellerAccountSuspended(
 ): Promise<DispatchResult> {
   try {
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_account_suspended",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_SUSPENDED:${sellerId}:${auditLogId}`,
+        subject: "Seller account update — notification",
+        client: opts.client,
+      });
 
     return renderAndDispatch(
       {
@@ -2069,7 +2292,13 @@ export async function sendSellerAccountClosed(
 ): Promise<DispatchResult> {
   try {
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_account_closed",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_CLOSED:${sellerId}:${auditLogId}`,
+        subject: "Seller account update — notification",
+        client: opts.client,
+      });
 
     return renderAndDispatch(
       {
@@ -2109,7 +2338,14 @@ export async function sendSellerProfileApproved(
     const row = await db.seller.findUnique({ where: { id: sellerId }, select: { contentReviewedAt: true } });
     const reviewedAt = row?.contentReviewedAt ?? new Date();
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_profile_approved",
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PROFILE_APPROVED:${sellerId}:${reviewedAt.getTime()}:APPROVED`,
+        subject: "Seller profile update — notification",
+        client: opts.client,
+      });
 
     return renderAndDispatch(
       {
@@ -2148,7 +2384,14 @@ export async function sendSellerProfileRejected(
     const row = await db.seller.findUnique({ where: { id: sellerId }, select: { contentReviewedAt: true } });
     const reviewedAt = row?.contentReviewedAt ?? new Date();
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_profile_rejected",
+        idempotencyKey:
+          opts.idempotencyKey ?? `SELLER_PROFILE_REJECTED:${sellerId}:${reviewedAt.getTime()}:DRAFT`,
+        subject: "Seller profile update — notification",
+        client: opts.client,
+      });
 
     return renderAndDispatch(
       {
@@ -2251,7 +2494,13 @@ export async function sendSellerOrderCancelled(
     });
     if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
     const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_order_cancelled",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_CANCELLED:${sellerOrderId}`,
+        subject: `Order ${so.order.orderNumber} cancelled — seller notification`,
+        client: opts.client,
+      });
 
     return renderAndDispatch(
       {
@@ -2316,7 +2565,13 @@ export async function sendSellerReturnReceived(
     });
     if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
-    if (!ctx) return { ok: false, status: "FAILED", error: "no_recipient" };
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_return_received",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_RECEIVED:${returnId}:${sellerId}`,
+        subject: `Return ${ret.returnNumber} received — seller notification`,
+        client: opts.client,
+      });
     const items = await db.returnItem.findMany({
       where: { returnRequestId: returnId, orderItem: { sellerId } },
       select: { name: true, variantLabel: true, quantity: true },
