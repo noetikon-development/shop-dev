@@ -1261,6 +1261,9 @@ model Seller {
   // Phase 9F-5b — products this seller has proposed for the Axiaro catalog.
   productRequests SellerProductRequest[]
 
+  // Phase 9F-8e — bookkeeping-only payout records for this seller.
+  settlements SellerSettlement[]
+
   @@index([type])
   @@index([status])
   @@index([contentStatus])
@@ -1438,20 +1441,73 @@ model SellerOrder {
   // PENDING_PAYMENT | PROCESSING | READY_TO_SHIP | SHIPPED | DELIVERED | CANCELLED
   settlementStatus String @default("PENDING_CAPTURE")
   // PENDING_CAPTURE | CAPTURED | SETTLED | REFUNDED | CLAWED_BACK
+  // 9F-8e MVP uses only: PENDING_CAPTURE -> SETTLED -> CLAWED_BACK.
+
+  // Settlement (Phase 9F-8e — bookkeeping-only seller payout recording).
+  // `settlementId` points at the SellerSettlement batch this order was last
+  // involved in — the batch that SETTLED it, or (after a post-settlement
+  // cancellation / return) the batch that RECONCILED its clawback. NULL until
+  // then. `settlementClawbackAmount` is the amount Axiaro must still recover
+  // from the seller because a sale it already paid out was voided / partly
+  // returned; it is netted into and zeroed by the next settlement batch. No
+  // real money moves — an admin records payments made outside the system.
+  settlementId             String?
+  settlementClawbackAmount Int     @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  seller    Seller      @relation(fields: [sellerId], references: [id])
-  items     OrderItem[]
-  shipments Shipment[]
+  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  seller     Seller            @relation(fields: [sellerId], references: [id])
+  items      OrderItem[]
+  shipments  Shipment[]
+  settlement SellerSettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
 
   @@unique([orderId, sellerId])
   @@index([orderId])
   @@index([sellerId])
   @@index([status])
   @@index([settlementStatus])
+  @@index([settlementId])
+}
+
+// Bookkeeping-only seller payout record (Phase 9F-8e). NOT a real transfer:
+// an authorized admin records that a payment was made to a THIRD_PARTY seller
+// OUTSIDE the system (bank / GCash / cash) — the same posture as the
+// ReturnRequest refund bookkeeping. No PayMongo, no scheduled runs, no
+// thresholds, no DRAFT state. `netAmount` MAY be <= 0 when clawbacks reconciled
+// this batch exceed the new receivables.
+model SellerSettlement {
+  id         String @id @default(cuid())
+  sellerId   String
+  sellerName String // Seller.displayName snapshot at settlement time
+
+  status String @default("PAID") // PAID (the MVP has no DRAFT state)
+
+  // Money (centavos). Seller receivable per order = SellerOrder.total -
+  // SellerOrder.commissionAmount (merchandise + shipping, less commission).
+  grossReceivable  Int @default(0) // Σ SellerOrder.total of the orders settled here
+  commissionAmount Int @default(0) // Σ SellerOrder.commissionAmount of those orders
+  clawbackAmount   Int @default(0) // Σ outstanding clawback deltas reconciled here (>= 0)
+  netAmount        Int @default(0) // grossReceivable - commissionAmount - clawbackAmount
+  orderCount       Int @default(0)
+  clawbackCount    Int @default(0)
+
+  // Admin-entered bookkeeping — mirrors ReturnRequest.refund* fields.
+  paidAt           DateTime
+  paymentReference String?
+  paymentMethod    String?
+  note             String?
+  createdById      String? // admin User.id snapshot — no FK (matches OrderItem.sellerId)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller       Seller        @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  sellerOrders SellerOrder[]
+
+  @@index([sellerId])
+  @@index([paidAt])
 }
 
 // One or more parcels for a SellerOrder (Phase 9E-3C-1). MVP: a shipment covers

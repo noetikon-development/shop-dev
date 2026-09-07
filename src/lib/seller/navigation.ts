@@ -27,6 +27,8 @@ export const SELLER_ROUTES: SellerRoute[] = [
   { path: "/seller/product-requests", label: "Product requests", accepts: "manage_offers", live: true },
   { path: "/seller/orders", label: "Orders", accepts: "view_seller_orders", live: true },
   { path: "/seller/returns", label: "Returns", accepts: "manage_seller_returns", live: true },
+  // 9F-8e: read-only statement of bookkeeping settlements Axiaro has recorded.
+  { path: "/seller/settlements", label: "Settlements", accepts: "view_seller_orders", live: true },
   { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: true },
 ];
 
@@ -42,6 +44,7 @@ const CRUMB_LABELS: Record<string, string> = {
   orders: "Orders",
   returns: "Returns",
   settings: "Settings",
+  settlements: "Settlements",
   "product-requests": "Product requests",
 };
 

@@ -343,14 +343,22 @@ export async function receiveReturnAction(input: unknown): Promise<ReturnAdminSt
           if (returnedValue <= 0) continue;
           const so = await tx.sellerOrder.findUnique({
             where: { id: sellerOrderId },
-            select: { commissionAmount: true, commissionRate: true },
+            select: { commissionAmount: true, commissionRate: true, settlementId: true },
           });
           if (!so) continue;
           const commissionAdjustment = roundHalfUp((returnedValue * so.commissionRate) / 10000);
-          await tx.sellerOrder.update({
-            where: { id: sellerOrderId },
-            data: { commissionAmount: Math.max(0, so.commissionAmount - commissionAdjustment) },
-          });
+          const data: Prisma.SellerOrderUpdateInput = {
+            commissionAmount: Math.max(0, so.commissionAmount - commissionAdjustment),
+          };
+          // 9F-8e clawback: if this SellerOrder was already SETTLED, the
+          // returned portion's receivable (returned merchandise value minus the
+          // commission being reversed) must be recovered from the seller —
+          // accrued for the next statement, no money moved.
+          if (so.settlementId !== null) {
+            data.settlementStatus = "CLAWED_BACK";
+            data.settlementClawbackAmount = { increment: Math.max(0, returnedValue - commissionAdjustment) };
+          }
+          await tx.sellerOrder.update({ where: { id: sellerOrderId }, data });
         }
       }
 

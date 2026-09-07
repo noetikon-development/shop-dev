@@ -89,9 +89,13 @@ function staticTests() {
     "4 · cancelOrderAction zeros commissionAmount in the same guarded SellerOrder update",
     /data: \{ status: "CANCELLED", updatedAt: new Date\(\), commissionAmount: 0 \}/.test(orderActions),
   );
+  // 9F-8e split the cascade into an unsettled-orders updateMany (this exact
+  // 9F-8c write, unchanged) + a per-row loop for SETTLED orders (clawback).
+  // The zero-commission write stays inside the `if (toCancel.length > 0)`
+  // guarded block.
   ok(
     "4 · the zero-out is inside the SAME `if (toCancel.length > 0)` guarded block, not a separate ungated write",
-    /if \(toCancel\.length > 0\) \{\s*\n\s*await tx\.sellerOrder\.updateMany\(\{\s*\n\s*where: \{ id: \{ in: toCancel\.map[\s\S]{0,300}data: \{ status: "CANCELLED", updatedAt: new Date\(\), commissionAmount: 0 \}/.test(
+    /if \(toCancel\.length > 0\) \{[\s\S]{0,400}await tx\.sellerOrder\.updateMany\(\{\s*\n\s*where: \{ id: \{ in: unsettledIds \} \},\s*\n\s*data: \{ status: "CANCELLED", updatedAt: new Date\(\), commissionAmount: 0 \}/.test(
       orderActions,
     ),
   );

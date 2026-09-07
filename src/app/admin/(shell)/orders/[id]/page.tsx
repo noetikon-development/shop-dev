@@ -7,7 +7,8 @@ import { getAdminOrder } from "@/lib/admin/orders";
 import { orderReturnableLines } from "@/lib/admin/returns";
 import { orderHasOpenReturn } from "@/lib/returns";
 import { getOrderPayments, getPaymentsAdminConfig } from "@/lib/admin/payments";
-import { PageHeader } from "@/components/admin/ui";
+import { sellerOrderStatusLabel, sellerOrderStatusTone } from "@/lib/marketplace/seller-order-status";
+import { Card, PageHeader, StatusBadge } from "@/components/admin/ui";
 import { OrderDetailView } from "@/components/admin/orders/order-detail-view";
 import { AdminStartReturn } from "@/components/admin/returns/admin-start-return";
 import { PaymentPanel } from "@/components/admin/payments/payment-panel";
@@ -84,6 +85,27 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
         canConfirm={canConfirm}
         storePickup={storePickup}
       />
+
+      {order.sellerOrders.length > 0 && (
+        <div className="mt-6">
+          <Card>
+            <h2 className="mb-3 text-sm font-semibold">Marketplace</h2>
+            <ul className="space-y-2 text-sm">
+              {order.sellerOrders.map((so) => (
+                <li key={so.id} className="flex items-center justify-between gap-3">
+                  <span className="text-ink-soft">{so.sellerName}</span>
+                  <span className="flex items-center gap-2">
+                    <StatusBadge tone={sellerOrderStatusTone(so.status)}>{sellerOrderStatusLabel(so.status)}</StatusBadge>
+                    <Link href={`/admin/seller-orders/${so.id}`} className="text-clay hover:underline">
+                      View seller order
+                    </Link>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        </div>
+      )}
 
       {canViewPayments && orderPayments && (
         <div className="mt-6">

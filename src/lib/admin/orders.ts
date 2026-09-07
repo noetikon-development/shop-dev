@@ -237,6 +237,11 @@ export async function getAdminOrder(id: string) {
         select: { id: true },
         take: 1,
       },
+      // Marketplace (9F-8d.1) — read-only, just enough for a link to the
+      // dedicated /admin/seller-orders/[id] view. Never written here.
+      sellerOrders: {
+        select: { id: true, sellerId: true, sellerName: true, status: true },
+      },
     },
   });
 

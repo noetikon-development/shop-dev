@@ -343,12 +343,15 @@ async function staticTests() {
   // 9F-7b: the sync now finds the not-yet-CANCELLED rows first (so the
   // affected seller(s) can be notified after commit), then updates exactly
   // those ids — still status-guarded, still inside the same transaction.
+  // 9F-8e: the updateMany's `where` narrowed from `toCancel.map(...)` to
+  // `unsettledIds` (settled orders take a per-row clawback path instead) —
+  // still the same findMany guard, still status-guarded, still in-tx.
   ok(
     "I12 cancelOrderAction syncs SellerOrder → CANCELLED (status-guarded, in-tx)",
     /tx\.sellerOrder\.findMany\(\{\s*where: \{ orderId, status: \{ not: "CANCELLED" \} \}/.test(
       orderActions.replace(/\n\s*/g, " "),
     ) &&
-      /tx\.sellerOrder\.updateMany\(\{\s*where: \{ id: \{ in: toCancel\.map/.test(
+      /tx\.sellerOrder\.updateMany\(\{\s*where: \{ id: \{ in: unsettledIds \} \}/.test(
         orderActions.replace(/\n\s*/g, " "),
       ) &&
       /data: \{ status: "CANCELLED"/.test(orderActions),

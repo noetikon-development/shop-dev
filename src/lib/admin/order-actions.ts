@@ -382,16 +382,38 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       //     fire for ones already CANCELLED earlier.)
       const toCancel = await tx.sellerOrder.findMany({
         where: { orderId, status: { not: "CANCELLED" } },
-        select: { id: true },
+        select: { id: true, total: true, commissionAmount: true, settlementId: true },
       });
       if (toCancel.length > 0) {
-        await tx.sellerOrder.updateMany({
-          where: { id: { in: toCancel.map((s) => s.id) } },
-          // 9F-8c: the sale this commission was earned on no longer exists —
-          // zero it in the same guarded write, so a repeat cancel attempt
-          // (which matches 0 rows above) can never re-zero or double-adjust.
-          data: { status: "CANCELLED", updatedAt: new Date(), commissionAmount: 0 },
-        });
+        // 9F-8c: the sale this commission was earned on no longer exists —
+        // zero it in the same guarded write, so a repeat cancel attempt (which
+        // matches 0 rows above) can never re-zero or double-adjust.
+        const unsettledIds = toCancel.filter((s) => s.settlementId === null).map((s) => s.id);
+        if (unsettledIds.length > 0) {
+          await tx.sellerOrder.updateMany({
+            where: { id: { in: unsettledIds } },
+            data: { status: "CANCELLED", updatedAt: new Date(), commissionAmount: 0 },
+          });
+        }
+        // 9F-8e clawback: a SellerOrder already SETTLED (paid out to the seller)
+        // and now cancelled — the full remaining receivable (total - commission)
+        // must be recovered. Accrue it on `settlementClawbackAmount` for the
+        // seller's next statement and flag `settlementStatus = CLAWED_BACK`.
+        // NO automatic money movement. Per-row `update` because the increment
+        // differs by order.
+        for (const so of toCancel) {
+          if (so.settlementId === null) continue;
+          await tx.sellerOrder.update({
+            where: { id: so.id },
+            data: {
+              status: "CANCELLED",
+              updatedAt: new Date(),
+              commissionAmount: 0,
+              settlementStatus: "CLAWED_BACK",
+              settlementClawbackAmount: { increment: Math.max(0, so.total - so.commissionAmount) },
+            },
+          });
+        }
         cancelledSellerOrderIds = toCancel.map((s) => s.id);
       }
 

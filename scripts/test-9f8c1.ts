@@ -68,7 +68,12 @@ function staticTests() {
     })(),
   );
   ok("4 · seller path never touches Offer/OfferInventory/Inventory beyond the pre-existing restock call", !/tx\.inventory\.|tx\.offerInventory\.(create|update|delete)/.test(sellerRepo.slice(sellerRepo.indexOf("returnedValueBySellerOrder"), sellerRepo.indexOf("returnedValueBySellerOrder") + 1500)));
-  ok("scope · no schema markers, no PayMongo/payout/settlement code added", !/9F-8c\.1[\s\S]{0,50}schema/i.test(sellerRepo) && !/PAYMONGO_|payout|settlement/i.test(sellerRepo));
+  // 9F-8e legitimately adds a small settlement-clawback hook to this file
+  // (settlementStatus / settlementClawbackAmount when a SETTLED order is
+  // returned) — a sanctioned, reviewed change. What must still be absent is
+  // any REAL payout mechanism (PayMongo, bank/GCash transfer APIs, payout
+  // batches).
+  ok("scope · no PayMongo / real-payout code in the seller return repo", !/PAYMONGO_|payoutBatch|transport\.sendMail|bankTransfer/i.test(sellerRepo));
   ok("scope · scripts/seed-rbac.ts not referenced", !/seed-rbac/.test(sellerRepo));
   ok("scope · checkout.ts not touched by this phase", !/9F-8c/.test(read("src/lib/checkout.ts")));
 }
