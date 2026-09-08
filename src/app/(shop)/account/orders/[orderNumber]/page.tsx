@@ -5,7 +5,9 @@ import { ChevronLeft, RotateCcw } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { returnEligibility } from "@/lib/returns";
+import { isCancellable } from "@/lib/orders/status";
 import { OrderDetail } from "@/components/order/order-detail";
+import { CustomerCancelOrder } from "@/components/order/customer-cancel-order";
 import { buttonClasses } from "@/components/ui/button";
 
 export async function generateMetadata({
@@ -36,6 +38,7 @@ export default async function AccountOrderPage({
       </Link>
       <h2 className="text-subtitle">Order {order.orderNumber}</h2>
       <OrderDetail order={order} />
+      {isCancellable(order.status) && <CustomerCancelOrder orderNumber={order.orderNumber} />}
       <ReturnCallout orderNumber={orderNumber} elig={elig} orderStatus={order.status} />
     </div>
   );

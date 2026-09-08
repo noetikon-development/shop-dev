@@ -57,6 +57,7 @@
     "test:9f28b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f28b.ts",
     "test:9f29b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f29b.ts",
     "test:9f30b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f30b.ts",
+    "test:9f30d": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f30d.ts",
     "db:migrate:9e1": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260903130000_cartitem_offer_binding.sql",
     "db:migrate:9e2": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260903140000_cartitem_offer_uniqueness.sql",
     "reconcile:9e2": "node --env-file=.env --import tsx scripts/reconcile-cartitem-offer-9e2.ts",
