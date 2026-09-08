@@ -25,6 +25,7 @@ import { cleanUserText } from "@/lib/ugc";
 import {
   ensureFirstPartyOffer,
   syncFirstPartyOfferPrice,
+  syncFirstPartyOfferStatusToProduct,
   setFirstPartyOfferCondition,
 } from "@/lib/admin/offer-sync";
 import {
@@ -215,40 +216,51 @@ export async function updateProduct(
   }
 
   try {
-    await prisma.product.update({
-      where: { id },
-      data: {
-        name: data.name,
-        slug: data.slug,
-        shortDescription: data.shortDescription,
-        description: data.description,
-        categoryId: data.categoryId,
-        status: data.status,
-        featured: data.featured,
-        freeShipping: data.freeShipping,
-        price: data.price,
-        compareAtPrice: data.compareAtPrice ?? null,
-        weightGrams: data.weightGrams ?? 500,
-        // Informational marketing content — never affects price/SKU/stock/variants.
-        ...(content ? { specs: content.specs, highlights: content.highlights, care: content.care } : {}),
-      },
-    });
+    await prisma.$transaction(async (tx) => {
+      await tx.product.update({
+        where: { id },
+        data: {
+          name: data.name,
+          slug: data.slug,
+          shortDescription: data.shortDescription,
+          description: data.description,
+          categoryId: data.categoryId,
+          status: data.status,
+          featured: data.featured,
+          freeShipping: data.freeShipping,
+          price: data.price,
+          compareAtPrice: data.compareAtPrice ?? null,
+          weightGrams: data.weightGrams ?? 500,
+          // Informational marketing content — never affects price/SKU/stock/variants.
+          ...(content ? { specs: content.specs, highlights: content.highlights, care: content.care } : {}),
+        },
+      });
 
-    // Single-variant product: keep the default variant's price in step with the
-    // product price so the storefront (which reads the variant) matches.
-    if (existing.variants.length === 1) {
-      await prisma.variant.update({
-        where: { id: existing.variants[0].id },
-        data: { price: data.price, compareAtPrice: data.compareAtPrice ?? null },
-      });
-      // Phase 9D-A: the changed variant's Axiaro FIRST_PARTY offer follows.
-      // Multi-variant products change only Product.price here (no Variant.price
-      // changes), so no offer is affected — do not touch them.
-      await syncFirstPartyOfferPrice(existing.variants[0].id, {
-        price: data.price,
-        compareAtPrice: data.compareAtPrice ?? null,
-      });
-    }
+      // Single-variant product: keep the default variant's price in step with the
+      // product price so the storefront (which reads the variant) matches.
+      if (existing.variants.length === 1) {
+        await tx.variant.update({
+          where: { id: existing.variants[0].id },
+          data: { price: data.price, compareAtPrice: data.compareAtPrice ?? null },
+        });
+        // Phase 9D-A: the changed variant's Axiaro FIRST_PARTY offer follows.
+        // Multi-variant products change only Product.price here (no Variant.price
+        // changes), so no offer is affected — do not touch them.
+        await syncFirstPartyOfferPrice(
+          existing.variants[0].id,
+          { price: data.price, compareAtPrice: data.compareAtPrice ?? null },
+          tx,
+        );
+      }
+
+      // 9F-25A (G5): Product.status is authoritative for its FIRST_PARTY offers —
+      // when it changes, align every 1P offer across ALL of the product's
+      // variants (ACTIVE→ACTIVE, DRAFT→DRAFT, ARCHIVED→ARCHIVED). THIRD_PARTY
+      // offers, OfferInventory, price and condition are untouched.
+      if (existing.status !== data.status) {
+        await syncFirstPartyOfferStatusToProduct(id, data.status, tx);
+      }
+    });
   } catch (err) {
     console.error("[updateProduct]", err);
     return { error: "Could not save the product." };
@@ -276,17 +288,32 @@ export async function setProductStatus(
   if (!PRODUCT_STATUSES.includes(status as (typeof PRODUCT_STATUSES)[number])) {
     return { error: "Invalid status." };
   }
-  const product = await prisma.product.findUnique({ where: { id }, select: { name: true } });
+  const product = await prisma.product.findUnique({ where: { id }, select: { name: true, status: true } });
   if (!product) return { error: "That product no longer exists." };
 
-  await prisma.product.update({ where: { id }, data: { status } });
+  // 9F-25A (G5): the product status write + the FIRST_PARTY offer status sync are
+  // atomic — a live ACTIVE product must never be left with DRAFT 1P offers (or
+  // the reverse) by a half-applied change.
+  let firstPartyOffersSynced = 0;
+  try {
+    await prisma.$transaction(async (tx) => {
+      await tx.product.update({ where: { id }, data: { status } });
+      if (product.status !== status) {
+        firstPartyOffersSynced = await syncFirstPartyOfferStatusToProduct(id, status, tx);
+      }
+    });
+  } catch (err) {
+    console.error("[setProductStatus]", err);
+    return { error: "Could not change the product status." };
+  }
+
   await writeAudit({
     actorUserId: admin.user.id,
     action: status === "ARCHIVED" ? "catalog.product.archived" : "catalog.product.updated",
     targetType: "product",
     targetId: id,
     summary: `${admin.user.email} set “${product.name}” to ${status}`,
-    meta: { status },
+    meta: { status, firstPartyOffersSynced },
   });
   revalidateStorefront();
   return { ok: true, message: `Product ${status.toLowerCase()}.` };

@@ -281,6 +281,49 @@ export async function ensureFirstPartyOffer(
 }
 
 /**
+ * 9F-25A (G5) — keep every Axiaro FIRST_PARTY `Offer.status` in step with the
+ * catalog `Product.status`. `Product.status` is authoritative for its own 1P
+ * offers:
+ *
+ *   ACTIVE   → FIRST_PARTY offers ACTIVE
+ *   DRAFT    → FIRST_PARTY offers DRAFT
+ *   ARCHIVED → FIRST_PARTY offers ARCHIVED
+ *
+ * Called by `setProductStatus` and `updateProduct` whenever the product status
+ * changes. A single `updateMany` scoped to `seller.type = 'FIRST_PARTY'` and the
+ * product's variants:
+ *   - NEVER touches a THIRD_PARTY offer (a 3P seller on the same variant keeps
+ *     its own status — that plane is `setSellerOfferStatus` / `adminSetOfferStatus`);
+ *   - NEVER touches `Offer.id`, `OfferInventory`, price, condition, cost, SKU,
+ *     `handlingTimeDays`, or any seller/variant relationship — only `status`;
+ *   - NEVER creates an offer (drift where a variant has NO 1P offer is
+ *     `ensureFirstPartyOffer`'s job, at variant-creation time);
+ *   - is idempotent — `status: { not: target }` means an already-aligned offer
+ *     is not rewritten, so re-running (or a no-status-change product save) is a
+ *     zero-row no-op.
+ *
+ * Returns the number of 1P offers actually moved (0 when everything was already
+ * aligned).
+ */
+export async function syncFirstPartyOfferStatusToProduct(
+  productId: string,
+  productStatus: string,
+  tx: Tx = prisma,
+): Promise<number> {
+  const target =
+    productStatus === "ACTIVE" ? "ACTIVE" : productStatus === "ARCHIVED" ? "ARCHIVED" : "DRAFT";
+  const res = await tx.offer.updateMany({
+    where: {
+      variant: { is: { productId } },
+      seller: { is: { type: "FIRST_PARTY" } },
+      status: { not: target },
+    },
+    data: { status: target },
+  });
+  return res.count;
+}
+
+/**
  * 9F-23c — set the `condition` of the single Axiaro FIRST_PARTY Offer for a
  * variant, in place. This is the ONLY writer of a non-NEW condition onto a 1P
  * offer; it is driven by the CMS variant editor through `updateVariant`.
