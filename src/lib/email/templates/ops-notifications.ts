@@ -56,6 +56,65 @@ export function renderOrderReceivedOps(d: {
 }
 
 /**
+ * Ops notice — a THIRD_PARTY seller published a listing (offer → ACTIVE), so it
+ * is now buy-box-eligible on the storefront (9F-24D P1-7). Companion to the
+ * seller's own action; goes to the ops inbox only. Carries listing metadata
+ * (seller, product, option, price, condition) — no customer data.
+ */
+export function renderSellerOfferPublishedOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  sellerName: string;
+  productName: string;
+  optionLabel: string;
+  sku: string;
+  price: number;
+  condition: string;
+  publishedAt: Date;
+}) {
+  const when = `${d.publishedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Listing published: ${d.sellerName} — ${d.productName} (${peso(d.price)})`;
+  const rows =
+    kvRow("Seller", d.sellerName) +
+    kvRow("Product", d.productName) +
+    kvRow("Option", d.optionLabel) +
+    kvRow("SKU", d.sku) +
+    kvRow("Condition", d.condition) +
+    kvRow("Price", peso(d.price)) +
+    kvRow("Published", when, { last: true });
+  const body = `
+    ${heading("A seller published a listing")}
+    ${paragraph(`${d.sellerName} set a listing to Active on ${d.brand} — it is now visible to buyers on the storefront.`)}
+    ${infoBox(rows)}
+    ${paragraph("Review it against Axiaro's listing standards. To pull it, take the offer offline from the Offers area, or suspend the seller if it's serious.")}
+    ${button("Open the offers list", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A seller published a listing",
+      ``,
+      `${d.sellerName} set a listing to Active on ${d.brand} — it is now visible to buyers on the storefront.`,
+      ``,
+      `Seller: ${d.sellerName}`,
+      `Product: ${d.productName}`,
+      `Option: ${d.optionLabel}`,
+      `SKU: ${d.sku}`,
+      `Condition: ${d.condition}`,
+      `Price: ${peso(d.price)}`,
+      `Published: ${when}`,
+      ``,
+      "Review it against Axiaro's listing standards. To pull it, take the offer offline from the Offers area, or suspend the seller if it's serious.",
+      ``,
+      `Open the offers list: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
+
+/**
  * Ops alert — another transactional email FAILED or was SKIPPED for a delivery
  * reason (9F-18). Carries only operational metadata already held on the failed
  * `EmailLog` row: no customer/seller name, address, phone, full email, payout

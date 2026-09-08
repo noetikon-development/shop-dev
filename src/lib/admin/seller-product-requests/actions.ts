@@ -15,7 +15,10 @@ import {
   rejectRequest,
   linkExistingProduct,
 } from "@/lib/admin/seller-product-requests/repository";
-import { approveByCreatingProduct } from "@/lib/admin/seller-product-requests/create-canonical";
+import {
+  approveByCreatingProduct,
+  seedSellerDraftOffers,
+} from "@/lib/admin/seller-product-requests/create-canonical";
 import { promoteRequestImage } from "@/lib/admin/seller-product-requests/promote-image";
 import { pesosToCentavos } from "@/lib/admin/catalog-schemas";
 
@@ -45,9 +48,41 @@ function revalidate(requestId: string, sellerId?: string) {
   revalidatePath(`/admin/seller-product-requests/${requestId}`);
   if (sellerId) revalidatePath(`/admin/sellers/${sellerId}`);
   revalidatePath("/admin/audit");
+  revalidatePath("/admin/offers");
   revalidatePath(`/seller/product-requests/${requestId}`);
   revalidatePath("/seller/product-requests");
+  revalidatePath("/seller/offers");
   revalidatePath("/seller");
+}
+
+/**
+ * 9F-24D (P1-1) — after an approval, hand the proposing seller a set of DRAFT
+ * listings for the result product's ACTIVE variants + one audit row. Best-effort:
+ * a failure here never unwinds the approval (which already committed).
+ */
+async function seedAndAuditSellerDraftOffers(
+  adminUserId: string,
+  adminEmail: string,
+  requestId: string,
+  sellerId: string,
+  productId: string,
+  productName: string,
+) {
+  try {
+    const seeded = await seedSellerDraftOffers(sellerId, adminUserId, productId);
+    if (seeded.created.length > 0) {
+      await writeAudit({
+        actorUserId: adminUserId,
+        action: "seller_offer.seeded_from_request",
+        targetType: "seller_product_request",
+        targetId: requestId,
+        summary: `${adminEmail} created ${seeded.created.length} draft listing(s) for the seller from approved request "${productName}"`,
+        meta: { sellerId, productId, offerIds: seeded.created, skipped: seeded.skipped },
+      });
+    }
+  } catch (err) {
+    console.error("[seller-product-requests] seedSellerDraftOffers", err);
+  }
 }
 
 function revalidateStorefront() {
@@ -166,14 +201,28 @@ export async function linkExistingProductAction(
   });
   scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 
+  await seedAndAuditSellerDraftOffers(
+    admin.user.id,
+    admin.user.email,
+    parsed.data.requestId,
+    res.sellerId,
+    res.productId,
+    res.productName,
+  );
+
   revalidate(parsed.data.requestId, res.sellerId);
-  return { ok: true, message: `Linked to ${res.productSlug}. The seller can now list against it.` };
+  return { ok: true, message: `Linked to ${res.productSlug}. Draft listings are ready for the seller to price and stock.` };
 }
 
 // ---------------------------------------------------------------------------
 // Create a new canonical product from the request  (PENDING → APPROVED)
 // ---------------------------------------------------------------------------
 
+// 9F-24D P1-2 — no `status` field. A product created from a seller proposal is
+// ALWAYS a draft (see `approveByCreatingProduct`); the admin activates it later
+// from `/admin/products/[id]` once it's genuinely ready. This is what stops an
+// approval from creating an ACTIVE Axiaro (1P) offer against the seller's
+// proposed product.
 const createSchema = z.object({
   requestId: z.string().min(1).max(64),
   name: z.string().trim().min(2).max(160),
@@ -182,7 +231,6 @@ const createSchema = z.object({
   shortDescription: z.string().trim().min(1).max(300),
   description: z.string().trim().min(1).max(8000),
   categoryId: z.string().trim().min(1).max(64),
-  status: z.enum(["DRAFT", "ACTIVE"]),
   sku: z.string().trim().max(64).optional().or(z.literal("")),
   optionsJson: z.string().optional(),
   note: z.string().trim().max(2000).optional().or(z.literal("")),
@@ -201,7 +249,6 @@ export async function createProductFromRequestAction(
     shortDescription: formData.get("shortDescription"),
     description: formData.get("description"),
     categoryId: formData.get("categoryId"),
-    status: formData.get("status") ?? "DRAFT",
     sku: formData.get("sku") ?? "",
     optionsJson: formData.get("optionsJson") ?? "[]",
     note: formData.get("note") ?? "",
@@ -243,7 +290,6 @@ export async function createProductFromRequestAction(
     shortDescription: parsed.data.shortDescription,
     description: parsed.data.description,
     categoryId: parsed.data.categoryId,
-    status: parsed.data.status,
     price,
     compareAtPrice,
     weightGrams,
@@ -273,9 +319,18 @@ export async function createProductFromRequestAction(
   });
   scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 
+  await seedAndAuditSellerDraftOffers(
+    admin.user.id,
+    admin.user.email,
+    parsed.data.requestId,
+    res.sellerId,
+    res.productId,
+    res.productName,
+  );
+
   revalidateStorefront();
   revalidate(parsed.data.requestId, res.sellerId);
-  return { ok: true, message: `Created ${res.productSlug}. The seller can now list against it.` };
+  return { ok: true, message: `Created ${res.productSlug} as a draft. Draft listings are ready for the seller to price and stock.` };
 }
 
 // ---------------------------------------------------------------------------

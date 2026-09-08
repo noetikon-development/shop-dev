@@ -44,7 +44,7 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerReturnReceived,
@@ -525,6 +525,85 @@ export async function sendOrderReceivedOps(
     );
   } catch (err) {
     console.error("[email] sendOrderReceivedOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro Operations — a THIRD_PARTY seller published a listing (offer → ACTIVE),
+ * 9F-24D P1-7. `auditLogId` is the `adminAuditLog` row `setOfferStatusAction`
+ * (or the admin equivalent) wrote for the transition; its id anchors the
+ * idempotency key so a later, unrelated edit to the same Offer never collides
+ * with — or suppresses — this notice. FIRST_PARTY offers are skipped.
+ * Key: SELLER_OFFER_PUBLISHED:<offerId>:<auditLogId>.
+ */
+export async function sendSellerOfferPublishedOps(
+  offerId: string,
+  auditLogId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const offer = await db.offer.findUnique({
+      where: { id: offerId },
+      select: {
+        id: true,
+        price: true,
+        condition: true,
+        status: true,
+        updatedAt: true,
+        seller: { select: { displayName: true, type: true } },
+        variant: {
+          select: {
+            sku: true,
+            product: { select: { name: true } },
+            optionValues: {
+              select: {
+                optionValue: { select: { value: true, option: { select: { sortOrder: true } } } },
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!offer) return { ok: false, status: "FAILED", error: "offer_not_found" };
+    // Ops only cares about 3P listings — Axiaro's own listings aren't "published
+    // by a seller" in the sense this notice means.
+    if (offer.seller.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const optionLabel =
+      offer.variant.optionValues
+        .slice()
+        .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
+        .map((ov) => ov.optionValue.value)
+        .join(" · ") || "Default";
+
+    return renderAndDispatch(
+      {
+        type: "seller_offer_published",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `SELLER_OFFER_PUBLISHED:${offer.id}:${auditLogId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOfferPublishedOps({
+          brand,
+          siteUrl,
+          adminUrl: `${siteUrl}/admin/offers/${offer.id}`,
+          sellerName: offer.seller.displayName,
+          productName: offer.variant.product.name,
+          optionLabel,
+          sku: offer.variant.sku,
+          price: offer.price,
+          condition: conditionLabel(offer.condition),
+          publishedAt: offer.updatedAt,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOfferPublishedOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -1872,6 +1951,16 @@ export async function retryEmailByLog(
       const sellerId = parts[2];
       if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
       return sendSellerReturnReceived(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    // 9F-24D P1-7 — key: SELLER_OFFER_PUBLISHED:<offerId>:<auditLogId>. Both ids
+    // are parsed straight back out of the key; the offer row is re-read
+    // (deterministic). Retry reuses the same EmailLog row.
+    case "seller_offer_published": {
+      const parts = log.idempotencyKey.split(":");
+      const offerId = parts[1];
+      const auditLogId = parts[2];
+      if (!offerId || !auditLogId) return { ok: false, status: "FAILED", error: "no_offer" };
+      return sendSellerOfferPublishedOps(offerId, auditLogId, { retry: true, client: tx });
     }
     case "seller_settlement_recorded": {
       // Key: SETTLEMENT_RECORDED:<settlementId>. Deterministic re-read of the

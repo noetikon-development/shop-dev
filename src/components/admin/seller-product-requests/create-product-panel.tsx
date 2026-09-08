@@ -66,8 +66,9 @@ export function CreateProductPanel({
       <input type="hidden" name="optionsJson" value={optionsJson} />
       <p className="text-xs text-ink-faint">
         Curate these into Axiaro house style — the seller&rsquo;s wording is only a starting point.
-        The product is created as a <strong>draft</strong> and put on no storefront until you
-        activate it.
+        The product is created as a <strong>draft</strong> (on no storefront) and the proposing
+        seller gets DRAFT listings for its variants to price and stock. Activate the product from
+        its catalog page once it&rsquo;s ready.
       </p>
 
       <FormField label="Product name" htmlFor="cpr-name" required error={fe.name}>
@@ -106,24 +107,16 @@ export function CreateProductPanel({
         />
       </FormField>
 
-      <div className="grid gap-3 sm:grid-cols-2">
-        <FormField label="Category" htmlFor="cpr-cat" required error={fe.categoryId}>
-          <Select id="cpr-cat" name="categoryId" required defaultValue={proposal.categoryId ?? ""}>
-            <option value="">— choose —</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id} disabled={!c.active}>
-                {c.label}
-              </option>
-            ))}
-          </Select>
-        </FormField>
-        <FormField label="Status" htmlFor="cpr-status">
-          <Select id="cpr-status" name="status" defaultValue="DRAFT">
-            <option value="DRAFT">Draft (not on storefront)</option>
-            <option value="ACTIVE">Active</option>
-          </Select>
-        </FormField>
-      </div>
+      <FormField label="Category" htmlFor="cpr-cat" required error={fe.categoryId}>
+        <Select id="cpr-cat" name="categoryId" required defaultValue={proposal.categoryId ?? ""}>
+          <option value="">— choose —</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id} disabled={!c.active}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
+      </FormField>
 
       <div className="grid gap-3 sm:grid-cols-3">
         <FormField label="Price (₱)" htmlFor="cpr-price" required error={fe.price}>

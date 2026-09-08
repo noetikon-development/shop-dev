@@ -4,6 +4,9 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
+import { writeAudit } from "@/lib/admin/audit";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendSellerOfferPublishedOps } from "@/lib/email/notifications";
 import {
   createSellerOffer,
   updateSellerOffer,
@@ -25,6 +28,11 @@ import {
  * change what buyers see, so `setOfferStatusAction` revalidates the storefront
  * product cache for those transitions. Every other seller action still leaves
  * the storefront untouched.
+ *
+ * 9F-24D (P0-2 / P1-7): every real offer status transition writes one
+ * `adminAuditLog` row ("who moved which listing from X to Y, when"), and a
+ * `→ ACTIVE` publish also queues one ops notification so Axiaro knows a 3P
+ * listing went live. Both are best-effort and never block the seller's action.
  */
 
 export type SellerActionState = {
@@ -198,6 +206,34 @@ export async function setOfferStatusAction(
     revalidateTag("products", "max");
     revalidateTag("categories", "max");
   }
+
+  // 9F-24D (P0-2): audit the transition. `previousStatus === newStatus` is a
+  // no-op (the seller re-submitted the status it already had) — nothing to log.
+  if (res.previousStatus !== res.newStatus) {
+    const auditId = await writeAudit({
+      actorUserId: ctx.userId,
+      action: "seller_offer.status_changed",
+      targetType: "offer",
+      targetId: parsed.data.offerId,
+      summary: `${ctx.sellerName} moved listing "${res.productName}" (${res.variantSku}) ${res.previousStatus} → ${res.newStatus}`,
+      meta: {
+        actor: "seller",
+        sellerId: ctx.sellerId,
+        offerId: parsed.data.offerId,
+        variantId: res.variantId,
+        from: res.previousStatus,
+        to: res.newStatus,
+        storefrontAffected: res.storefrontAffected,
+      },
+    });
+    // 9F-24D (P1-7): a listing going live is worth an ops heads-up. The audit
+    // row id anchors the idempotency key (never `Offer.updatedAt`, which this
+    // very write also bumps). The sender no-ops for a FIRST_PARTY offer.
+    if (res.newStatus === "ACTIVE" && auditId) {
+      scheduleEmail(() => sendSellerOfferPublishedOps(parsed.data.offerId, auditId));
+    }
+  }
+
   const verb =
     parsed.data.status === "ACTIVE"
       ? "published — it's now live"

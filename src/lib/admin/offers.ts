@@ -1,16 +1,21 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import {
+  offerPublishBlockers,
+  OFFER_PUBLISH_BLOCKER_MESSAGE,
+} from "@/lib/marketplace/seller-repository";
+import { isMultiSellerCheckoutEnabled } from "@/lib/marketplace/marketplace-settings";
 
 /**
  * Admin cross-seller Offer read layer (Phase 9F-8d.1).
  *
  * READ-ONLY — no write function lives here, and nothing here ever activates,
- * modifies, or deletes an Offer. `listSellerOffersForAdmin`
- * (`src/lib/admin/sellers/repository.ts`) is scoped to one seller (used on
- * `/admin/sellers/[id]`); this is the cross-seller counterpart an operator
- * needs to see every seller's listings in one place, filterable by seller and
- * status, before/after marketplace activation.
+ * modifies, or deletes an Offer (that is `src/lib/admin/offer-status.ts`, added
+ * in 9F-24D). `listSellerOffersForAdmin` (`src/lib/admin/sellers/repository.ts`)
+ * is scoped to one seller (used on `/admin/sellers/[id]`); this is the
+ * cross-seller counterpart an operator needs to see every seller's listings in
+ * one place, filterable by seller and status.
  */
 
 export const ADMIN_OFFERS_PAGE_SIZE = 50;
@@ -99,6 +104,113 @@ export async function listAllOffersForAdmin(filters: AdminOfferListFilters): Pro
     page,
     pageSize: ADMIN_OFFERS_PAGE_SIZE,
     pageCount: Math.max(1, Math.ceil(total / ADMIN_OFFERS_PAGE_SIZE)),
+  };
+}
+
+export type AdminOfferDetail = {
+  id: string;
+  sellerId: string;
+  sellerName: string;
+  sellerType: string;
+  sellerStatus: string;
+  productId: string;
+  productName: string;
+  productSlug: string;
+  productStatus: string;
+  variantSku: string;
+  variantStatus: string;
+  optionLabel: string;
+  sellerSku: string | null;
+  condition: string;
+  price: number;
+  compareAtPrice: number | null;
+  handlingTimeDays: number;
+  status: string;
+  quantity: number;
+  reserved: number;
+  available: number;
+  reorderPoint: number;
+  updatedAt: string;
+  /** empty when the offer is already ACTIVE; otherwise the reasons it can't go ACTIVE */
+  publishBlockers: string[];
+};
+
+/** One offer, cross-seller, with everything `/admin/offers/[id]` needs. */
+export async function getAdminOfferDetail(offerId: string): Promise<AdminOfferDetail | null> {
+  const o = await prisma.offer.findUnique({
+    where: { id: offerId },
+    select: {
+      id: true,
+      sellerId: true,
+      condition: true,
+      status: true,
+      price: true,
+      compareAtPrice: true,
+      handlingTimeDays: true,
+      sellerSku: true,
+      updatedAt: true,
+      seller: { select: { displayName: true, type: true, status: true } },
+      variant: {
+        select: {
+          sku: true,
+          status: true,
+          product: { select: { id: true, name: true, slug: true, status: true } },
+          optionValues: {
+            select: { optionValue: { select: { value: true, option: { select: { sortOrder: true } } } } },
+          },
+        },
+      },
+      inventory: { select: { quantity: true, reserved: true, reorderPoint: true } },
+    },
+  });
+  if (!o) return null;
+
+  const quantity = o.inventory?.quantity ?? 0;
+  const reserved = o.inventory?.reserved ?? 0;
+  const available = Math.max(0, quantity - reserved);
+  const marketplaceOpen = await isMultiSellerCheckoutEnabled();
+  const publishBlockers =
+    o.status === "ACTIVE"
+      ? []
+      : offerPublishBlockers({
+          offerStatus: o.status,
+          sellerStatus: o.seller.status,
+          marketplaceOpen,
+          productStatus: o.variant.product.status,
+          variantStatus: o.variant.status,
+          available,
+        }).map((b) => OFFER_PUBLISH_BLOCKER_MESSAGE[b]);
+
+  return {
+    id: o.id,
+    sellerId: o.sellerId,
+    sellerName: o.seller.displayName,
+    sellerType: o.seller.type,
+    sellerStatus: o.seller.status,
+    productId: o.variant.product.id,
+    productName: o.variant.product.name,
+    productSlug: o.variant.product.slug,
+    productStatus: o.variant.product.status,
+    variantSku: o.variant.sku,
+    variantStatus: o.variant.status,
+    optionLabel:
+      o.variant.optionValues
+        .slice()
+        .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
+        .map((ov) => ov.optionValue.value)
+        .join(" · ") || "Default",
+    sellerSku: o.sellerSku,
+    condition: o.condition,
+    price: o.price,
+    compareAtPrice: o.compareAtPrice,
+    handlingTimeDays: o.handlingTimeDays,
+    status: o.status,
+    quantity,
+    reserved,
+    available,
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
+    updatedAt: o.updatedAt.toISOString(),
+    publishBlockers,
   };
 }
 

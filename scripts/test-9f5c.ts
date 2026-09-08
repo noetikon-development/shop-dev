@@ -352,7 +352,15 @@ async function staticTests() {
   // 46-48 — gates
   ok("46 · nothing here flips marketplace.multiSellerCheckout", !/multiSellerCheckout/.test(actions + create + repo + promote));
   ok("47 · nothing here touches PayMongo / Payment / webhooks", !/paymongo|PaymentRefund|webhookEvent/i.test(actions + create + repo + promote));
-  ok("16/48 · product created as DRAFT by default (no storefront exposure on approval)", /status: z\.enum\(\["DRAFT", "ACTIVE"\]\)/.test(actions) && /defaultValue="DRAFT"/.test(read("src/components/admin/seller-product-requests/create-product-panel.tsx")));
+  // 9F-24D P1-2 — a product from a seller proposal is ALWAYS created DRAFT (no
+  // ACTIVE option in the schema, the form, or the create-canonical call), so an
+  // approval can never mint an ACTIVE Axiaro 1P offer against the proposal.
+  ok(
+    "16/48 · product from a proposal is always DRAFT (no ACTIVE path anywhere)",
+    !/status: z\.enum\(\["DRAFT", "ACTIVE"\]\)/.test(actions) &&
+      /status: "DRAFT"/.test(create) &&
+      !/name="status"/.test(read("src/components/admin/seller-product-requests/create-product-panel.tsx")),
+  );
   ok("48 · storefront libs never import the admin request code", ["src/lib/data.ts", "src/lib/cart.ts", "src/lib/checkout.ts"].every((f) => !/seller-product-request/.test(read(f))));
 
   // Part 5 — proposed options inside the existing JSON, no migration

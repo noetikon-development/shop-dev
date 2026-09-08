@@ -60,7 +60,7 @@ export default async function AdminOffersPage({
       key: "product",
       header: "Product",
       cell: (r) => (
-        <Link href={`/admin/products/${r.productId}`} className="text-ink hover:underline">
+        <Link href={`/admin/offers/${r.id}`} className="text-ink hover:underline">
           {r.productName}
         </Link>
       ),
@@ -74,13 +74,22 @@ export default async function AdminOffersPage({
       header: "Status",
       cell: (r) => <StatusBadge tone={offerStatusTone(r.status)}>{r.status}</StatusBadge>,
     },
+    {
+      key: "manage",
+      header: "",
+      cell: (r) => (
+        <Link href={`/admin/offers/${r.id}`} className="text-xs text-clay hover:underline">
+          Manage
+        </Link>
+      ),
+    },
   ];
 
   return (
     <div>
       <PageHeader
         title="Offers"
-        description="Every seller's catalog listings, across every seller. Read-only — activation still requires marketplace.multiSellerCheckout and the seller's own offer status transition."
+        description="Every seller's catalog listings, across every seller. Open a listing to change its status — publish a seller's ready draft, or pull a live one — without touching their price, condition or stock."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-3">

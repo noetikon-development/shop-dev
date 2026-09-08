@@ -384,8 +384,23 @@ export type MutateSellerOfferResult = { ok: true } | SellerRepoError;
  * 9F-24A — `setSellerOfferStatus` result. `storefrontAffected` is true iff the
  * transition changed the offer's buy-box visibility (from or to `ACTIVE`), so
  * the caller can revalidate the storefront cache only when it matters.
+ *
+ * 9F-24D (P0-2) — the result also carries `previousStatus` / `newStatus` (equal
+ * on a no-op) plus a little offer context, so the caller can write ONE audit row
+ * for the transition. A status change to a customer-visible listing must leave a
+ * trace of who did it and when.
  */
-export type SetOfferStatusResult = { ok: true; storefrontAffected: boolean } | SellerRepoError;
+export type SetOfferStatusResult =
+  | {
+      ok: true;
+      storefrontAffected: boolean;
+      previousStatus: OfferStatus;
+      newStatus: OfferStatus;
+      variantId: string;
+      productName: string;
+      variantSku: string;
+    }
+  | SellerRepoError;
 
 /** Edit an Offer's commercial terms. Ownership re-checked inside the tx. */
 export async function updateSellerOffer(
@@ -520,12 +535,32 @@ export async function setSellerOfferStatus(
         id: true,
         status: true,
         seller: { select: { status: true } },
-        variant: { select: { status: true, product: { select: { status: true } } } },
+        variant: {
+          select: {
+            id: true,
+            sku: true,
+            status: true,
+            product: { select: { status: true, name: true } },
+          },
+        },
         inventory: { select: { quantity: true, reserved: true } },
       },
     });
     if (!offer) return { ok: false, code: "NOT_FOUND", error: "No such offer for this seller." };
-    if (offer.status === next) return { ok: true, storefrontAffected: false };
+    const offerContext = {
+      variantId: offer.variant.id,
+      productName: offer.variant.product.name,
+      variantSku: offer.variant.sku,
+    };
+    if (offer.status === next) {
+      return {
+        ok: true,
+        storefrontAffected: false,
+        previousStatus: offer.status as OfferStatus,
+        newStatus: next,
+        ...offerContext,
+      };
+    }
     if (offer.status === "ARCHIVED") {
       return { ok: false, code: "VALIDATION", error: "An archived offer can't be reactivated." };
     }
@@ -562,7 +597,13 @@ export async function setSellerOfferStatus(
 
     await tx.offer.update({ where: { id: offerId }, data: { status: next } });
     // Buy-box visibility changed iff the offer was ACTIVE or becomes ACTIVE.
-    return { ok: true, storefrontAffected: offer.status === "ACTIVE" || next === "ACTIVE" };
+    return {
+      ok: true,
+      storefrontAffected: offer.status === "ACTIVE" || next === "ACTIVE",
+      previousStatus: offer.status as OfferStatus,
+      newStatus: next,
+      ...offerContext,
+    };
   };
 
   try {

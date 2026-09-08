@@ -6,6 +6,8 @@ import { productCreateSchema, productOptionsSchema } from "@/lib/admin/catalog-s
 import { generateProductSlug, generateVariantSku } from "@/lib/admin/catalog";
 import { ensureFirstPartyOffer } from "@/lib/admin/offer-sync";
 import { regenerateVariants } from "@/lib/admin/variants";
+import { createSellerOffer } from "@/lib/marketplace/seller-repository";
+import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
  * Phase 9F-5c Part 4 — create a canonical Product from a PENDING
@@ -20,11 +22,15 @@ import { regenerateVariants } from "@/lib/admin/variants";
  * Side effects — IDENTICAL to the existing Axiaro product-creation flow
  * (`createProduct` + `saveProductOptions` in src/lib/admin/catalog-actions.ts),
  * which 9E-3D did not touch:
- *   - Product                     — 1 row (status = curated.status, default DRAFT)
+ *   - Product                     — 1 row, ALWAYS status DRAFT (9F-24D P1-2 —
+ *                                   a product born from a seller proposal is
+ *                                   never auto-published; Axiaro activates it
+ *                                   explicitly later, which is also what keeps
+ *                                   the Axiaro FIRST_PARTY offer out of ACTIVE)
  *   - Variant                     — the default variant, then the option cartesian
  *   - Inventory                   — 1 birth-record row per variant, quantity 0
  *                                   (never an InventoryAdjustment)
- *   - Offer (FIRST_PARTY, NEW)    — 1 per variant, DRAFT unless product ACTIVE
+ *   - Offer (FIRST_PARTY, NEW)    — 1 per variant, DRAFT (product is DRAFT)
  *   - OfferInventory              — 1 per variant, quantity 0
  *   - OfferAdjustment             — 1 MIGRATION_OPENING per variant, delta 0
  *   - SellerProductRequest        — status PENDING → APPROVED, resultProductId set
@@ -33,6 +39,11 @@ import { regenerateVariants } from "@/lib/admin/variants";
  * operational authority. Compatible with the 9E-3D-7 freeze (the observation
  * monitor's Inventory-mutation heuristic surfaces the birth-record row as an
  * advisory line — it is a creation, not a rewrite of a frozen quantity).
+ *
+ * 9F-24D (P1-1): the proposing seller's own THIRD_PARTY draft listings are
+ * seeded separately by `seedSellerDraftOffers` (called from `actions.ts` after
+ * this returns), so an approval leaves the seller with editable DRAFT offers to
+ * price and stock — not an empty "create listing" form.
  */
 
 const SWATCH_HINTS: Record<string, string> = {
@@ -49,7 +60,6 @@ export type CuratedProduct = {
   shortDescription: string;
   description: string;
   categoryId: string;
-  status: string;
   price: number;
   compareAtPrice?: number | null;
   weightGrams?: number;
@@ -97,7 +107,11 @@ export async function approveByCreatingProduct(
     shortDescription: curated.shortDescription,
     description: curated.description,
     categoryId: curated.categoryId,
-    status: curated.status,
+    // 9F-24D P1-2 — always DRAFT. A product created from a seller proposal is
+    // never born customer-visible; this is also what keeps its Axiaro
+    // FIRST_PARTY offer out of ACTIVE (ensureFirstPartyOffer mirrors the
+    // product status).
+    status: "DRAFT",
     featured: curated.featured ?? false,
     freeShipping: curated.freeShipping ?? false,
     price: curated.price,
@@ -264,4 +278,70 @@ export async function approveByCreatingProduct(
   }
 
   return { ok: true, variantGenDeferred, ...outcome };
+}
+
+// ---------------------------------------------------------------------------
+// 9F-24D (P1-1) — seed the proposing seller's own draft listings
+// ---------------------------------------------------------------------------
+
+type SeedClient = Prisma.TransactionClient | typeof prisma;
+
+export type SeedSellerDraftOffersResult = {
+  /** Offer ids created for the seller (DRAFT, THIRD_PARTY, condition NEW). */
+  created: string[];
+  /** Variants where the seller already had an offer for this condition. */
+  skipped: number;
+};
+
+/**
+ * After a request is APPROVED (new product created, or linked to an existing
+ * one), give the proposing seller a `DRAFT` THIRD_PARTY offer for every ACTIVE
+ * variant of the result product — pre-filled from the catalog price, zero
+ * opening stock. The seller then only has to set their price and stock, instead
+ * of hunting for the product in an empty "create listing" form.
+ *
+ * Reuses `createSellerOffer` (the sanctioned seller-plane path) with a synthetic
+ * `SellerContext` for the proposing seller — it does its own dedupe on
+ * `(sellerId, variantId, condition)`, so calling this twice (or after the seller
+ * already listed one variant) is safe. Best-effort: a per-variant failure is
+ * logged and skipped, never thrown.
+ *
+ * Pass a transaction client for tests (each `createSellerOffer` then runs inside
+ * it); production callers omit it and each offer gets its own transaction.
+ */
+export async function seedSellerDraftOffers(
+  sellerId: string,
+  actorUserId: string,
+  productId: string,
+  client: SeedClient = prisma,
+): Promise<SeedSellerDraftOffersResult> {
+  const txArg = client === prisma ? undefined : (client as Prisma.TransactionClient);
+  const ctx: SellerContext = {
+    sellerId,
+    sellerName: "",
+    sellerUserId: actorUserId,
+    userId: actorUserId,
+    role: "OWNER",
+    permissions: new Set<string>(),
+  };
+
+  const variants = await client.variant.findMany({
+    where: { productId, status: "ACTIVE" },
+    select: { id: true, price: true },
+  });
+
+  const created: string[] = [];
+  let skipped = 0;
+  for (const v of variants) {
+    if (!Number.isInteger(v.price) || v.price <= 0) continue;
+    const res = await createSellerOffer(
+      ctx,
+      { variantId: v.id, price: v.price, condition: "NEW", openingQuantity: 0, reorderPoint: 3 },
+      txArg,
+    );
+    if (res.ok) created.push(res.offerId);
+    else if (res.code === "CONFLICT") skipped += 1;
+    else console.error("[seedSellerDraftOffers] createSellerOffer failed", v.id, res.error);
+  }
+  return { created, skipped };
 }
