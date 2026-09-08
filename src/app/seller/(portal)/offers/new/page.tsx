@@ -158,7 +158,12 @@ export default async function AddSellerListingPage({
             ) : variants.length === 0 ? (
               <EmptyState
                 title="Nothing to list here"
-                description="Nothing in the catalog matches — or you already list every match. If Axiaro doesn't carry your product yet, requesting a new one opens in a later phase."
+                description="Nothing in the catalog matches — or you already list every match. If Axiaro doesn't carry your product yet, request it."
+                action={
+                  <Link href="/seller/product-requests/new" className="btn btn-outline py-1.5 text-xs">
+                    Request a product
+                  </Link>
+                }
                 compact
               />
             ) : (

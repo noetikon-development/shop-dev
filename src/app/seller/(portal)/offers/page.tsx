@@ -49,10 +49,11 @@ export default async function SellerOffersPage({
           label="Status"
           paramKey="status"
           options={[
+            // Lifecycle order (9F-29C): "All" is prepended by FilterSelect.
             { value: "DRAFT", label: "Draft" },
+            { value: "ACTIVE", label: "Active" },
             { value: "INACTIVE", label: "Inactive" },
             { value: "ARCHIVED", label: "Archived" },
-            { value: "ACTIVE", label: "Active" },
           ]}
         />
       </FilterBar>

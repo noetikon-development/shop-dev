@@ -11,8 +11,9 @@ import { CheckCircle2, X } from "lucide-react";
  * every seller route on Seller.status === "APPROVED" + an ACTIVE membership), so
  * a SUSPENDED / CLOSED seller never renders this.
  *
- * Copy deliberately stops at "prepare your listings" — it must not imply the
- * storefront shows seller offers, because marketplace.multiSellerCheckout is off.
+ * The 3P marketplace is open (marketplace.multiSellerCheckout is on): an APPROVED
+ * seller can list against the catalog AND publish those listings, which buyers
+ * can then purchase. The copy says exactly that.
  */
 
 const KEY = "axr_seller_approved_ack_dismissed";
@@ -53,8 +54,8 @@ export function SellerApprovedBanner({ sellerName }: { sellerName: string }) {
       <div className="min-w-0 flex-1">
         <p className="font-medium text-ink">Your {sellerName} seller account is approved and ready.</p>
         <p className="mt-0.5 text-ink-soft">
-          You can now prepare your product listings on Axiaro — set them up as drafts and manage your
-          stock. Axiaro will let you know when customer checkout opens for sellers.
+          List against the Axiaro catalog and publish a listing when it&rsquo;s ready — buyers can
+          purchase from your published listings.
         </p>
       </div>
       <button

@@ -118,7 +118,7 @@ export function OfferCreateForm({
           Create listing
         </button>
         <span className="text-xs text-ink-faint">
-          New listings are saved as a draft — publishing to buyers opens later.
+          New listings are saved as drafts — publish it from the listing page when it&rsquo;s ready.
         </span>
       </div>
     </form>

@@ -2,9 +2,9 @@
  * The seller-portal information architecture — the single source of truth for
  * the `/seller` sidebar and breadcrumbs. Plain data; safe to import anywhere.
  *
- * Deliberately small in 9F-1: the portal foundation is Dashboard + Offers. Seller
- * orders / fulfilment / returns / settings / users land in later phases and are
- * added here one line at a time.
+ * The portal now covers Dashboard, Listings, Product requests, Orders /
+ * fulfilment, Returns, Settlements and Settings — every route below has a real
+ * screen. New routes are still added here one line at a time.
  */
 
 export type SellerRoute = {
