@@ -125,10 +125,12 @@ function staticTests() {
   // invariant / scope guards
   ok("schema · @@unique([sellerId, variantId, condition]) unchanged",
     /@@unique\(\[sellerId, variantId, condition\]\)/.test(read("prisma/schema.prisma")) && !/9F-23b/.test(read("prisma/schema.prisma")));
-  ok("scope · no CMS/admin condition selector added (product-variants.tsx)",
-    !/9F-23b/.test(read("src/components/admin/catalog/product-variants.tsx")) && !/conditionLabel|name="condition"/.test(read("src/components/admin/catalog/product-variants.tsx")));
-  ok("scope · updateVariant / catalog-actions not given a 1P condition control",
-    !/9F-23b/.test(read("src/lib/admin/variants.ts")) && !/setFirstPartyOfferCondition/.test(read("src/lib/admin/catalog-actions.ts")));
+  // 9F-23b itself added no CMS control (the marker check still holds); the
+  // Condition selector + setFirstPartyOfferCondition arrived in 9F-23c, verified
+  // by test-9f23c.ts.
+  ok("scope · product-variants.tsx not touched by 9F-23b", !/9F-23b/.test(read("src/components/admin/catalog/product-variants.tsx")));
+  ok("scope · catalog-actions.ts not touched by 9F-23b (9F-23c owns the 1P condition control)",
+    !/9F-23b/.test(read("src/lib/admin/variants.ts")) && !/9F-23b/.test(read("src/lib/admin/catalog-actions.ts")));
   ok("scope · checkout / OrderItem snapshot untouched", !/9F-23b/.test(read("src/lib/checkout.ts")));
   ok("scope · buy-box / seller 3P repo untouched",
     !/9F-23b/.test(read("src/lib/marketplace/buy-box-rule.ts")) && !/9F-23b/.test(read("src/lib/marketplace/seller-repository.ts")));

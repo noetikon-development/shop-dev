@@ -33,7 +33,7 @@ export default async function EditProductPage({
   };
 
   return (
-    <div className="mx-auto max-w-3xl">
+    <div className="mx-auto max-w-4xl">
       <PageHeader
         title={product.name}
         description={`/p/${product.slug} · ${product.category.name}`}
@@ -95,6 +95,11 @@ export default async function EditProductPage({
           price: v.price,
           compareAtPrice: v.compareAtPrice,
           status: v.status,
+          // 9F-23c: the one Axiaro FIRST_PARTY offer's condition (NEW if the
+          // offer is missing; `hasMultipleOffers` disables the selector when the
+          // one-per-variant invariant is somehow broken).
+          condition: v.offers[0]?.condition ?? "NEW",
+          hasMultipleOffers: v.offers.length > 1,
           optionValueIds: v.optionValues.map((ov) => ov.optionValueId),
           orderItemCount: v._count.orderItems,
         }))}

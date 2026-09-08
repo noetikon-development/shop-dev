@@ -1,6 +1,7 @@
 import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { OFFER_CONDITIONS } from "@/lib/admin/catalog-schemas";
 
 /**
  * FIRST_PARTY (Axiaro) admin inventory authority.
@@ -277,4 +278,72 @@ export async function ensureFirstPartyOffer(
       },
     });
   }
+}
+
+/**
+ * 9F-23c — set the `condition` of the single Axiaro FIRST_PARTY Offer for a
+ * variant, in place. This is the ONLY writer of a non-NEW condition onto a 1P
+ * offer; it is driven by the CMS variant editor through `updateVariant`.
+ *
+ * Model B: ONE FIRST_PARTY offer per variant, condition an editable attribute.
+ * The existing `Offer` row is UPDATEd — same `Offer.id`, same `OfferInventory`,
+ * same `OfferAdjustment` history, same `CartItem.offerId` / `OrderItem.offerId`
+ * bindings. Never creates a second offer; `@@unique([sellerId, variantId,
+ * condition])` is untouched (there is only one 1P offer, so no collision).
+ *
+ * Guards (returns `{ ok:false, error }`, never throws for these — caller shows
+ * `error` verbatim):
+ *   - unknown condition value → rejected
+ *   - zero FIRST_PARTY offer for the variant → safe failure
+ *   - more than one FIRST_PARTY offer → safe failure (never an arbitrary pick;
+ *     same fail-safe pattern as `lockFirstPartyOfferInventory`, 9F-23b)
+ *   - the product is ACTIVE → rejected ("Set this product to Draft…") so a live
+ *     customer's listing can't silently flip New → Refurbished. Historical
+ *     `OrderItem.condition` snapshots are irrelevant and never touched.
+ *
+ * A no-op (condition already equals the target) succeeds without a write, even
+ * for an ACTIVE product.
+ */
+export async function setFirstPartyOfferCondition(
+  variantId: string,
+  condition: string,
+  tx: Prisma.TransactionClient,
+): Promise<
+  | { ok: true; previous: string; changed: boolean }
+  | { ok: false; error: string }
+> {
+  if (!(OFFER_CONDITIONS as readonly string[]).includes(condition)) {
+    return { ok: false, error: "That isn’t a condition we recognise." };
+  }
+
+  const rows = await tx.$queryRaw<
+    { id: string; condition: string; productStatus: string }[]
+  >`
+    SELECT o."id", o."condition", p."status" AS "productStatus"
+    FROM "Offer" o
+    JOIN "Seller" s ON s."id" = o."sellerId"
+    JOIN "Variant" v ON v."id" = o."variantId"
+    JOIN "Product" p ON p."id" = v."productId"
+    WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY'
+    FOR UPDATE OF o
+    LIMIT 2`;
+
+  if (rows.length === 0) return { ok: false, error: "No Axiaro listing exists for that variant." };
+  if (rows.length > 1) {
+    return {
+      ok: false,
+      error: "This variant has more than one Axiaro listing — resolve that before changing its condition.",
+    };
+  }
+
+  const offer = rows[0];
+  if (offer.condition === condition) {
+    return { ok: true, previous: offer.condition, changed: false };
+  }
+  if (offer.productStatus === "ACTIVE") {
+    return { ok: false, error: "Set this product to Draft before changing its condition." };
+  }
+
+  await tx.offer.update({ where: { id: offer.id }, data: { condition } });
+  return { ok: true, previous: offer.condition, changed: true };
 }

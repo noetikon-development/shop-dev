@@ -240,33 +240,32 @@ function cardPricing(p: CardRow): { price: number; compareAtPrice: number | null
 }
 
 /**
- * 9F-22: the condition to badge on the card — the condition of the product's
- * cheapest winning offer, but ONLY when it is non-NEW. Uses the SAME shared
- * `resolveWinningOfferView` rule as the PDP / cart (no change to `rankOffers`),
- * over already-loaded rows (no extra query). `null` → no chip (the NEW norm).
+ * 9F-22 / 9F-23c: the condition to badge on the card — the condition of the
+ * product's SINGLE winning offer, ONLY when it is non-NEW. Resolved across the
+ * product's WHOLE offer pool (every variant's offers together) with the SAME
+ * shared `resolveWinningOfferView` rule the PDP / cart bind to — so the chip
+ * always names the exact offer a customer lands on, never an arbitrary
+ * per-variant pick on a price tie. `rankOffers` is untouched. `null` → no chip
+ * (the NEW norm). Same logic as `pdpCondition` in `loadProductBySlug`.
  */
 function cardCondition(variants: { offers: CardOfferRow[] }[]): string | null {
-  let cheapest: { price: number; condition: string } | null = null;
-  for (const v of variants) {
-    const candidates: FullOfferCandidate[] = v.offers.map((o) => ({
-      offerId: o.id,
-      sellerId: "",
-      sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
-      sellerStatus: o.seller.status as FullOfferCandidate["sellerStatus"],
-      offerStatus: o.status as FullOfferCandidate["offerStatus"],
-      available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
-      reorderPoint: o.inventory?.reorderPoint ?? 0,
-      price: o.price,
-      compareAtPrice: o.compareAtPrice,
-      createdAt: o.createdAt,
-    }));
-    const win = resolveWinningOfferView(candidates);
-    if (!win) continue;
-    const row = v.offers.find((o) => o.id === win.offerId);
-    if (!row) continue;
-    if (!cheapest || win.price < cheapest.price) cheapest = { price: win.price, condition: row.condition };
-  }
-  return cheapest && cheapest.condition !== "NEW" ? cheapest.condition : null;
+  const allOffers = variants.flatMap((v) => v.offers);
+  const candidates: FullOfferCandidate[] = allOffers.map((o) => ({
+    offerId: o.id,
+    sellerId: "",
+    sellerType: o.seller.type === "FIRST_PARTY" ? "FIRST_PARTY" : "THIRD_PARTY",
+    sellerStatus: o.seller.status as FullOfferCandidate["sellerStatus"],
+    offerStatus: o.status as FullOfferCandidate["offerStatus"],
+    available: Math.max(0, (o.inventory?.quantity ?? 0) - (o.inventory?.reserved ?? 0)),
+    reorderPoint: o.inventory?.reorderPoint ?? 0,
+    price: o.price,
+    compareAtPrice: o.compareAtPrice,
+    createdAt: o.createdAt,
+  }));
+  const win = resolveWinningOfferView(candidates);
+  if (!win) return null;
+  const row = allOffers.find((o) => o.id === win.offerId);
+  return row && row.condition !== "NEW" ? row.condition : null;
 }
 
 function toCard(p: CardRow): ProductCardView {
@@ -907,16 +906,18 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     console.error(msg);
   }
 
-  // 9F-22: the card-level condition chip — the cheapest resolved winner's
-  // condition, ONLY when non-NEW. Per-variant condition is on variants[].
+  // 9F-22 / 9F-23c: the product-level condition chip — the condition of the
+  // SINGLE winning offer across the whole pool (every ACTIVE variant's offers),
+  // via the same `resolveWinningOfferView` rule that binds the PDP / cart. Not a
+  // per-variant cheapest pick — that diverged from the real winner on a price
+  // tie. Identical logic to `cardCondition`, so PLP and PDP agree. `rankOffers`
+  // unchanged. Per-variant condition stays on `variants[].offerCondition`.
   const pdpCondition = (() => {
-    let cheapest: { price: number; condition: string | null } | null = null;
-    for (const v of activeVariants) {
-      const r = resolvedByVariant.get(v.id)!;
-      if (r.price == null) continue;
-      if (!cheapest || r.price < cheapest.price) cheapest = { price: r.price, condition: r.offerCondition };
-    }
-    return cheapest && cheapest.condition && cheapest.condition !== "NEW" ? cheapest.condition : null;
+    const allOffers = activeVariants.flatMap((v) => v.offers);
+    const win = resolveWinningOfferView(allOffers.map(fullCandidate));
+    if (!win) return null;
+    const row = allOffers.find((o) => o.id === win.offerId);
+    return row && row.condition !== "NEW" ? row.condition : null;
   })();
 
   return {

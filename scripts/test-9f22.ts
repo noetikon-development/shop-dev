@@ -102,7 +102,7 @@ function staticTests() {
 
   // 7 — card + PDP
   ok("data · card select adds condition: true (winner + facet queries)", (data.match(/condition: true,\s*\n\s*seller: \{ select: \{ type: true, status: true \} \}/g) ?? []).length >= 2);
-  ok("data · cardCondition uses resolveWinningOfferView + non-NEW gate", /function cardCondition\([\s\S]{0,900}resolveWinningOfferView\(candidates\)[\s\S]{0,300}cheapest\.condition !== "NEW"/.test(data));
+  ok("data · cardCondition uses resolveWinningOfferView + non-NEW gate (9F-23c: whole-pool winner)", /function cardCondition\([\s\S]{0,900}resolveWinningOfferView\(candidates\)[\s\S]{0,200}row\.condition !== "NEW"/.test(data));
   ok("data · ProductCardView gets a `condition` field", /condition,\s*\n\s*defaultVariantId:/.test(data));
   ok("card · renders a chip only when product.condition is set", /\{product\.condition && \(\s*<span[\s\S]{0,200}conditionLabel\(product\.condition\)\}/.test(card));
   ok("pdp · seller-info condition row gated on isNoteworthyCondition", /isNoteworthyCondition\(matchedVariant\.offerCondition\)/.test(pdp) && !/\{matchedVariant\.offerCondition && \(/.test(pdp));

@@ -72,7 +72,7 @@ function staticTests() {
   ok("8 · admin/inventory.ts + inventory write paths NOT touched", !/9F-23a/.test(read("src/lib/admin/inventory.ts")) && !/9F-23a/.test(read("src/lib/inventory.ts")) && !/9F-23a/.test(read("src/lib/admin/inventory-actions.ts")));
   ok("8 · checkout.ts + OrderItem snapshot NOT touched", !/9F-23a/.test(read("src/lib/checkout.ts")));
   ok("8 · buy-box / seller-repository / email NOT touched", !/9F-23a/.test(read("src/lib/marketplace/buy-box-rule.ts")) && !/9F-23a/.test(read("src/lib/marketplace/seller-repository.ts")) && !/9F-23a/.test(read("src/lib/email/notifications.ts")));
-  ok("9 · NO CMS/admin condition selector added (product-variants.tsx unchanged)", !/9F-23a/.test(read("src/components/admin/catalog/product-variants.tsx")) && !/conditionLabel|name="condition"/.test(read("src/components/admin/catalog/product-variants.tsx")));
+  ok("9 · product-variants.tsx not touched by 9F-23a (CMS condition selector lands in 9F-23c)", !/9F-23a/.test(read("src/components/admin/catalog/product-variants.tsx")));
   ok("10 · ensureFirstPartyOffer default condition is still NEW (no offer can go non-NEW yet)", /condition: opts\.condition \?\? "NEW"/.test(read("src/lib/admin/offer-sync.ts")) || /condition: "NEW",/.test(read("src/lib/admin/offer-sync.ts")));
   ok("scope · seed-rbac.ts untouched", !/9F-23a/.test(read("scripts/seed-rbac.ts")));
   ok("scope · schema unchanged (no 9F-23a marker)", !/9F-23a/.test(read("prisma/schema.prisma")));

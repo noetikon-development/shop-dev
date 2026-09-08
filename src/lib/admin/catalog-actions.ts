@@ -16,12 +16,17 @@ import {
   pesosToCentavos,
   formBool,
   PRODUCT_STATUSES,
+  OFFER_CONDITIONS,
   parseSpecsText,
   parseHighlightsText,
   parseCareText,
 } from "@/lib/admin/catalog-schemas";
 import { cleanUserText } from "@/lib/ugc";
-import { ensureFirstPartyOffer, syncFirstPartyOfferPrice } from "@/lib/admin/offer-sync";
+import {
+  ensureFirstPartyOffer,
+  syncFirstPartyOfferPrice,
+  setFirstPartyOfferCondition,
+} from "@/lib/admin/offer-sync";
 import {
   generateProductSlug,
   generateCategorySlug,
@@ -925,6 +930,7 @@ export async function updateVariant(
   });
   if (!variant) return { error: "That variant no longer exists." };
 
+  const rawCondition = formData.get("condition");
   const parsed = variantUpdateSchema.safeParse({
     sku: String(formData.get("sku") ?? "").trim(),
     price: pesosToCentavos(formData.get("price")) ?? NaN,
@@ -933,6 +939,7 @@ export async function updateVariant(
       return c === null || Number.isNaN(c) ? null : c;
     })(),
     status: String(formData.get("status") ?? "ACTIVE"),
+    ...(rawCondition == null ? {} : { condition: String(rawCondition) }),
   });
   if (!parsed.success) {
     return { error: "Please fix the highlighted fields.", fieldErrors: zodFieldErrors(parsed.error.issues) };
@@ -943,23 +950,43 @@ export async function updateVariant(
     return { error: "That SKU is already in use.", fieldErrors: { sku: "Already in use" } };
   }
 
+  // 9F-23c: a 1P condition change (when the CMS editor sends one) rides in the
+  // SAME transaction as the variant write and is guarded — a rejection rolls
+  // the whole save back so a partial write never persists.
+  let conditionChanged = false;
+  class ConditionRejected extends Error {}
   try {
-    await prisma.variant.update({
-      where: { id },
-      data: {
-        sku: data.sku,
-        price: data.price,
-        compareAtPrice: data.compareAtPrice ?? null,
-        status: data.status,
-      },
-    });
-    await prisma.inventory.updateMany({ where: { variantId: id }, data: { sku: data.sku } });
-    // Phase 9D-A: keep this variant's Axiaro FIRST_PARTY offer price in step.
-    await syncFirstPartyOfferPrice(id, {
-      price: data.price,
-      compareAtPrice: data.compareAtPrice ?? null,
+    await prisma.$transaction(async (tx) => {
+      await tx.variant.update({
+        where: { id },
+        data: {
+          sku: data.sku,
+          price: data.price,
+          compareAtPrice: data.compareAtPrice ?? null,
+          status: data.status,
+        },
+      });
+      // 9F-23c: touch the legacy (frozen, post-9E-3D) Inventory row ONLY on a
+      // real SKU rename — a condition- / price- / status-only save must leave
+      // the archive completely untouched (it has no inventory relevance and
+      // trips the 9E-3D freeze monitor).
+      if (data.sku !== variant.sku) {
+        await tx.inventory.updateMany({ where: { variantId: id }, data: { sku: data.sku } });
+      }
+      // Phase 9D-A: keep this variant's Axiaro FIRST_PARTY offer price in step.
+      await syncFirstPartyOfferPrice(
+        id,
+        { price: data.price, compareAtPrice: data.compareAtPrice ?? null },
+        tx,
+      );
+      if (data.condition) {
+        const res = await setFirstPartyOfferCondition(id, data.condition, tx);
+        if (!res.ok) throw new ConditionRejected(res.error);
+        conditionChanged = res.changed;
+      }
     });
   } catch (err) {
+    if (err instanceof ConditionRejected) return { error: err.message };
     console.error("[updateVariant]", err);
     return { error: "Could not save the variant." };
   }
@@ -970,7 +997,12 @@ export async function updateVariant(
     targetType: "variant",
     targetId: id,
     summary: `${admin.user.email} updated variant ${data.sku} of “${variant.product.name}”`,
-    meta: { sku: data.sku, price: data.price, status: data.status },
+    meta: {
+      sku: data.sku,
+      price: data.price,
+      status: data.status,
+      ...(conditionChanged ? { condition: data.condition } : {}),
+    },
   });
   revalidateStorefront();
   return { ok: true, message: "Variant saved." };
@@ -1068,6 +1100,12 @@ export async function addVariant(
   const price = pesosToCentavos(formData.get("price")) ?? product.price;
   if (!Number.isInteger(price) || price < 0) return { error: "Enter a valid price." };
 
+  // 9F-23c: the initial 1P Offer's condition (defaults to NEW).
+  const condition = String(formData.get("condition") ?? "NEW");
+  if (!(OFFER_CONDITIONS as readonly string[]).includes(condition)) {
+    return { error: "Choose a valid condition." };
+  }
+
   const variant = await prisma.variant.create({
     data: { productId, sku, price, compareAtPrice: product.compareAtPrice, status: "ACTIVE", stock: 0 },
   });
@@ -1080,9 +1118,10 @@ export async function addVariant(
     data: { variantId: variant.id, sku, quantity: 0, reserved: 0, reorderPoint: 3 },
   });
   // Phase 9D-A: the storefront card price reads the Axiaro FIRST_PARTY Offer.
+  // 9F-23c: create it with the admin-chosen condition (create-only seam).
   await ensureFirstPartyOffer(
     { id: variant.id, sku, price, compareAtPrice: product.compareAtPrice },
-    { productStatus: product.status, costPrice: product.costPrice },
+    { productStatus: product.status, costPrice: product.costPrice, condition },
   );
 
   await writeAudit({
@@ -1091,7 +1130,7 @@ export async function addVariant(
     targetType: "variant",
     targetId: variant.id,
     summary: `${admin.user.email} added variant ${sku} to “${product.name}”`,
-    meta: { sku, price },
+    meta: { sku, price, ...(condition !== "NEW" ? { condition } : {}) },
   });
   revalidateStorefront();
   return { ok: true, message: "Variant added." };

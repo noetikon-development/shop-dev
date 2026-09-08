@@ -13,6 +13,22 @@ export type ProductStatus = (typeof PRODUCT_STATUSES)[number];
 export const VARIANT_STATUSES = ["ACTIVE", "ARCHIVED"] as const;
 export type VariantStatus = (typeof VARIANT_STATUSES)[number];
 
+/**
+ * Supported condition values for the single Axiaro FIRST_PARTY (1P) Offer on a
+ * variant (9F-23c). Must stay in step with `OfferCondition` in
+ * `src/lib/marketplace/types.ts` and `OFFER_CONDITIONS` in
+ * `src/lib/marketplace/seller-repository.ts` (the 3P list). Labels live in
+ * `conditionLabel()` (`src/lib/seller/format.ts`). Client-safe.
+ */
+export const OFFER_CONDITIONS = [
+  "NEW",
+  "REFURBISHED",
+  "OPEN_BOX",
+  "USED_LIKE_NEW",
+  "USED_GOOD",
+] as const;
+export type OfferConditionValue = (typeof OFFER_CONDITIONS)[number];
+
 /** URL-safe, lowercase, hyphen-separated. */
 export const slugSchema = z
   .string()
@@ -101,6 +117,10 @@ export const variantUpdateSchema = z.object({
   price: priceSchema,
   compareAtPrice: priceSchema.nullable().optional(),
   status: z.enum(VARIANT_STATUSES),
+  // 9F-23c: the condition of this variant's single Axiaro FIRST_PARTY Offer.
+  // Optional — only the CMS variant editor submits it; when present it drives a
+  // guarded update of the existing 1P Offer row (never a new offer).
+  condition: z.enum(OFFER_CONDITIONS).optional(),
 }).refine((v) => v.compareAtPrice == null || v.compareAtPrice > v.price, {
   message: "Compare-at price must be higher than the price",
   path: ["compareAtPrice"],

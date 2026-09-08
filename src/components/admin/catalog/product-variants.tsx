@@ -17,7 +17,8 @@ import {
   addVariant,
   type CatalogState,
 } from "@/lib/admin/catalog-actions";
-import { VARIANT_STATUSES } from "@/lib/admin/catalog-schemas";
+import { VARIANT_STATUSES, OFFER_CONDITIONS } from "@/lib/admin/catalog-schemas";
+import { conditionLabel } from "@/lib/seller/format";
 
 type OptionValue = { id: string; value: string };
 type Option = { id: string; name: string; values: OptionValue[] };
@@ -27,15 +28,22 @@ type Variant = {
   price: number;
   compareAtPrice: number | null;
   status: string;
+  /** Condition of this variant's single Axiaro FIRST_PARTY offer (9F-23c). */
+  condition: string;
+  /** True only if the one-1P-offer-per-variant invariant is broken (selector locked). */
+  hasMultipleOffers: boolean;
   optionValueIds: string[];
   orderItemCount: number;
 };
+
+const CONDITION_LOCK_HINT = "Set this product to Draft before changing its condition.";
 
 const pesos = (c: number | null) => (c == null ? "" : (c / 100).toFixed(2));
 const OPTION_SUGGESTIONS = ["Colour", "Size", "Material", "Style"];
 
 export function ProductVariants({
   productId,
+  productActive,
   options,
   variants,
   canEdit,
@@ -43,6 +51,7 @@ export function ProductVariants({
   canDelete,
 }: {
   productId: string;
+  productActive: boolean;
   options: Option[];
   variants: Variant[];
   canEdit: boolean;
@@ -61,6 +70,7 @@ export function ProductVariants({
       <OptionsEditor productId={productId} options={options} canEdit={canEdit} />
       <VariantTable
         productId={productId}
+        productActive={productActive}
         options={options}
         variants={variants}
         canEdit={canEdit}
@@ -196,6 +206,7 @@ function OptionsEditor({
 
 function VariantTable({
   productId,
+  productActive,
   options,
   variants,
   canEdit,
@@ -203,6 +214,7 @@ function VariantTable({
   canDelete,
 }: {
   productId: string;
+  productActive: boolean;
   options: Option[];
   variants: Variant[];
   canEdit: boolean;
@@ -228,15 +240,16 @@ function VariantTable({
       </div>
 
       <div className="overflow-x-auto rounded-md border border-line">
-        <table className="w-full min-w-[46rem] text-sm">
+        <table className="w-full min-w-[50rem] text-sm">
           <thead>
             <tr className="border-b border-line bg-surface-sunken/60 text-left text-xs uppercase tracking-wide text-ink-faint">
               <th className="px-3 py-2 font-semibold">Variant</th>
               <th className="px-3 py-2 font-semibold">SKU</th>
               <th className="px-3 py-2 font-semibold">Price</th>
               <th className="px-3 py-2 font-semibold">Compare-at</th>
+              <th className="px-3 py-2 font-semibold">Condition</th>
               <th className="px-3 py-2 font-semibold">Status</th>
-              <th className="px-3 py-2" />
+              <th className="sticky right-0 bg-surface-sunken px-3 py-2 font-semibold" />
             </tr>
           </thead>
           <tbody>
@@ -247,6 +260,7 @@ function VariantTable({
                 label={comboLabel(v)}
                 canEdit={canEdit}
                 canDelete={canDelete}
+                productActive={productActive}
                 lastOne={variants.length <= 1}
               />
             ))}
@@ -266,12 +280,14 @@ function VariantRow({
   label,
   canEdit,
   canDelete,
+  productActive,
   lastOne,
 }: {
   variant: Variant;
   label: string;
   canEdit: boolean;
   canDelete: boolean;
+  productActive: boolean;
   lastOne: boolean;
 }) {
   const router = useRouter();
@@ -310,7 +326,7 @@ function VariantRow({
           name="sku"
           defaultValue={variant.sku}
           disabled={!canEdit}
-          className="field w-32 font-mono text-xs"
+          className="field w-28 font-mono text-xs"
         />
         {fe.sku && <p className="mt-0.5 text-xs text-clay">{fe.sku}</p>}
       </td>
@@ -321,7 +337,7 @@ function VariantRow({
           defaultValue={pesos(variant.price)}
           inputMode="decimal"
           disabled={!canEdit}
-          className="field w-24 text-xs"
+          className="field w-20 text-xs"
         />
         {fe.price && <p className="mt-0.5 text-xs text-clay">{fe.price}</p>}
       </td>
@@ -333,9 +349,41 @@ function VariantRow({
           inputMode="decimal"
           disabled={!canEdit}
           placeholder="—"
-          className="field w-24 text-xs"
+          className="field w-20 text-xs"
         />
         {fe.compareAtPrice && <p className="mt-0.5 text-xs text-clay">{fe.compareAtPrice}</p>}
+      </td>
+      <td className="px-3 py-2">
+        {(() => {
+          const conditionLocked = !canEdit || productActive || variant.hasMultipleOffers;
+          return (
+            <>
+              <Select
+                form={`vf-${variant.id}`}
+                name="condition"
+                defaultValue={variant.condition}
+                disabled={conditionLocked}
+                aria-label="Condition"
+                className="w-40 text-xs"
+              >
+                {OFFER_CONDITIONS.map((c) => (
+                  <option key={c} value={c}>
+                    {conditionLabel(c)}
+                  </option>
+                ))}
+              </Select>
+              {canEdit && productActive && (
+                <p className="mt-0.5 max-w-[10rem] text-xs text-ink-faint">{CONDITION_LOCK_HINT}</p>
+              )}
+              {canEdit && !productActive && variant.hasMultipleOffers && (
+                <p className="mt-0.5 max-w-[10rem] text-xs text-clay">
+                  Multiple Axiaro listings found — resolve before editing.
+                </p>
+              )}
+              {fe.condition && <p className="mt-0.5 text-xs text-clay">{fe.condition}</p>}
+            </>
+          );
+        })()}
       </td>
       <td className="px-3 py-2">
         <Select
@@ -343,7 +391,7 @@ function VariantRow({
           name="status"
           defaultValue={variant.status}
           disabled={!canEdit}
-          className="w-28 text-xs"
+          className="w-24 text-xs"
         >
           {VARIANT_STATUSES.map((s) => (
             <option key={s} value={s}>
@@ -352,7 +400,7 @@ function VariantRow({
           ))}
         </Select>
       </td>
-      <td className="whitespace-nowrap px-3 py-2 text-right">
+      <td className="sticky right-0 whitespace-nowrap border-l border-line/60 bg-surface px-3 py-2 text-right">
         {canEdit && (
           <form id={`vf-${variant.id}`} onSubmit={onSubmit} className="inline">
             <input type="hidden" name="id" value={variant.id} />
@@ -445,6 +493,15 @@ function AddVariant({
         </FormField>
         <FormField label="Price (pesos)" htmlFor="av-price" hint="Blank = product price">
           <input id="av-price" name="price" inputMode="decimal" className="field text-sm" />
+        </FormField>
+        <FormField label="Condition" htmlFor="av-condition" hint="The Axiaro listing's condition">
+          <Select id="av-condition" name="condition" defaultValue="NEW">
+            {OFFER_CONDITIONS.map((c) => (
+              <option key={c} value={c}>
+                {conditionLabel(c)}
+              </option>
+            ))}
+          </Select>
         </FormField>
       </div>
       <div className="mt-3 flex gap-2">

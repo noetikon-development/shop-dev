@@ -38,8 +38,13 @@ export function ProductEditor({ categories, product, images, colours, options, v
     >
       {(active) => (
         <div className="rounded-md border border-line bg-surface p-5">
+          {/* Details/Images stay in a comfortable reading column; the Variants
+              tab uses the full width so its editable table never hides a
+              column or its Save control off-screen (9F-23c). */}
           {active === "details" && (
-            <ProductForm categories={categories} product={product} canEdit={perms.edit} />
+            <div className="mx-auto max-w-2xl">
+              <ProductForm categories={categories} product={product} canEdit={perms.edit} />
+            </div>
           )}
           {active === "images" && (
             <ProductImages
@@ -52,6 +57,7 @@ export function ProductEditor({ categories, product, images, colours, options, v
           {active === "variants" && (
             <ProductVariants
               productId={product.id}
+              productActive={product.status === "ACTIVE"}
               options={options}
               variants={variants}
               canEdit={perms.edit}

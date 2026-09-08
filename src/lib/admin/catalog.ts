@@ -169,6 +169,15 @@ export async function getAdminProduct(id: string) {
         include: {
           optionValues: { select: { optionValueId: true } },
           _count: { select: { orderItems: true } },
+          // 9F-23c: the single Axiaro FIRST_PARTY Offer for the CMS condition
+          // selector. `take: 2` so a broken one-per-variant invariant is visible
+          // to the caller rather than silently resolved.
+          offers: {
+            where: { seller: { is: { type: "FIRST_PARTY" } } },
+            orderBy: { createdAt: "asc" },
+            take: 2,
+            select: { condition: true },
+          },
         },
       },
     },
