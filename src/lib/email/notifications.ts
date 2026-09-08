@@ -447,7 +447,13 @@ export async function sendOrderConfirmation(
           customerName,
           items: order.items.map((i) => ({
             name: i.name,
-            variantLabel: i.variantLabel,
+            // 9F-23d: fold a "Condition: …" line under a non-NEW item — the same
+            // pattern as seller_order_received (9F-22). NEW / NULL leaves
+            // variantLabel untouched, so the email stays byte-identical to
+            // today. Seller-type-agnostic: works for 1P, 3P and mixed orders.
+            variantLabel: isNoteworthyCondition(i.condition)
+              ? [i.variantLabel, `Condition: ${conditionLabel(i.condition!)}`].filter(Boolean).join(" · ")
+              : i.variantLabel,
             quantity: i.quantity,
             unitPrice: i.unitPrice,
             lineTotal: i.lineTotal,
