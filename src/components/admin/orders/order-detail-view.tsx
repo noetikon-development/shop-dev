@@ -62,6 +62,9 @@ export function OrderDetailView({
   storePickup: boolean;
 }) {
   const paymentMethod = PAYMENT_METHODS.find((p) => p.id === order.paymentMethod);
+  // 9F-28B (F2): checkout stores COD as paymentMethod "NONE" — show the real
+  // method (COD) rather than a blank. Reuses the catalogue label.
+  const codLabel = PAYMENT_METHODS.find((p) => p.id === "COD")?.label ?? "Cash on delivery";
   const shippingMethodName =
     order.shippingMethodName ?? (order.shippingMethod ? order.shippingMethod : "—");
 
@@ -91,7 +94,7 @@ export function OrderDetailView({
             <Field label="Payment method">
               {order.paymentMethod && order.paymentMethod !== "NONE"
                 ? (paymentMethod?.label ?? order.paymentMethod)
-                : "Not set"}
+                : codLabel}
             </Field>
           </dl>
           {order.note && (

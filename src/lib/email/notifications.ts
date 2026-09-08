@@ -409,6 +409,27 @@ const ORDER_INCLUDE = {
   user: { select: { name: true } },
 } as const;
 
+/**
+ * 9F-28B (F1) — "pay on delivery" is a PAYMENT fact, not an order-status one.
+ *
+ * A COD order (`paymentMethod` "NONE"/"COD") that has NOT been paid online is
+ * arranged on delivery whether it is still `PENDING_PAYMENT` (1P) or was
+ * auto-confirmed to `PROCESSING` at checkout (3P — 9F-15B). A CARD / GCASH order
+ * that is `PAID` is never pay-on-delivery. The defensive `paymentStatus !== PAID`
+ * guard means a COD order that somehow carries a recorded payment would NOT be
+ * told to pay again.
+ *
+ * Reads only payment fields — never `Order.status`, so it is immune to the
+ * fulfilment auto-confirm.
+ */
+export function isPayOnDeliveryOrder(order: {
+  paymentMethod: string | null;
+  paymentStatus: string;
+}): boolean {
+  const codMethod = order.paymentMethod === "NONE" || order.paymentMethod === "COD";
+  return codMethod && order.paymentStatus !== "PAID";
+}
+
 // ---------------------------------------------------------------------------
 // Order confirmation — ORDER_CREATED:<orderId>
 // ---------------------------------------------------------------------------
@@ -465,7 +486,10 @@ export async function sendOrderConfirmation(
           shippingFee: order.shippingFee,
           grandTotal: order.grandTotal,
           shippingAddress,
-          payOnDelivery: order.status === "PENDING_PAYMENT",
+          // 9F-28B (F1): from the payment fields, NOT order.status — a 3P COD
+          // order is auto-confirmed to PROCESSING but is still collected on
+          // delivery.
+          payOnDelivery: isPayOnDeliveryOrder(order),
         }),
     );
   } catch (err) {

@@ -38,7 +38,8 @@ export type OrderConfirmationData = {
   shippingFee: number;
   grandTotal: number;
   shippingAddress: Record<string, unknown>;
-  /** true while the order is PENDING_PAYMENT (the normal pay-on-delivery state). */
+  /** true for a pay-on-delivery order — a COD order that isn't paid online.
+   *  Derived from the payment fields by the caller (9F-28B), NOT Order.status. */
   payOnDelivery: boolean;
 };
 
