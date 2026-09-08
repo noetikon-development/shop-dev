@@ -73,6 +73,10 @@ export type SellerRequestDetailView = {
   id: string;
   status: string;
   editable: boolean;
+  /** 9F-26A (G7): a REJECTED request the seller can reopen to DRAFT and revise */
+  canReopen: boolean;
+  /** 9F-26A (G7): this DRAFT was reopened from a rejection — keep the feedback in view */
+  reopenedFromRejection: boolean;
   name: string;
   brand: string | null;
   shortDesc: string | null;
@@ -104,6 +108,23 @@ export async function getSellerRequestDetail(
 
   const { options, variants } = parseProposal(r.proposedVariants);
   const editable = r.status === "DRAFT";
+  const canReopen = r.status === "REJECTED";
+
+  // 9F-26A (G7): a DRAFT that carries a review note AND a reopen audit entry was
+  // reopened from a rejection — surface the feedback while the seller revises it.
+  // Scoped to this exact case so the PENDING → DRAFT ("request changes") flow's
+  // rendering is untouched.
+  const reopenedFromRejection =
+    editable && r.reviewStatusNote != null
+      ? (await prisma.adminAuditLog.findFirst({
+          where: {
+            targetType: "seller_product_request",
+            targetId: r.id,
+            action: "seller.product_request.reopened",
+          },
+          select: { id: true },
+        })) != null
+      : false;
 
   const duplicates = editable
     ? await checkRequestDuplicates(
@@ -140,6 +161,8 @@ export async function getSellerRequestDetail(
     id: r.id,
     status: r.status,
     editable,
+    canReopen,
+    reopenedFromRejection,
     name: r.proposedName,
     brand: r.proposedBrand,
     shortDesc: r.proposedShortDesc,

@@ -10,6 +10,7 @@ import {
   createSellerRequest,
   updateSellerRequest,
   submitSellerRequest,
+  reopenRejectedRequest,
   attachRequestImage,
   detachRequestImage,
   type SellerRequestError,
@@ -228,6 +229,43 @@ export async function submitRequestAction(
         : "Submitted for review. An Axiaro admin will look at it.",
     warnings: res.warnings,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Reopen a rejected request (9F-26A / G7)
+// ---------------------------------------------------------------------------
+
+/**
+ * REJECTED → DRAFT for the seller's own request. The proposal + images + review
+ * feedback are all preserved; the seller then edits and resubmits through the
+ * normal `submitRequestAction` flow. One audit row on a real reopen — the same
+ * "status transition writes one adminAuditLog" pattern as `submitRequestAction`.
+ * No email (this is the seller's own self-service action — like saving a draft).
+ */
+export async function reopenRequestAction(
+  _prev: SellerRequestActionState,
+  formData: FormData,
+): Promise<SellerRequestActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_offers");
+  const requestId = String(formData.get("requestId") ?? "");
+  if (!requestId) return { error: "Missing request." };
+
+  const res = await reopenRejectedRequest(ctx, requestId);
+  if (!res.ok) return fromError(res);
+
+  if (res.reopened) {
+    await writeAudit({
+      actorUserId: ctx.userId,
+      action: "seller.product_request.reopened",
+      targetType: "seller_product_request",
+      targetId: requestId,
+      summary: `seller ${ctx.sellerName} reopened a rejected product request (${requestId}) to revise it`,
+      meta: { sellerId: ctx.sellerId, requestId },
+    });
+  }
+
+  revalidate(requestId);
+  return { ok: true, message: "Reopened as a draft — make your changes and resubmit." };
 }
 
 // ---------------------------------------------------------------------------

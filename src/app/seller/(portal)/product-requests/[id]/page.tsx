@@ -9,6 +9,7 @@ import { requestStatusTone, requestStatusLabel } from "@/lib/seller/format";
 import { RequestForm } from "@/components/seller/request-form";
 import { RequestImagesPanel } from "@/components/seller/request-images-panel";
 import { RequestSubmitPanel } from "@/components/seller/request-submit-panel";
+import { RequestReopenButton } from "@/components/seller/request-reopen-button";
 
 export const metadata: Metadata = { title: "Product request" };
 
@@ -37,11 +38,22 @@ export default async function SellerProductRequestDetailPage({
         actions={<StatusBadge tone={requestStatusTone(r.status)}>{requestStatusLabel(r.status)}</StatusBadge>}
       />
 
-      {r.status === "REJECTED" && r.reviewNote && (
+      {r.status === "REJECTED" && (
         <div className="mb-6 rounded-sm border border-danger/30 bg-danger-50 px-4 py-3 text-sm text-danger">
           <p className="font-medium">Axiaro didn&rsquo;t approve this request</p>
+          {r.reviewNote && <p className="mt-1 whitespace-pre-wrap">{r.reviewNote}</p>}
+          <p className="mt-2 text-xs">
+            Reopen it to make the changes Axiaro asked for and send it back — your proposal, images
+            and this feedback are kept.
+          </p>
+          {r.canReopen && <RequestReopenButton requestId={r.id} />}
+        </div>
+      )}
+      {r.reopenedFromRejection && r.reviewNote && (
+        <div className="mb-6 rounded-sm border border-line bg-surface-sunken px-4 py-3 text-sm text-ink-soft">
+          <p className="font-medium text-ink">Why Axiaro didn&rsquo;t approve this last time</p>
           <p className="mt-1 whitespace-pre-wrap">{r.reviewNote}</p>
-          <p className="mt-2 text-xs">Start a new request with the changes if you&rsquo;d still like Axiaro to carry it.</p>
+          <p className="mt-2 text-xs">Make these changes, then submit for review again.</p>
         </div>
       )}
       {r.status === "PENDING" && (

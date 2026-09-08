@@ -586,6 +586,60 @@ export async function submitSellerRequest(
   }
 }
 
+/**
+ * 9F-26A (G7) — reopen the seller's OWN rejected request so they can revise it
+ * and resubmit through the normal DRAFT → PENDING flow.
+ *
+ * REJECTED → DRAFT only. The proposal (name / brand / descriptions / options /
+ * variants / seller note) and the attached images are left exactly as they were,
+ * and the rejection feedback (`reviewStatusNote` / `reviewedById` / `reviewedAt`)
+ * is DELIBERATELY preserved — the seller needs to see why it was turned down
+ * while they fix it, and the next admin review overwrites those fields the same
+ * way the existing PENDING → DRAFT ("request changes") flow does.
+ *
+ * Scoped to `ctx.sellerId` — another seller's request resolves as NOT_FOUND.
+ * Idempotent: an already-DRAFT request returns `{ ok:true, reopened:false }`.
+ * Never sets APPROVED / PENDING / REJECTED — the seller plane can only move a
+ * request DRAFT ↔ (submit to) PENDING; reopening is the mirror of submitting.
+ * No new request row is created.
+ */
+export async function reopenRejectedRequest(
+  ctx: SellerContext,
+  requestId: string,
+  externalTx?: Prisma.TransactionClient,
+): Promise<{ ok: true; reopened: boolean } | SellerRequestError> {
+  const run = async (
+    tx: Prisma.TransactionClient,
+  ): Promise<{ ok: true; reopened: boolean } | SellerRequestError> => {
+    const current = await tx.sellerProductRequest.findFirst({
+      where: { id: requestId, sellerId: ctx.sellerId },
+      select: { id: true, status: true },
+    });
+    if (!current) return { ok: false, code: "NOT_FOUND", error: "No such request for this seller." };
+    if (current.status === "DRAFT") return { ok: true, reopened: false };
+    if (current.status !== "REJECTED") {
+      return { ok: false, code: "LOCKED", error: `A ${current.status.toLowerCase()} request can't be reopened.` };
+    }
+
+    const reopened = await tx.sellerProductRequest.updateMany({
+      where: { id: requestId, sellerId: ctx.sellerId, status: current.status },
+      data: { status: "DRAFT" },
+    });
+    if (reopened.count === 0) {
+      return { ok: false, code: "CONFLICT", error: "The request changed while you were reopening it. Reload and try again." };
+    }
+    return { ok: true, reopened: true };
+  };
+
+  try {
+    if (externalTx) return await run(externalTx);
+    return await prisma.$transaction(run);
+  } catch (err) {
+    console.error("[seller-product-request-repository] reopenRejectedRequest failed", err);
+    return { ok: false, code: "VALIDATION", error: "Could not reopen the request." };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Images — seller-owned MediaAsset only, DRAFT request only
 // ---------------------------------------------------------------------------
