@@ -5,6 +5,11 @@ import { ArrowLeft } from "lucide-react";
 import { requireSellerSession } from "@/lib/seller/session";
 import { sellerCan } from "@/lib/marketplace/seller-context";
 import { getSellerOfferDetail } from "@/lib/seller/offers";
+import {
+  offerPublishBlockers,
+  OFFER_PUBLISH_BLOCKER_MESSAGE,
+} from "@/lib/marketplace/seller-repository";
+import { isMultiSellerCheckoutEnabled } from "@/lib/marketplace/marketplace-settings";
 import { PageHeader, Card, StatusBadge } from "@/components/seller/ui";
 import { pesos, offerStatusTone, conditionLabel } from "@/lib/seller/format";
 import { OfferEditForm } from "@/components/seller/offer-edit-form";
@@ -22,6 +27,21 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
   const canManageOffers = sellerCan(ctx, "manage_offers");
   const canManageInventory = sellerCan(ctx, "manage_offer_inventory");
   const editable = offer.status !== "ARCHIVED";
+
+  // 9F-24A — the same publish gate the server action enforces.
+  const marketplaceOpen = await isMultiSellerCheckoutEnabled();
+  const publishBlockerMessages =
+    offer.status === "ACTIVE"
+      ? []
+      : offerPublishBlockers({
+          offerStatus: offer.status,
+          sellerStatus: offer.sellerStatus,
+          marketplaceOpen,
+          productStatus: offer.productStatus,
+          variantStatus: offer.variantStatus,
+          available: offer.available,
+        }).map((b) => OFFER_PUBLISH_BLOCKER_MESSAGE[b]);
+  const isLive = offer.status === "ACTIVE";
 
   return (
     <div>
@@ -82,15 +102,23 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
             <h2 className="mb-3 text-sm font-semibold">Availability</h2>
             <p className="text-sm text-ink-soft">
               This listing is <strong className="text-ink">{offer.status.toLowerCase()}</strong> and is{" "}
-              <strong className="text-ink">not visible to buyers</strong>. Publishing listings to the
-              storefront opens in a later marketplace phase.
+              <strong className="text-ink">
+                {isLive ? "visible to buyers on the storefront" : "not visible to buyers"}
+              </strong>
+              {isLive
+                ? "."
+                : ". Publish it from the Status panel once it's ready."}
             </p>
           </Card>
 
           {canManageOffers && (
             <Card>
               <h2 className="mb-3 text-sm font-semibold">Status</h2>
-              <OfferStatusControls offerId={offer.id} status={offer.status} />
+              <OfferStatusControls
+                offerId={offer.id}
+                status={offer.status}
+                blockers={publishBlockerMessages}
+              />
             </Card>
           )}
 

@@ -255,17 +255,24 @@ async function staticTests() {
 
   const actions = read("src/lib/seller/offer-actions.ts");
   ok(
-    "H7 seller actions never revalidate the storefront (products tag)",
-    !/revalidateTag\(\s*["']products/.test(actions),
+    // 9F-24A: publishing / unpublishing a 3P offer DOES change the buy box, so
+    // setOfferStatusAction now revalidates the storefront — but ONLY inside the
+    // `if (res.storefrontAffected)` guard. Every other seller action still
+    // leaves `products` untouched.
+    "H7 only setOfferStatusAction revalidates the storefront, and only when storefrontAffected",
+    /if \(res\.storefrontAffected\) \{\s*\n\s*revalidateTag\("products", "max"\);/.test(actions) &&
+      (actions.match(/revalidateTag\(\s*["']products/g) ?? []).length === 1,
   );
 
   const statusControls = read("src/components/seller/offer-status-controls.tsx");
   const statusActions = read("src/lib/seller/offer-actions.ts");
   ok(
-    "H8 nothing in the status control / action moves an offer to ACTIVE",
-    !/submit\(\s*["']ACTIVE["']\)/.test(statusControls) &&
-      !/>\s*Publish\b|Go live\s*</i.test(statusControls) &&
-      !/z\.enum\(\[[^\]]*["']ACTIVE["'][^\]]*\]\)/.test(statusActions),
+    // 9F-24A: the seller CAN now publish an offer to ACTIVE — gated by the repo
+    // double-lock (flag) + the publish-readiness check.
+    "H8 publish → ACTIVE is wired (status control + action enum), gated by the repo",
+    /submit\("ACTIVE"\)/.test(statusControls) &&
+      /Publish listing/.test(statusControls) &&
+      /z\.enum\(\["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"\]\)/.test(statusActions),
   );
 
   const nav = read("src/lib/seller/navigation.ts");

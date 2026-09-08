@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
@@ -21,9 +21,10 @@ import {
  * the repository re-checks row ownership inside its transaction. A seller can
  * only ever mutate their own Offer / OfferInventory.
  *
- * None of these revalidate `products` / touch the storefront: a seller offer
- * never reaches `status = "ACTIVE"` in 9F-1, so it is never buy-box-eligible and
- * the storefront output cannot change.
+ * 9F-24A: a `→ ACTIVE` (publish) or `ACTIVE → …` (unpublish) status change DOES
+ * change what buyers see, so `setOfferStatusAction` revalidates the storefront
+ * product cache for those transitions. Every other seller action still leaves
+ * the storefront untouched.
  */
 
 export type SellerActionState = {
@@ -164,12 +165,14 @@ export async function updateOfferAction(
 }
 
 // ---------------------------------------------------------------------------
-// Status — DRAFT ↔ INACTIVE, or → ARCHIVED. Never → ACTIVE (9F-1 gate).
+// Status — DRAFT ↔ INACTIVE ↔ ACTIVE, or → ARCHIVED (terminal). A `→ ACTIVE`
+// (publish) transition is gated by `setSellerOfferStatus`'s double-lock +
+// publish-readiness check (9F-8c / 9F-24A). ARCHIVED can't be reactivated.
 // ---------------------------------------------------------------------------
 
 const statusSchema = z.object({
   offerId: z.string().min(1),
-  status: z.enum(["DRAFT", "INACTIVE", "ARCHIVED"]),
+  status: z.enum(["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"]),
 });
 
 export async function setOfferStatusAction(
@@ -189,9 +192,21 @@ export async function setOfferStatusAction(
   revalidatePath(`/seller/offers/${parsed.data.offerId}`);
   revalidatePath("/seller/offers");
   revalidatePath("/seller");
+  // 9F-24A: only bust the storefront cache when buy-box visibility actually
+  // changed (offer was ACTIVE, or is now ACTIVE).
+  if (res.storefrontAffected) {
+    revalidateTag("products", "max");
+    revalidateTag("categories", "max");
+  }
   const verb =
-    parsed.data.status === "INACTIVE" ? "deactivated" : parsed.data.status === "ARCHIVED" ? "archived" : "moved to draft";
-  return { ok: true, message: `Offer ${verb}.` };
+    parsed.data.status === "ACTIVE"
+      ? "published — it's now live"
+      : parsed.data.status === "INACTIVE"
+        ? "taken offline"
+        : parsed.data.status === "ARCHIVED"
+          ? "archived"
+          : "moved to draft";
+  return { ok: true, message: `Listing ${verb}.` };
 }
 
 // ---------------------------------------------------------------------------

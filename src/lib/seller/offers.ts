@@ -36,6 +36,12 @@ export type SellerOfferView = {
   productId: string;
   productName: string;
   productSlug: string;
+  /** canonical catalog Product.status — a publish gate (9F-24A) */
+  productStatus: string;
+  /** canonical catalog Variant.status — a publish gate (9F-24A) */
+  variantStatus: string;
+  /** the owning Seller.status — a publish gate (9F-24A) */
+  sellerStatus: string;
   optionLabel: string;
   variantSku: string;
   sellerSku: string | null;
@@ -62,6 +68,9 @@ function toView(o: OfferRow): SellerOfferView {
     productId: o.variant.product.id,
     productName: o.variant.product.name,
     productSlug: o.variant.product.slug,
+    productStatus: o.variant.product.status,
+    variantStatus: o.variant.status,
+    sellerStatus: o.seller.status,
     optionLabel: optionLabel(o.variant) || "Default",
     variantSku: o.variant.sku,
     sellerSku: o.sellerSku,

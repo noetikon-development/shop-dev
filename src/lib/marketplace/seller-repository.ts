@@ -52,6 +52,50 @@ type OfferStatus = (typeof OFFER_STATUSES)[number];
 type OfferCondition = (typeof OFFER_CONDITIONS)[number];
 
 // ---------------------------------------------------------------------------
+// 9F-24A — publish (→ ACTIVE) readiness
+// ---------------------------------------------------------------------------
+
+/**
+ * The reasons a seller offer can't be moved to `ACTIVE` (customer-visible).
+ * A pure check so the seller offer page and `setSellerOfferStatus` agree.
+ */
+export type OfferPublishBlocker =
+  | "ARCHIVED"
+  | "SELLER_NOT_APPROVED"
+  | "MARKETPLACE_CLOSED"
+  | "PRODUCT_NOT_ACTIVE"
+  | "VARIANT_NOT_ACTIVE"
+  | "NO_STOCK";
+
+export const OFFER_PUBLISH_BLOCKER_MESSAGE: Record<OfferPublishBlocker, string> = {
+  ARCHIVED: "This listing is archived and can’t be published.",
+  SELLER_NOT_APPROVED: "Your seller account isn’t approved to publish listings.",
+  // Keep this exact wording — it was the pre-9F-24A gate message.
+  MARKETPLACE_CLOSED: "Offers can’t be published yet — the marketplace isn’t open to buyers.",
+  PRODUCT_NOT_ACTIVE: "Axiaro hasn’t made this product live in the catalog yet.",
+  VARIANT_NOT_ACTIVE: "This product option isn’t active in the catalog.",
+  NO_STOCK: "Add stock first — a live listing needs at least one unit available.",
+};
+
+export function offerPublishBlockers(input: {
+  offerStatus: string;
+  sellerStatus: string;
+  marketplaceOpen: boolean;
+  productStatus: string;
+  variantStatus: string;
+  available: number;
+}): OfferPublishBlocker[] {
+  const out: OfferPublishBlocker[] = [];
+  if (input.offerStatus === "ARCHIVED") out.push("ARCHIVED");
+  if (input.sellerStatus !== "APPROVED") out.push("SELLER_NOT_APPROVED");
+  if (!input.marketplaceOpen) out.push("MARKETPLACE_CLOSED");
+  if (input.productStatus !== "ACTIVE") out.push("PRODUCT_NOT_ACTIVE");
+  if (input.variantStatus !== "ACTIVE") out.push("VARIANT_NOT_ACTIVE");
+  if (input.available <= 0) out.push("NO_STOCK");
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Reads
 // ---------------------------------------------------------------------------
 
@@ -65,6 +109,7 @@ export type SellerOfferListOptions = {
 
 const SELLER_OFFER_INCLUDE = {
   inventory: true,
+  seller: { select: { status: true } },
   variant: {
     select: {
       id: true,
@@ -335,6 +380,13 @@ export type UpdateSellerOfferPatch = {
 
 export type MutateSellerOfferResult = { ok: true } | SellerRepoError;
 
+/**
+ * 9F-24A — `setSellerOfferStatus` result. `storefrontAffected` is true iff the
+ * transition changed the offer's buy-box visibility (from or to `ACTIVE`), so
+ * the caller can revalidate the storefront cache only when it matters.
+ */
+export type SetOfferStatusResult = { ok: true; storefrontAffected: boolean } | SellerRepoError;
+
 /** Edit an Offer's commercial terms. Ownership re-checked inside the tx. */
 export async function updateSellerOffer(
   ctx: SellerContext,
@@ -429,17 +481,24 @@ export async function updateSellerOffer(
  *
  * ALLOWED (9F-8c): DRAFT ↔ INACTIVE, either → ARCHIVED, and — ONLY when
  * `marketplace.multiSellerCheckout` is `"true"` — DRAFT → ACTIVE and
- * INACTIVE → ACTIVE. The gate check above remains the first line of defense;
- * this map is the second, independent one (both must permit a transition to
- * ACTIVE, matching the double-lock already documented in the 9F-8b/9F-8c
- * audits). A FIRST_PARTY offer is managed by the operator plane, not here.
+ * INACTIVE → ACTIVE. The gate check below remains the first line of defense;
+ * the transition map is the second, independent one (both must permit a
+ * transition to ACTIVE, matching the double-lock already documented in the
+ * 9F-8b/9F-8c audits). A FIRST_PARTY offer is managed by the operator plane,
+ * not here.
+ *
+ * 9F-24A — a `→ ACTIVE` (publish) transition also runs `offerPublishBlockers`
+ * INSIDE the transaction: the seller must be APPROVED, the catalog Product +
+ * Variant must both be ACTIVE, and the OfferInventory must have at least one
+ * unit available. Any failure returns `FORBIDDEN` with the reason(s) and
+ * writes nothing.
  */
 export async function setSellerOfferStatus(
   ctx: SellerContext,
   offerId: string,
   next: OfferStatus,
   externalTx?: Prisma.TransactionClient,
-): Promise<MutateSellerOfferResult> {
+): Promise<SetOfferStatusResult> {
   if (!(OFFER_STATUSES as readonly string[]).includes(next)) {
     return { ok: false, code: "VALIDATION", error: "Unknown status." };
   }
@@ -449,25 +508,27 @@ export async function setSellerOfferStatus(
       return {
         ok: false,
         code: "FORBIDDEN",
-        error: "Offers can't be published yet — the marketplace isn't open to buyers.",
+        error: OFFER_PUBLISH_BLOCKER_MESSAGE.MARKETPLACE_CLOSED,
       };
     }
   }
 
-  const run = async (tx: Prisma.TransactionClient): Promise<MutateSellerOfferResult> => {
+  const run = async (tx: Prisma.TransactionClient): Promise<SetOfferStatusResult> => {
     const offer = await tx.offer.findFirst({
       where: { id: offerId, sellerId: ctx.sellerId },
-      select: { id: true, status: true },
+      select: {
+        id: true,
+        status: true,
+        seller: { select: { status: true } },
+        variant: { select: { status: true, product: { select: { status: true } } } },
+        inventory: { select: { quantity: true, reserved: true } },
+      },
     });
     if (!offer) return { ok: false, code: "NOT_FOUND", error: "No such offer for this seller." };
-    if (offer.status === next) return { ok: true };
+    if (offer.status === next) return { ok: true, storefrontAffected: false };
     if (offer.status === "ARCHIVED") {
       return { ok: false, code: "VALIDATION", error: "An archived offer can't be reactivated." };
     }
-    // The `next === "ACTIVE"` gate check above already ran and returned
-    // FORBIDDEN before reaching here if `marketplace.multiSellerCheckout` is
-    // not `"true"` — by the time this map is consulted for an ACTIVE
-    // destination, the gate has already passed.
     const allowed: Record<string, OfferStatus[]> = {
       DRAFT: ["INACTIVE", "ARCHIVED", "ACTIVE"],
       INACTIVE: ["DRAFT", "ARCHIVED", "ACTIVE"],
@@ -476,8 +537,32 @@ export async function setSellerOfferStatus(
     if (!(allowed[offer.status] ?? []).includes(next)) {
       return { ok: false, code: "VALIDATION", error: `Can't move an offer from ${offer.status} to ${next}.` };
     }
+
+    // 9F-24A publish-readiness — only for a `→ ACTIVE` transition. The flag gate
+    // above has already returned FORBIDDEN if the marketplace is closed, so by
+    // the time we're here for an ACTIVE target `marketplaceOpen` is true.
+    if (next === "ACTIVE") {
+      const available = Math.max(0, (offer.inventory?.quantity ?? 0) - (offer.inventory?.reserved ?? 0));
+      const blockers = offerPublishBlockers({
+        offerStatus: offer.status,
+        sellerStatus: offer.seller.status,
+        marketplaceOpen: true,
+        productStatus: offer.variant.product.status,
+        variantStatus: offer.variant.status,
+        available,
+      });
+      if (blockers.length > 0) {
+        return {
+          ok: false,
+          code: "FORBIDDEN",
+          error: blockers.map((b) => OFFER_PUBLISH_BLOCKER_MESSAGE[b]).join(" "),
+        };
+      }
+    }
+
     await tx.offer.update({ where: { id: offerId }, data: { status: next } });
-    return { ok: true };
+    // Buy-box visibility changed iff the offer was ACTIVE or becomes ACTIVE.
+    return { ok: true, storefrontAffected: offer.status === "ACTIVE" || next === "ACTIVE" };
   };
 
   try {
