@@ -9,6 +9,7 @@ import { PageHeader, Card, StatusBadge } from "@/components/seller/ui";
 import { pesos } from "@/lib/seller/format";
 import { sellerOrderStatusLabel, sellerOrderStatusTone } from "@/lib/marketplace/seller-order-status";
 import { OrderFulfillmentPanel } from "@/components/seller/order-fulfillment-panel";
+import { SellerOrderCancelPanel } from "@/components/seller/seller-order-cancel-panel";
 
 export const metadata: Metadata = { title: "Order" };
 
@@ -112,6 +113,15 @@ export default async function SellerOrderDetailPage({ params }: PageProps<"/sell
               </p>
             )}
           </Card>
+
+          {order.canCancel && canFulfil && (
+            <Card>
+              <h2 className="mb-3 text-sm font-semibold">
+                {order.cancelLabels.button === "Decline order" ? "Decline this order" : "Cancel this order"}
+              </h2>
+              <SellerOrderCancelPanel sellerOrderId={order.id} labels={order.cancelLabels} />
+            </Card>
+          )}
 
           <Card>
             <h2 className="mb-3 text-sm font-semibold">Parent order</h2>

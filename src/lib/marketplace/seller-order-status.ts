@@ -50,6 +50,36 @@ export const SELLER_ORDER_STATUS_TRANSITIONS: Record<SellerOrderStatus, SellerOr
 };
 
 /**
+ * 9F-30B — the SellerOrder states from which the OWNING seller may cancel the
+ * order because they can't fulfil it: decline a not-yet-started order
+ * (`PENDING_PAYMENT`) or cancel one they've accepted but can't complete
+ * (`PROCESSING`). Nothing dispatched yet in either case — READY_TO_SHIP /
+ * SHIPPED / DELIVERED are past the point of no return, and CANCELLED is terminal.
+ *
+ * This is DELIBERATELY separate from `SELLER_ORDER_STATUS_TRANSITIONS` (the
+ * forward fulfilment machine, driven by `advanceSellerOrderStatus`) — exactly
+ * like `CANCELLABLE_STATUSES` is separate from `ORDER_STATUS_TRANSITIONS` on the
+ * parent order. Seller cancellation runs through its own action + repository
+ * function so it can cancel the parent Order and reverse inventory; it must
+ * never flow through the fulfilment-advance path.
+ */
+export const SELLER_ORDER_CANCELLABLE_FROM: SellerOrderStatus[] = ["PENDING_PAYMENT", "PROCESSING"];
+
+export function sellerCanCancelSellerOrder(from: string): boolean {
+  return (SELLER_ORDER_CANCELLABLE_FROM as string[]).includes(from);
+}
+
+/**
+ * Seller-facing labels for the cancel control. Declining a not-yet-started order
+ * and cancelling one already in progress read differently.
+ */
+export function sellerCancelLabels(from: string): { button: string; done: string } {
+  return from === "PENDING_PAYMENT"
+    ? { button: "Decline order", done: "declined" }
+    : { button: "Cancel order", done: "cancelled" };
+}
+
+/**
  * Parent `Order.status` values that permit the seller to work the order. Payment
  * confirmation / cancellation stay entirely on the parent order (admin + the
  * deferred payment step) — the seller can only fulfil an order the platform has

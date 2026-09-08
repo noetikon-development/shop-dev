@@ -63,6 +63,8 @@ export type EmailType =
   | "seller_return_received"
   // 9F-24D (P1-7) — a THIRD_PARTY seller's offer went ACTIVE (published). Ops-only.
   | "seller_offer_published"
+  // 9F-30B — a THIRD_PARTY seller declined / cancelled a customer's order. Ops-only.
+  | "seller_order_cancelled_ops"
   // 9F-20 — bookkeeping settlement recorded for a THIRD_PARTY seller.
   | "seller_settlement_recorded"
   | "return_refund_initiated_ops"

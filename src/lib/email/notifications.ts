@@ -44,7 +44,7 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerReturnReceived,
@@ -628,6 +628,92 @@ export async function sendSellerOfferPublishedOps(
     );
   } catch (err) {
     console.error("[email] sendSellerOfferPublishedOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro Operations — a THIRD_PARTY seller declined (from PENDING_PAYMENT) or
+ * cancelled (from PROCESSING) a customer's order they can't fulfil (9F-30B).
+ * The seller plane already cancelled the parent Order, restored the seller's
+ * OfferInventory and told the customer; this is the Ops signal so the team can
+ * follow up. The SELLER is never emailed about their own action.
+ *
+ * `auditLogId` is the `seller_order.cancelled` `adminAuditLog` row the action
+ * wrote. Its id anchors the key (never `SellerOrder.updatedAt`), and the
+ * `action` / `previousParentStatus` / `restockedUnits` / `reason` are read back
+ * off that row's `meta` on every call — including retry — so nothing depends on
+ * a caller-supplied flag. FIRST_PARTY sellers are skipped.
+ * Key: SELLER_ORDER_CANCELLED_OPS:<sellerOrderId>:<auditLogId>.
+ */
+export async function sendSellerOrderCancelledOps(
+  sellerOrderId: string,
+  auditLogId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const so = await db.sellerOrder.findUnique({
+      where: { id: sellerOrderId },
+      select: {
+        id: true,
+        seller: { select: { displayName: true, type: true } },
+        order: { select: { id: true, orderNumber: true } },
+        items: { select: { quantity: true } },
+      },
+    });
+    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    // Ops-only, 3P-only — a FIRST_PARTY seller can't self-cancel anyway.
+    if (so.seller.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const audit = await db.adminAuditLog.findUnique({
+      where: { id: auditLogId },
+      select: { meta: true, createdAt: true },
+    });
+    let meta: Record<string, unknown> = {};
+    try {
+      meta = JSON.parse(audit?.meta ?? "{}") as Record<string, unknown>;
+    } catch {
+      meta = {};
+    }
+    const from = typeof meta.from === "string" ? meta.from : "PROCESSING";
+    const action: "declined" | "cancelled" = from === "PENDING_PAYMENT" ? "declined" : "cancelled";
+    const wasParentStatus = typeof meta.previousParentStatus === "string" ? meta.previousParentStatus : "—";
+    const restockedUnits =
+      typeof meta.restockedUnits === "number"
+        ? meta.restockedUnits
+        : so.items.reduce((n, it) => n + it.quantity, 0);
+    const reason = typeof meta.reason === "string" && meta.reason.trim() ? meta.reason.trim() : "(no reason recorded)";
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "seller_order_cancelled_ops",
+        to,
+        from: ORDERS_FROM,
+        orderId: so.order.id,
+        idempotencyKey: `SELLER_ORDER_CANCELLED_OPS:${so.id}:${auditLogId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOrderCancelledOps({
+          brand,
+          siteUrl,
+          adminUrl: `${siteUrl}/admin/orders/${so.order.id}`,
+          sellerName: so.seller.displayName,
+          orderNumber: so.order.orderNumber,
+          action,
+          wasParentStatus,
+          itemCount: so.items.length,
+          restockedUnits,
+          reason,
+          cancelledAt: audit?.createdAt ?? new Date(),
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderCancelledOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -1985,6 +2071,16 @@ export async function retryEmailByLog(
       const auditLogId = parts[2];
       if (!offerId || !auditLogId) return { ok: false, status: "FAILED", error: "no_offer" };
       return sendSellerOfferPublishedOps(offerId, auditLogId, { retry: true, client: tx });
+    }
+    // 9F-30B — key: SELLER_ORDER_CANCELLED_OPS:<sellerOrderId>:<auditLogId>. Both
+    // ids parsed straight back out of the key; the SellerOrder + audit rows are
+    // re-read (deterministic). Retry reuses the same EmailLog row.
+    case "seller_order_cancelled_ops": {
+      const parts = log.idempotencyKey.split(":");
+      const sellerOrderId = parts[1];
+      const auditLogId = parts[2];
+      if (!sellerOrderId || !auditLogId) return { ok: false, status: "FAILED", error: "no_seller_order" };
+      return sendSellerOrderCancelledOps(sellerOrderId, auditLogId, { retry: true, client: tx });
     }
     case "seller_settlement_recorded": {
       // Key: SETTLEMENT_RECORDED:<settlementId>. Deterministic re-read of the

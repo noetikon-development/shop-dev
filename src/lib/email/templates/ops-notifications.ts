@@ -115,6 +115,69 @@ export function renderSellerOfferPublishedOps(d: {
 }
 
 /**
+ * Ops notice — a THIRD_PARTY seller declined / cancelled a customer's order they
+ * can't fulfil (9F-30B). The customer's whole order was cancelled and their
+ * stock restored; the customer has already been emailed. Ops needs to know so
+ * they can follow up (source the item elsewhere, apologise, etc). Listing /
+ * order metadata only — no customer name, address, phone or email.
+ */
+export function renderSellerOrderCancelledOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  sellerName: string;
+  orderNumber: string;
+  action: "declined" | "cancelled";
+  wasParentStatus: string;
+  itemCount: number;
+  restockedUnits: number;
+  reason: string;
+  cancelledAt: Date;
+}) {
+  const when = `${d.cancelledAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Seller ${d.action} order ${d.orderNumber} — ${d.sellerName}`;
+  const rows =
+    kvRow("Seller", d.sellerName) +
+    kvRow("Order", d.orderNumber) +
+    kvRow("Action", d.action === "declined" ? "Declined (before starting)" : "Cancelled (in progress)") +
+    kvRow("Was", d.wasParentStatus) +
+    kvRow("Items", String(d.itemCount)) +
+    kvRow("Units returned to stock", String(d.restockedUnits)) +
+    kvRow("Reason", d.reason) +
+    kvRow("When", when, { last: true });
+  const body = `
+    ${heading("A seller cancelled a customer's order")}
+    ${paragraph(`${d.sellerName} ${d.action} order ${d.orderNumber} on ${d.brand} — the customer's whole order has been cancelled and the stock restored. The customer has been notified.`)}
+    ${infoBox(rows)}
+    ${paragraph("Follow up if the customer needs the item sourced another way.")}
+    ${button("Open the order", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A seller cancelled a customer's order",
+      ``,
+      `${d.sellerName} ${d.action} order ${d.orderNumber} on ${d.brand} — the customer's whole order has been cancelled and the stock restored. The customer has been notified.`,
+      ``,
+      `Seller: ${d.sellerName}`,
+      `Order: ${d.orderNumber}`,
+      `Action: ${d.action === "declined" ? "Declined (before starting)" : "Cancelled (in progress)"}`,
+      `Was: ${d.wasParentStatus}`,
+      `Items: ${d.itemCount}`,
+      `Units returned to stock: ${d.restockedUnits}`,
+      `Reason: ${d.reason}`,
+      `When: ${when}`,
+      ``,
+      "Follow up if the customer needs the item sourced another way.",
+      ``,
+      `Open the order: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
+
+/**
  * Ops alert — another transactional email FAILED or was SKIPPED for a delivery
  * reason (9F-18). Carries only operational metadata already held on the failed
  * `EmailLog` row: no customer/seller name, address, phone, full email, payout

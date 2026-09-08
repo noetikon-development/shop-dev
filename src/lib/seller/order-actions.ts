@@ -1,17 +1,24 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { z } from "zod";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
+import { writeAudit } from "@/lib/admin/audit";
 import {
   advanceSellerOrderStatus,
   saveSellerShipment,
+  sellerCancelSellerOrder,
   type SellerOrderRepoError,
 } from "@/lib/marketplace/seller-order-repository";
 import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendOrderShipped, sendOrderDelivered } from "@/lib/email/notifications";
-import { sellerAdvanceLabels } from "@/lib/marketplace/seller-order-status";
+import {
+  sendOrderShipped,
+  sendOrderDelivered,
+  sendOrderCancelled,
+  sendSellerOrderCancelledOps,
+} from "@/lib/email/notifications";
+import { sellerAdvanceLabels, sellerCancelLabels } from "@/lib/marketplace/seller-order-status";
 
 /**
  * `/seller/orders` server actions (Phase 9F-2).
@@ -85,6 +92,104 @@ export async function advanceSellerOrderAction(
   // ambiguous "moved back to preparing".
   const { done } = sellerAdvanceLabels(res.from, parsed.data.to);
   return { ok: true, message: `Order ${done}.` };
+}
+
+// ---------------------------------------------------------------------------
+// Cancel / decline — 9F-30B
+//
+// The owning seller cancels an order they can't fulfil. This IS a cancellation
+// (not a fulfilment move): it goes through `sellerCancelSellerOrder`, which
+// reuses the admin `cancelOrderAction` reversal architecture — parent Order →
+// CANCELLED, OfferInventory restored, soldCount rolled back, commission zeroed,
+// one OrderEvent, all inside one transaction. This layer then (post-commit)
+// audits it, tells the CUSTOMER, and raises an Ops signal. The seller is NOT
+// emailed about their own cancellation (they just did it).
+// ---------------------------------------------------------------------------
+
+const cancelSchema = z.object({
+  sellerOrderId: z.string().min(1),
+  reason: z.string().trim().min(1, "Add a reason.").max(300),
+});
+
+export async function sellerCancelOrderAction(
+  _prev: SellerOrderActionState,
+  formData: FormData,
+): Promise<SellerOrderActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_fulfillment");
+  const parsed = cancelSchema.safeParse({
+    sellerOrderId: formData.get("sellerOrderId"),
+    reason: formData.get("reason"),
+  });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Add a reason for the cancellation." };
+  }
+
+  const res = await sellerCancelSellerOrder(ctx, parsed.data.sellerOrderId, parsed.data.reason);
+  if (!res.ok) return fromRepoError(res);
+
+  const verb = res.from === "PENDING_PAYMENT" ? "declined" : "cancelled";
+
+  // Audit — the Ops signal. Actor = the seller user; trigger names which path.
+  const auditId = await writeAudit({
+    actorUserId: ctx.userId,
+    action: "seller_order.cancelled",
+    targetType: "order",
+    targetId: res.orderId,
+    summary:
+      `Seller ${ctx.sellerName} ${verb} order ${res.orderNumber} ` +
+      `(was ${res.previousParentStatus}); restocked ${res.restockedUnits} unit(s) across ${res.restockedLines} line(s)`,
+    meta: {
+      trigger: res.from === "PENDING_PAYMENT" ? "seller_decline" : "seller_cancel",
+      sellerId: ctx.sellerId,
+      sellerOrderId: parsed.data.sellerOrderId,
+      orderNumber: res.orderNumber,
+      from: res.from,
+      previousParentStatus: res.previousParentStatus,
+      restockedUnits: res.restockedUnits,
+      restockedLines: res.restockedLines,
+      reason: parsed.data.reason,
+    },
+  });
+
+  // 9F-20-style dedicated audit for any actual post-settlement clawback (can't
+  // happen from PENDING_PAYMENT/PROCESSING, kept symmetric with the admin path).
+  for (const cb of res.clawbackEvents) {
+    await writeAudit({
+      actorUserId: ctx.userId,
+      action: "seller.settlement.clawback_accrued",
+      targetType: "seller_order",
+      targetId: cb.sellerOrderId,
+      summary:
+        `seller cancellation of order ${res.orderNumber} clawed back ` +
+        `${cb.clawbackDelta} centavos from seller ${cb.sellerId}`,
+      meta: {
+        sellerOrderId: cb.sellerOrderId,
+        orderId: res.orderId,
+        sellerId: cb.sellerId,
+        returnId: null,
+        cancellationReference: res.orderNumber,
+        clawbackDelta: cb.clawbackDelta,
+        newOutstandingClawback: cb.newOutstandingClawback,
+      },
+    });
+  }
+
+  // Customer notification — the SAME email the admin cancellation sends. It never
+  // claims a refund (COD / PayMongo dormant). Key ORDER_CANCELLED:<orderId> → one
+  // send per order (a later admin cancel can't duplicate it).
+  scheduleEmail(() => sendOrderCancelled(res.orderId, parsed.data.reason));
+  // Axiaro Operations — a seller just cancelled a customer's order. Ops-only,
+  // audit-row-anchored key, no customer PII. The seller does NOT get an email.
+  if (auditId) {
+    scheduleEmail(() => sendSellerOrderCancelledOps(parsed.data.sellerOrderId, auditId));
+  }
+
+  revalidate(parsed.data.sellerOrderId);
+  revalidateOrderPaths(res.orderNumber, res.orderId);
+  revalidateTag("products", "max"); // availability + bestseller changed
+
+  const { done } = sellerCancelLabels(res.from);
+  return { ok: true, message: `Order ${done}. ${res.restockedUnits} unit(s) returned to your stock.` };
 }
 
 // ---------------------------------------------------------------------------

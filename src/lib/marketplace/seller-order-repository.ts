@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import {
   canTransitionSellerOrder,
   isSellerOrderStatus,
+  sellerCanCancelSellerOrder,
   shipmentStatusForSellerOrder,
   type SellerOrderStatus,
 } from "@/lib/marketplace/seller-order-status";
@@ -14,7 +15,8 @@ import {
   buildTrackingUrl,
   courierLabel,
 } from "@/lib/orders/couriers";
-import { canTransition } from "@/lib/orders/status";
+import { canTransition, CANCELLABLE_STATUSES } from "@/lib/orders/status";
+import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
 
@@ -29,8 +31,19 @@ import type { SellerContext } from "@/lib/marketplace/types";
  * write transaction with a status-guarded `updateMany` (0 rows ⇒ someone else
  * moved it ⇒ abort).
  *
- * NEVER touches: `Inventory` / `InventoryAdjustment` / `Variant.stock`,
- * `OfferInventory`, payments, settlement.
+ * NEVER touches: `Inventory` / `InventoryAdjustment` / `Variant.stock`, payments.
+ *
+ * Phase 9F-30B adds ONE more scoped exception: `sellerCancelSellerOrder` — the
+ * owning 3P seller declining / cancelling an order they can't fulfil. It reuses
+ * the EXISTING cancellation architecture (`admin/order-actions.ts` `cancelOrderAction`):
+ * the parent `Order` → CANCELLED (atomic status gate = the one-shot guard),
+ * `OfferInventory` restored per `OrderItem.offerId` (`restoreOfferStock` +
+ * `OfferAdjustment(CANCELLATION)`), `Product.soldCount` rolled back, `SellerOrder`
+ * → CANCELLED with `commissionAmount` zeroed (+ a settlement clawback IF the row
+ * was somehow already settled — it never can be from PENDING_PAYMENT/PROCESSING,
+ * kept only for symmetry), one `OrderEvent`. The customer email + ops audit are
+ * fired by the caller AFTER commit; the seller is NOT emailed about their own
+ * cancellation. Single-seller only (this phase) — a multi-seller parent is refused.
  *
  * Phase 9F-12b adds ONE scoped exception: when a seller advances a SellerOrder
  * to SHIPPED / DELIVERED and EVERY SellerOrder on the parent Order has reached
@@ -153,7 +166,15 @@ export async function getSellerOrderForSeller(
       shippingMethodName: true,
       createdAt: true,
       updatedAt: true,
-      order: { select: { orderNumber: true, status: true, placedAt: true, shippingAddress: true } },
+      order: {
+        select: {
+          orderNumber: true,
+          status: true,
+          placedAt: true,
+          shippingAddress: true,
+          _count: { select: { sellerOrders: true } },
+        },
+      },
       items: {
         select: {
           id: true,
@@ -427,6 +448,215 @@ export async function advanceSellerOrderStatus(
   } catch (err) {
     console.error("[seller-order-repository] advanceSellerOrderStatus failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not update the order." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 9F-30B — seller cancels / declines an order it can't fulfil
+// ---------------------------------------------------------------------------
+
+export type SellerOrderClawbackEvent = {
+  sellerOrderId: string;
+  sellerId: string;
+  clawbackDelta: number;
+  newOutstandingClawback: number;
+};
+
+export type SellerCancelResult =
+  | {
+      ok: true;
+      from: SellerOrderStatus;
+      orderId: string;
+      orderNumber: string;
+      previousParentStatus: string;
+      restockedUnits: number;
+      restockedLines: number;
+      clawbackEvents: SellerOrderClawbackEvent[];
+    }
+  | SellerOrderRepoError;
+
+/** Thrown inside the tx when the atomic parent-Order gate matches 0 rows. */
+class ParentOrderMovedError extends Error {}
+
+/**
+ * The owning seller cancels a `SellerOrder` (PENDING_PAYMENT = decline,
+ * PROCESSING = cancel) because they can't fulfil it. Reuses the same reversal
+ * the admin `cancelOrderAction` performs — this phase is single-seller, so the
+ * seller's SellerOrder IS the whole order and cancelling it cancels the parent.
+ *
+ * Guards / idempotency (identical mechanism to `cancelOrderAction`):
+ *   - SellerOrder scoped to `ctx.sellerId`; status must be PENDING_PAYMENT / PROCESSING
+ *   - the parent Order must still be in `CANCELLABLE_STATUSES`
+ *   - a single atomic `UPDATE "Order" … WHERE status IN (cancellable)` is the
+ *     one-shot gate: 0 rows ⇒ the order already moved on ⇒ nothing is restored
+ *   - the SellerOrder write is status-guarded too (0 rows ⇒ STALE)
+ *
+ * Never touches payments, `Order.paymentStatus`, `Inventory`, the returns/refund
+ * flow, or another seller's rows.
+ */
+export async function sellerCancelSellerOrder(
+  ctx: SellerContext,
+  sellerOrderId: string,
+  reason: string,
+  externalTx?: Prisma.TransactionClient,
+): Promise<SellerCancelResult> {
+  const cleanReason = reason.trim();
+  if (!cleanReason) {
+    return { ok: false, code: "VALIDATION", error: "Add a reason so Axiaro and the customer know why." };
+  }
+
+  const run = async (tx: Prisma.TransactionClient): Promise<SellerCancelResult> => {
+    const so = await tx.sellerOrder.findFirst({
+      where: { id: sellerOrderId, sellerId: ctx.sellerId },
+      select: {
+        id: true,
+        status: true,
+        total: true,
+        commissionAmount: true,
+        settlementId: true,
+        settlementClawbackAmount: true,
+        order: {
+          select: {
+            id: true,
+            orderNumber: true,
+            status: true,
+            sellerOrders: { select: { id: true } },
+          },
+        },
+        items: { select: { id: true, offerId: true, quantity: true, productId: true } },
+      },
+    });
+    if (!so) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
+
+    if (so.order.sellerOrders.length !== 1) {
+      return {
+        ok: false,
+        code: "VALIDATION",
+        error: "This order has items from more than one seller — contact Axiaro to cancel it.",
+      };
+    }
+    if (!sellerCanCancelSellerOrder(so.status)) {
+      return {
+        ok: false,
+        code: "VALIDATION",
+        error: `An order that is ${so.status.toLowerCase().replace("_", " ")} can't be cancelled here.`,
+      };
+    }
+    if (!(CANCELLABLE_STATUSES as string[]).includes(so.order.status)) {
+      return {
+        ok: false,
+        code: "CONFLICT",
+        error: "The customer order has already moved on — reload and check its status.",
+      };
+    }
+
+    // 1. SellerOrder → CANCELLED, status-guarded + commission zeroed (the sale it
+    //    was earned on no longer exists). 0 rows ⇒ someone else moved it.
+    const soRes = await tx.sellerOrder.updateMany({
+      where: { id: sellerOrderId, sellerId: ctx.sellerId, status: so.status },
+      data: { status: "CANCELLED", commissionAmount: 0, updatedAt: new Date() },
+    });
+    if (soRes.count === 0) {
+      return { ok: false, code: "STALE", error: "This order was updated elsewhere — reload and try again." };
+    }
+
+    // 2. Parent Order → CANCELLED — the atomic one-shot gate for the reversal
+    //    below. 0 rows ⇒ the order was shipped / delivered / cancelled since we
+    //    read it ⇒ abort the WHOLE tx (rolls back the SellerOrder write) so
+    //    inventory is never restored against an order that's still live.
+    const cancelledOrder = await tx.$executeRaw`
+      UPDATE "Order" SET "status" = 'CANCELLED', "updatedAt" = now()
+      WHERE "id" = ${so.order.id}
+        AND "status" IN ('PENDING_PAYMENT', 'PENDING', 'PROCESSING')`;
+    if (cancelledOrder === 0) throw new ParentOrderMovedError();
+
+    // 3. Reverse exactly what checkout's SALE deducted — OfferInventory per
+    //    OrderItem.offerId + OfferAdjustment(CANCELLATION). Same as
+    //    cancelOrderAction's offer-native branch. Runs at most once (step 2 gate).
+    let restockedUnits = 0;
+    let restockedLines = 0;
+    const soldBackByProduct = new Map<string, number>();
+    for (const it of so.items) {
+      if (it.quantity <= 0) continue;
+      if (it.offerId) {
+        const res = await restoreOfferStock(
+          {
+            offerId: it.offerId,
+            units: it.quantity,
+            reason: "CANCELLATION",
+            note: `Order ${so.order.orderNumber} cancelled by seller ${ctx.sellerName} · item ${it.id}`,
+            actorUserId: ctx.userId,
+          },
+          tx,
+        );
+        if (!res.ok) throw new Error(res.error ?? "Could not restore a line — cancellation aborted.");
+      }
+      restockedUnits += it.quantity;
+      restockedLines += 1;
+      soldBackByProduct.set(it.productId, (soldBackByProduct.get(it.productId) ?? 0) + it.quantity);
+    }
+
+    // 4. Undo the soldCount bump checkout made (never below zero).
+    for (const [productId, qty] of soldBackByProduct) {
+      await tx.$executeRaw`
+        UPDATE "Product" SET "soldCount" = GREATEST(0, "soldCount" - ${qty})
+        WHERE "id" = ${productId}`;
+    }
+
+    // 5. Settlement clawback — ONLY if this SellerOrder was somehow already
+    //    settled. It never can be from PENDING_PAYMENT / PROCESSING (settlement
+    //    needs DELIVERED), but keep the branch symmetric with cancelOrderAction.
+    const clawbackEvents: SellerOrderClawbackEvent[] = [];
+    if (so.settlementId !== null) {
+      const delta = Math.max(0, so.total - so.commissionAmount);
+      await tx.sellerOrder.update({
+        where: { id: sellerOrderId },
+        data: {
+          settlementStatus: "CLAWED_BACK",
+          settlementClawbackAmount: { increment: delta },
+        },
+      });
+      if (delta > 0) {
+        clawbackEvents.push({
+          sellerOrderId,
+          sellerId: ctx.sellerId,
+          clawbackDelta: delta,
+          newOutstandingClawback: so.settlementClawbackAmount + delta,
+        });
+      }
+    }
+
+    // 6. Timeline event on the customer-facing order.
+    await tx.orderEvent.create({
+      data: {
+        orderId: so.order.id,
+        status: "CANCELLED",
+        title: "Order cancelled",
+        detail: `Cancelled by the seller. Reason: ${cleanReason}`,
+      },
+    });
+
+    return {
+      ok: true,
+      from: so.status as SellerOrderStatus,
+      orderId: so.order.id,
+      orderNumber: so.order.orderNumber,
+      previousParentStatus: so.order.status,
+      restockedUnits,
+      restockedLines,
+      clawbackEvents,
+    };
+  };
+
+  try {
+    if (externalTx) return await run(externalTx);
+    return await prisma.$transaction(run);
+  } catch (err) {
+    if (err instanceof ParentOrderMovedError) {
+      return { ok: false, code: "CONFLICT", error: "The order changed while you were cancelling it. Reload and try again." };
+    }
+    console.error("[seller-order-repository] sellerCancelSellerOrder failed", err);
+    return { ok: false, code: "VALIDATION", error: "Could not cancel the order." };
   }
 }
 

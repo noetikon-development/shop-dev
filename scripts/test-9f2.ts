@@ -292,13 +292,17 @@ async function dbTests() {
 async function staticTests() {
   const repo = read("src/lib/marketplace/seller-order-repository.ts");
   ok(
-    "G1 seller-order-repository writes Order.status / OrderEvent ONLY through the guarded 9F-12b parent rollup",
+    "G1 seller-order-repository writes Order.status / OrderEvent ONLY through the guarded 9F-12b rollup or the 9F-30B seller-cancel gate",
     /async function rollUpParentOrder\(/.test(repo) &&
-      // the single Order write is an id + status-guarded updateMany inside the rollup
+      // the 9F-12b rollup's Order write is an id + status-guarded updateMany
       /tx\.order\.updateMany\(\{\s*\n?\s*where: \{ id: order\.id, status:/.test(repo) &&
-      !/prisma\.order\.update/.test(repo) &&
-      // every orderEvent.create sits after the rollup helper's definition
-      repo.split("orderEvent.create").length - 1 === 2 &&
+      // the 9F-30B seller-cancel Order write is an atomic status-IN-guarded one-shot
+      /UPDATE "Order" SET "status" = 'CANCELLED'[\s\S]{0,120}"status" IN \('PENDING_PAYMENT', 'PENDING', 'PROCESSING'\)/.test(repo) &&
+      // never an unguarded row update
+      !/prisma\.order\.update\b/.test(repo) &&
+      !/tx\.order\.update\(/.test(repo) &&
+      // orderEvent.create only ever inside the rollup helper (x2) or sellerCancelSellerOrder (x1)
+      repo.split("orderEvent.create").length - 1 === 3 &&
       repo.indexOf("orderEvent.create") > repo.indexOf("async function rollUpParentOrder"),
   );
   const repoCode = repo
@@ -306,16 +310,25 @@ async function staticTests() {
     .filter((l) => !l.trim().startsWith("*") && !l.trim().startsWith("//"))
     .join("\n");
   ok(
-    "G2 seller-order-repository never touches inventory / payments / settlement in code",
-    !/@\/lib\/inventory|\b(tx|prisma|client)\.(inventory|inventoryAdjustment|offerInventory|offerAdjustment|payment|paymentRefund)\b/.test(
+    "G2 seller-order-repository never touches raw inventory / payments; settlement clawback only via the 9F-30B seller-cancel path (symmetric with admin cancelOrderAction)",
+    !/@\/lib\/inventory\b|\b(tx|prisma|client)\.(inventory|inventoryAdjustment|offerInventory|offerAdjustment|payment|paymentRefund)\b/.test(
       repoCode,
-    ) && !/settlementStatus:\s|settlementStatus =/.test(repoCode),
+    ) &&
+      // the only settlement write is the CLAWED_BACK branch inside sellerCancelSellerOrder
+      (repoCode.match(/settlementStatus:\s/g) ?? []).length === 1 &&
+      /settlementStatus: "CLAWED_BACK"/.test(repoCode) &&
+      repoCode.indexOf('settlementStatus: "CLAWED_BACK"') > repoCode.indexOf("export async function sellerCancelSellerOrder"),
   );
   ok("G3 every write is sellerId-scoped + status-guarded updateMany", /updateMany\(\{[\s\S]*?sellerId: ctx\.sellerId, status: so\.status/.test(repo));
 
   const actions = read("src/lib/seller/order-actions.ts");
   ok("G4 order actions require manage_seller_fulfillment", (actions.match(/requireSellerSessionPermission\("manage_seller_fulfillment"\)/g) ?? []).length >= 2);
-  ok("G5 order actions never revalidate the storefront", !/revalidateTag\(\s*["']products/.test(actions) && !/revalidatePath\(\s*["']\/p\//.test(actions));
+  ok(
+    "G5 fulfilment order actions never revalidate the storefront (only the 9F-30B seller-cancel action does — availability changed)",
+    (actions.match(/revalidateTag\(\s*["']products/g) ?? []).length === 1 &&
+      actions.indexOf('revalidateTag("products"') > actions.indexOf("export async function sellerCancelOrderAction") &&
+      !/revalidatePath\(\s*["']\/p\//.test(actions),
+  );
 
   const nav = read("src/lib/seller/navigation.ts");
   ok("G6 /seller/orders is live in the nav", /path: "\/seller\/orders"[^}]*live: true/.test(nav.replace(/\n/g, " ")));
@@ -323,7 +336,23 @@ async function staticTests() {
   const detailRepo = read("src/lib/marketplace/seller-order-repository.ts");
   ok(
     "G7 getSellerOrderForSeller does not select Order.email / phone / userId / billingAddress / grandTotal",
-    /getSellerOrderForSeller[\s\S]*?order: \{ select: \{ orderNumber: true, status: true, placedAt: true, shippingAddress: true \} \}/.test(detailRepo),
+    (() => {
+      const fn = detailRepo.slice(
+        detailRepo.indexOf("export async function getSellerOrderForSeller"),
+        detailRepo.indexOf("// ---", detailRepo.indexOf("export async function getSellerOrderForSeller")),
+      );
+      // selects only the safe parent-order fields (+ a sellerOrders _count for the 9F-30B single-seller gate)
+      return (
+        /orderNumber: true/.test(fn) &&
+        /shippingAddress: true/.test(fn) &&
+        /_count: \{ select: \{ sellerOrders: true \} \}/.test(fn) &&
+        !/\bemail: true/.test(fn) &&
+        !/\bphone: true/.test(fn) &&
+        !/\buserId: true/.test(fn) &&
+        !/billingAddress/.test(fn) &&
+        !/grandTotal/.test(fn)
+      );
+    })(),
   );
 
   const statusMod = read("src/lib/marketplace/seller-order-status.ts");

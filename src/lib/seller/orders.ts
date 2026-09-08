@@ -8,7 +8,10 @@ import {
 import {
   allowedSellerOrderMoves,
   isParentOrderFulfillable,
+  sellerCanCancelSellerOrder,
+  sellerCancelLabels,
 } from "@/lib/marketplace/seller-order-status";
+import { CANCELLABLE_STATUSES } from "@/lib/orders/status";
 import { getCourier } from "@/lib/orders/couriers";
 import type { SellerContext } from "@/lib/marketplace/types";
 
@@ -118,6 +121,16 @@ export type SellerOrderDetailView = {
   }[];
   shipment: SellerOrderShipmentView | null;
   allowedMoves: string[];
+  /**
+   * 9F-30B — the owning seller may cancel / decline this order: SellerOrder is
+   * PENDING_PAYMENT or PROCESSING, the parent Order is still cancellable, and it
+   * is a single-seller order (this phase only cancels those on the seller plane).
+   * Independent of `parentFulfillable` — a PENDING_PAYMENT order is not yet
+   * fulfillable but can still be declined.
+   */
+  canCancel: boolean;
+  /** Button + toast wording for the cancel control, keyed off the current status. */
+  cancelLabels: { button: string; done: string };
 };
 
 export async function getSellerOrderDetail(
@@ -179,5 +192,10 @@ export async function getSellerOrderDetail(
     items: so.items,
     shipment,
     allowedMoves: allowedSellerOrderMoves(so.status, { parentOrderStatus: so.order.status }),
+    canCancel:
+      sellerCanCancelSellerOrder(so.status) &&
+      (CANCELLABLE_STATUSES as readonly string[]).includes(so.order.status) &&
+      so.order._count.sellerOrders === 1,
+    cancelLabels: sellerCancelLabels(so.status),
   };
 }
