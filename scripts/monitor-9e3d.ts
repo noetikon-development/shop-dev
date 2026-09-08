@@ -131,7 +131,7 @@ async function run() {
             (SELECT COUNT(*) FROM "OfferAdjustment" a WHERE a."offerInventoryId"=oi."id")::int AS n
      FROM "OfferInventory" oi
      JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
-     WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'`,
+     WHERE s.type = 'FIRST_PARTY'`,
   ) as { id: string; quantity: number; opening: number | null; sd: number; n: number }[];
   let broken = 0;
   for (const c of chains) { if (c.n > 0 && (c.opening ?? 0) + c.sd !== c.quantity) broken++; }

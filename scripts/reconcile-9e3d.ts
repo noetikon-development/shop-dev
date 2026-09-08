@@ -40,10 +40,13 @@ async function run() {
   const axiaro = await prisma.seller.findFirst({ where: { type: "FIRST_PARTY" }, select: { id: true } });
   if (!axiaro) { console.error("STOP — no FIRST_PARTY seller."); process.exitCode = 1; return; }
 
-  // Every FIRST_PARTY NEW offer with its OfferInventory, its variant, and that
-  // variant's legacy Inventory row.
+  // Every FIRST_PARTY offer with its OfferInventory, its variant, and that
+  // variant's legacy Inventory row. 9F-23a: the FIRST_PARTY seller is the only
+  // anchor — there is exactly ONE FIRST_PARTY offer per variant (invariant
+  // asserted below), so its condition (NEW today, CMS-settable later) is not
+  // part of how the canonical 1P offer is identified.
   const offers = await prisma.offer.findMany({
-    where: { sellerId: axiaro.id, condition: "NEW" },
+    where: { sellerId: axiaro.id },
     select: {
       id: true,
       variantId: true,
@@ -51,7 +54,7 @@ async function run() {
       variant: { select: { id: true, stock: true, inventory: { select: { id: true, quantity: true, reserved: true, reorderPoint: true } } } },
     },
   });
-  console.log(`  ${offers.length} FIRST_PARTY NEW offers\n`);
+  console.log(`  ${offers.length} FIRST_PARTY offers\n`);
 
   // Per-store / per-column operational-movement flags. Since the 9E-3D-5 /
   // 9E-3D-6 deploys, `Inventory` is a FROZEN mirror — checkout / cancel /
@@ -147,19 +150,21 @@ async function run() {
     `SELECT COUNT(*)::int AS n FROM "Inventory" i
      WHERE NOT EXISTS (
        SELECT 1 FROM "Offer" o JOIN "Seller" s ON s.id = o."sellerId"
-       WHERE o."variantId" = i."variantId" AND s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+       WHERE o."variantId" = i."variantId" AND s.type = 'FIRST_PARTY'
      )`,
   ) as { n: number }[];
-  check("every Inventory row has a FIRST_PARTY NEW offer (reverse coverage)", invNoFpOffer[0].n === 0, `${invNoFpOffer[0].n} uncovered`);
+  check("every Inventory row has a FIRST_PARTY offer (reverse coverage)", invNoFpOffer[0].n === 0, `${invNoFpOffer[0].n} uncovered`);
 
+  // 9F-23a: this is the standing 1P invariant — exactly one FIRST_PARTY offer
+  // per variant, regardless of condition. It replaces the old NEW-scoped guard.
   const multiFpOffer = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*)::int AS n FROM (
        SELECT o."variantId" FROM "Offer" o JOIN "Seller" s ON s.id = o."sellerId"
-       WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+       WHERE s.type = 'FIRST_PARTY'
        GROUP BY o."variantId" HAVING COUNT(*) > 1
      ) d`,
   ) as { n: number }[];
-  check("at most one FIRST_PARTY NEW offer per variant", multiFpOffer[0].n === 0, `${multiFpOffer[0].n} variants with >1`);
+  check("at most one FIRST_PARTY offer per variant", multiFpOffer[0].n === 0, `${multiFpOffer[0].n} variants with >1`);
 
   // ── negative stock ────────────────────────────────────────────────────
   const negOI = await prisma.$queryRawUnsafe(

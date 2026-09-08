@@ -297,8 +297,10 @@ export async function getProductPerformance(
             select: {
               // Phase 9E-3D-2: current stock from the operational authority —
               // the Axiaro FIRST_PARTY OfferInventory, not the legacy mirror.
+              // 9F-23a: keyed on the FIRST_PARTY seller only (one 1P offer per
+              // variant); its condition is not part of "Axiaro's business".
               offers: {
-                where: { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" },
+                where: { seller: { is: { type: "FIRST_PARTY" } } },
                 select: { inventory: { select: { quantity: true, reserved: true } } },
               },
             },
@@ -525,11 +527,13 @@ export async function getInventoryInsights(): Promise<InventoryInsights> {
   // the catalog columns (Variant.price / Product.costPrice), kept in step by
   // the 1P offer price write-through — value reporting is not an inventory
   // concern and is out of scope for this phase.
+  // 9F-23a: the FIRST_PARTY seller is the anchor — one 1P offer per variant,
+  // regardless of its condition (NEW today).
   const FP = Prisma.sql`
     JOIN "Offer" o  ON o.id = oi."offerId"
     JOIN "Seller" s ON s.id = o."sellerId"
     JOIN "Variant" v ON v.id = o."variantId"
-    WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND v.status = 'ACTIVE'`;
+    WHERE s.type = 'FIRST_PARTY' AND v.status = 'ACTIVE'`;
   const [activeVariants, totalVariants, statusRow, reorderRow, valueRow] = await Promise.all([
     prisma.variant.count({ where: { status: "ACTIVE" } }),
     prisma.variant.count(),
@@ -557,7 +561,7 @@ export async function getInventoryInsights(): Promise<InventoryInsights> {
       JOIN "Seller" s  ON s.id = o."sellerId"
       JOIN "Variant" v ON v.id = o."variantId"
       JOIN "Product" p ON p.id = v."productId"
-      WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND v.status = 'ACTIVE'
+      WHERE s.type = 'FIRST_PARTY' AND v.status = 'ACTIVE'
     `),
   ]);
 
@@ -603,7 +607,8 @@ export async function getLowStockReport(
   // OfferInventory (9E-3D-2). SKU from Variant.sku. No stock is touched.
   const all = await prisma.offerInventory.findMany({
     where: {
-      offer: { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW", variant: { status: "ACTIVE" } },
+      // 9F-23a: FIRST_PARTY seller anchor only — one 1P offer per variant.
+      offer: { seller: { is: { type: "FIRST_PARTY" } }, variant: { status: "ACTIVE" } },
     },
     select: {
       quantity: true,

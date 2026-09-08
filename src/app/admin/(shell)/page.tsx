@@ -38,12 +38,14 @@ export default async function AdminDashboard() {
           // authority — the Axiaro FIRST_PARTY OfferInventory. Semantically
           // identical to the old Inventory count (1:1 mirror), threshold
           // compared against available (quantity − reserved).
+          // 9F-23a: FIRST_PARTY seller anchor only — one 1P offer per variant,
+          // regardless of condition (NEW today).
           prisma.$queryRaw<{ count: bigint }[]>`
             SELECT COUNT(*)::bigint AS count
             FROM "OfferInventory" oi
             JOIN "Offer" o ON o.id = oi."offerId"
             JOIN "Seller" s ON s.id = o."sellerId"
-            WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+            WHERE s.type = 'FIRST_PARTY'
               AND oi."quantity" - oi."reserved" <= oi."reorderPoint"`.then((r) => Number(r[0]?.count ?? 0))
         : Promise.resolve(null),
     ]);

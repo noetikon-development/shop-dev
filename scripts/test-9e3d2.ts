@@ -122,6 +122,8 @@ async function dbTests() {
       ok("C  low-stock does NOT flag the fixture whose OfferInventory is healthy (mirror is low)", !flagged.includes(div.variantId));
 
       // ---- D — analytics insights raw SQL + dashboard tile ----
+      // 9F-23a: these replicas mirror the production queries, which now anchor on
+      // the FIRST_PARTY seller only (one 1P offer per variant, any condition).
       const insightsRow = await tx.$queryRawUnsafe<{ out: number; low: number }[]>(`
         SELECT COUNT(*) FILTER (WHERE oi.quantity - oi.reserved <= 0)::int AS out,
                COUNT(*) FILTER (WHERE oi.quantity - oi.reserved > 0 AND oi.quantity - oi.reserved <= oi."reorderPoint")::int AS low
@@ -129,14 +131,14 @@ async function dbTests() {
         JOIN "Offer" o ON o.id = oi."offerId"
         JOIN "Seller" s ON s.id = o."sellerId"
         JOIN "Variant" v ON v.id = o."variantId"
-        WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND v.status = 'ACTIVE'
+        WHERE s.type = 'FIRST_PARTY' AND v.status = 'ACTIVE'
           AND o."variantId" IN ($1, $2)`, div.variantId, lowAuth.variantId);
       ok("D  analytics insights: exactly 1 low from the divergent pair (the authority-low one)", insightsRow[0].low === 1 && insightsRow[0].out === 0, JSON.stringify(insightsRow[0]));
 
       const tile = await tx.$queryRawUnsafe<{ count: bigint }[]>(`
         SELECT COUNT(*)::bigint AS count FROM "OfferInventory" oi
         JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
-        WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW'
+        WHERE s.type = 'FIRST_PARTY'
           AND oi."quantity" - oi."reserved" <= oi."reorderPoint"
           AND o."variantId" IN ($1, $2)`, div.variantId, lowAuth.variantId);
       ok("D  dashboard low-stock tile counts the authority-low fixture only", Number(tile[0].count) === 1);
@@ -147,7 +149,7 @@ async function dbTests() {
         FROM "OfferInventory" oi
         JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
         JOIN "Variant" v ON v.id = o."variantId"
-        WHERE s.type = 'FIRST_PARTY' AND o.condition = 'NEW' AND o."variantId" = $1`, div.variantId);
+        WHERE s.type = 'FIRST_PARTY' AND o."variantId" = $1`, div.variantId);
       ok("D  retail value = OfferInventory.quantity (42) * Variant.price (1000) = 42000", valueRow[0].retail === "42000", valueRow[0].retail);
 
       // ---- E / F — admin write core keeps both stores + mirror in step ----
