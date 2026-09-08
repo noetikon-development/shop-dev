@@ -121,7 +121,7 @@ function staticTests() {
 
   // 12/14 — buy-box + 1P untouched
   ok("buy-box · rankOffers / buy-box-rule.ts NOT touched by 9F-22", !/9F-22/.test(read("src/lib/marketplace/buy-box-rule.ts")));
-  ok("1P · offer-sync.ts NOT touched by 9F-22 (still hardcodes condition 'NEW')", !/9F-22/.test(read("src/lib/admin/offer-sync.ts")) && /condition: "NEW"/.test(read("src/lib/admin/offer-sync.ts")));
+  ok("1P · offer-sync.ts NOT touched by 9F-22 (1P discovery de-NEW'd later in 9F-23b)", !/9F-22/.test(read("src/lib/admin/offer-sync.ts")));
   ok("1P · first-party-inventory.ts NOT touched", !/9F-22/.test(read("src/lib/admin/first-party-inventory.ts")));
   ok("1P · analytics NEW-only queries NOT touched", !/9F-22/.test(read("src/lib/analytics/queries.ts")));
   ok("scope · settlement / payment / reconcile scripts NOT touched", !/9F-22/.test(read("src/lib/marketplace/settlement.ts")) && !/9F-22/.test(read("scripts/reconcile-9e3d.ts")));

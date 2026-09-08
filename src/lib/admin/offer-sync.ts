@@ -7,8 +7,10 @@ import { prisma } from "@/lib/prisma";
  *
  * Phase 9E-3D-6: the admin stock-adjustment and threshold paths write
  * `OfferInventory` ONLY. `syncFirstPartyOfferStock` / `syncFirstPartyOfferReorderPoint`
- * are the WHOLE write — they row-lock the FIRST_PARTY (`condition = 'NEW'`)
- * `OfferInventory`, mutate it, record an `OfferAdjustment` (stock only —
+ * are the WHOLE write — they row-lock the single Axiaro FIRST_PARTY
+ * `OfferInventory` (9F-23b: identified by seller alone, not condition — there is
+ * exactly ONE FIRST_PARTY offer per variant; the raw-SQL locks assert that and
+ * fail safely otherwise), mutate it, record an `OfferAdjustment` (stock only —
  * threshold changes carry no adjustment, mirroring the old `setReorderPoint`),
  * and re-derive `Variant.stock` DIRECTLY from `OfferInventory` (D-3: the column
  * retires with `Inventory` later). No `Inventory` row is read, locked or
@@ -37,6 +39,11 @@ export type OfferStockResult =
  * Axiaro FIRST_PARTY `OfferInventory` — `max(0, quantity - reserved)`. Written
  * directly; no `Inventory` read. `Variant.stock` is read by nobody since 9D-D
  * and retires with `Inventory` (D-3); this keeps it coherent in the meantime.
+ *
+ * 9F-23b: the subquery is scoped to the FIRST_PARTY seller alone (one 1P offer
+ * per variant). If the invariant were violated (>1 FIRST_PARTY offer) the
+ * subquery raises "more than one row" and the caller's transaction rolls back —
+ * a safe failure, never a silent arbitrary pick.
  */
 export async function syncVariantStockFromFirstPartyOffer(
   variantId: string,
@@ -48,7 +55,7 @@ export async function syncVariantStockFromFirstPartyOffer(
       FROM "OfferInventory" oi
       JOIN "Offer" o ON o."id" = oi."offerId"
       JOIN "Seller" s ON s."id" = o."sellerId"
-      WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY' AND o."condition" = 'NEW'
+      WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY'
     ), 0))
     WHERE "id" = ${variantId}`;
 }
@@ -63,9 +70,11 @@ export async function firstPartySellerId(tx: Tx = prisma): Promise<string | null
 }
 
 /**
- * Push the current commercial values of a Variant onto its Axiaro FIRST_PARTY
- * offer (NEW condition). No-op when the 1P seller or the offer is missing —
- * `ensureFirstPartyOffer` covers creation.
+ * Push the current commercial values of a Variant onto its single Axiaro
+ * FIRST_PARTY offer. No-op when the 1P seller or the offer is missing —
+ * `ensureFirstPartyOffer` covers creation. 9F-23b: keyed on the FIRST_PARTY
+ * seller alone (one 1P offer per variant); `updateMany` touches exactly that
+ * one row, or zero.
  */
 export async function syncFirstPartyOfferPrice(
   variantId: string,
@@ -75,9 +84,44 @@ export async function syncFirstPartyOfferPrice(
   const sellerId = await firstPartySellerId(tx);
   if (!sellerId) return;
   await tx.offer.updateMany({
-    where: { variantId, sellerId, condition: "NEW" },
+    where: { variantId, sellerId },
     data: { price: data.price, compareAtPrice: data.compareAtPrice },
   });
+}
+
+/**
+ * 9F-23b: row-lock (`FOR UPDATE`) the ONE Axiaro FIRST_PARTY `OfferInventory`
+ * for a variant, identified by the seller alone (not condition). A THIRD_PARTY
+ * offer on the same variant is never touched. `LIMIT 2` so a broken invariant
+ * (>1 FIRST_PARTY offer) is detected and rejected rather than silently picking
+ * an arbitrary row. Returns `{ ok:false, error }` for zero-offer or
+ * multiple-offer — never throws for those; the caller surfaces `error`.
+ */
+async function lockFirstPartyOfferInventory(
+  variantId: string,
+  tx: Prisma.TransactionClient,
+): Promise<
+  | { ok: true; row: { id: string; quantity: number; reserved: number; reorderPoint: number } }
+  | { ok: false; error: string }
+> {
+  const locked = await tx.$queryRaw<
+    { id: string; quantity: number; reserved: number; reorderPoint: number }[]
+  >`
+    SELECT oi."id", oi."quantity", oi."reserved", oi."reorderPoint"
+    FROM "OfferInventory" oi
+    JOIN "Offer" o ON o."id" = oi."offerId"
+    JOIN "Seller" s ON s."id" = o."sellerId"
+    WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY'
+    FOR UPDATE OF oi
+    LIMIT 2`;
+  if (locked.length === 0) return { ok: false, error: "No inventory record for that variant." };
+  if (locked.length > 1) {
+    return {
+      ok: false,
+      error: "This variant has more than one Axiaro listing — stock can’t be adjusted until that’s resolved.",
+    };
+  }
+  return { ok: true, row: locked[0] };
 }
 
 /**
@@ -86,12 +130,10 @@ export async function syncFirstPartyOfferPrice(
  * inside the caller's transaction. Phase 9E-3D-6: this is the WHOLE admin stock
  * write; no `Inventory` row is read, locked or written.
  *
- * Row-locks the `OfferInventory` row (`FOR UPDATE`) scoped to the FIRST_PARTY,
- * `condition = 'NEW'` offer — a THIRD_PARTY offer on the same variant is never
- * touched. Rejects (returns `{ ok:false }`, does NOT throw) a change that would
- * take quantity below 0 or below the currently reserved amount — the caller
- * surfaces `error` verbatim. Throws only on an unexpected DB failure, which the
- * caller sanitizes.
+ * Rejects (returns `{ ok:false }`, does NOT throw) a change that would take
+ * quantity below 0 or below the currently reserved amount, or when the
+ * one-FIRST_PARTY-offer-per-variant invariant is broken — the caller surfaces
+ * `error` verbatim. Throws only on an unexpected DB failure.
  *
  * `reserved` is never changed here (admin stock adjustments only move on-hand
  * quantity — reservation state is owned by checkout).
@@ -104,15 +146,9 @@ export async function syncFirstPartyOfferStock(
   actorUserId: string | null,
   tx: Prisma.TransactionClient,
 ): Promise<OfferStockResult> {
-  const locked = await tx.$queryRaw<{ id: string; quantity: number; reserved: number }[]>`
-    SELECT oi."id", oi."quantity", oi."reserved"
-    FROM "OfferInventory" oi
-    JOIN "Offer" o ON o."id" = oi."offerId"
-    JOIN "Seller" s ON s."id" = o."sellerId"
-    WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY' AND o."condition" = 'NEW'
-    FOR UPDATE OF oi`;
-  const inv = locked[0];
-  if (!inv) return { ok: false, error: "No inventory record for that variant." };
+  const locked = await lockFirstPartyOfferInventory(variantId, tx);
+  if (!locked.ok) return { ok: false, error: locked.error };
+  const inv = locked.row;
 
   const previousQuantity = inv.quantity;
   const newQuantity = previousQuantity + delta;
@@ -147,22 +183,17 @@ export async function syncFirstPartyOfferStock(
  * WHOLE admin threshold write — no `Inventory.reorderPoint` update. No
  * `OfferAdjustment` (a threshold change is not a quantity change, matching the
  * old `setReorderPoint`). `Variant.stock` is unaffected (it is derived from
- * available, not the reorder point). Row-locks the `OfferInventory` row.
+ * available, not the reorder point). 9F-23b: row-locks the one FIRST_PARTY
+ * `OfferInventory` (seller anchor, fail-safe on 0 / >1).
  */
 export async function syncFirstPartyOfferReorderPoint(
   variantId: string,
   reorderPoint: number,
   tx: Prisma.TransactionClient,
 ): Promise<{ ok: true; previous: number } | { ok: false; error: string }> {
-  const locked = await tx.$queryRaw<{ id: string; reorderPoint: number }[]>`
-    SELECT oi."id", oi."reorderPoint"
-    FROM "OfferInventory" oi
-    JOIN "Offer" o ON o."id" = oi."offerId"
-    JOIN "Seller" s ON s."id" = o."sellerId"
-    WHERE o."variantId" = ${variantId} AND s."type" = 'FIRST_PARTY' AND o."condition" = 'NEW'
-    FOR UPDATE OF oi`;
-  const inv = locked[0];
-  if (!inv) return { ok: false, error: "No inventory record for that variant." };
+  const locked = await lockFirstPartyOfferInventory(variantId, tx);
+  if (!locked.ok) return { ok: false, error: locked.error };
+  const inv = locked.row;
   await tx.offerInventory.update({ where: { id: inv.id }, data: { reorderPoint } });
   return { ok: true, previous: inv.reorderPoint };
 }
@@ -171,6 +202,13 @@ export async function syncFirstPartyOfferReorderPoint(
  * Create the Axiaro FIRST_PARTY offer (+ its OfferInventory + opening
  * OfferAdjustment) for a newly-created Variant, if it does not already exist.
  * Safe to call inside the same transaction that created the Variant + Inventory.
+ *
+ * 9F-23b: discovery is by `(sellerId, variantId)` — the one Axiaro offer for the
+ * variant, whatever its condition. If it already exists this is a no-op for the
+ * offer row (it NEVER creates a second 1P offer, and never overwrites an
+ * existing condition). `opts.condition` sets the condition ONLY on a fresh
+ * create and defaults to `"NEW"` — no caller passes it yet; it is the seam for
+ * the later CMS control (9F-23c).
  */
 export async function ensureFirstPartyOffer(
   variant: {
@@ -179,16 +217,14 @@ export async function ensureFirstPartyOffer(
     price: number;
     compareAtPrice: number | null;
   },
-  opts: { productStatus: string; costPrice: number | null },
+  opts: { productStatus: string; costPrice: number | null; condition?: string },
   tx: Tx = prisma,
 ): Promise<void> {
   const sellerId = await firstPartySellerId(tx);
   if (!sellerId) return;
 
-  const existing = await tx.offer.findUnique({
-    where: {
-      sellerId_variantId_condition: { sellerId, variantId: variant.id, condition: "NEW" },
-    },
+  const existing = await tx.offer.findFirst({
+    where: { sellerId, variantId: variant.id },
     select: { id: true, inventory: { select: { id: true } } },
   });
 
@@ -202,7 +238,7 @@ export async function ensureFirstPartyOffer(
         compareAtPrice: variant.compareAtPrice,
         costPrice: opts.costPrice,
         sellerSku: variant.sku,
-        condition: "NEW",
+        condition: opts.condition ?? "NEW",
         status: opts.productStatus === "ACTIVE" ? "ACTIVE" : "DRAFT",
         fulfillmentType: "SELLER_FULFILLED",
         handlingTimeDays: 2,

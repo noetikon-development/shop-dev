@@ -56,7 +56,8 @@ async function adminAdjustCore(
       }
       const l = await tx.$queryRawUnsafe<{ id: string; quantity: number; reserved: number }[]>(
         `SELECT oi."id", oi."quantity", oi."reserved" FROM "OfferInventory" oi JOIN "Offer" o ON o.id = oi."offerId"
-         WHERE o."variantId" = $1 AND o.condition = 'NEW' FOR UPDATE OF oi`, variantId);
+         JOIN "Seller" s ON s.id = o."sellerId"
+         WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' FOR UPDATE OF oi LIMIT 2`, variantId);
       if (l[0]) {
         const nq = l[0].quantity + delta;
         if (nq < 0 || nq < l[0].reserved) throw new Error("invariant");
@@ -70,7 +71,7 @@ async function adminAdjustCore(
     // 9E-3D-6: OfferInventory-only. Re-derive Variant.stock from the offer;
     // NO Inventory write.
     await tx.$executeRawUnsafe(
-      `UPDATE "Variant" SET "stock" = GREATEST(0, COALESCE((SELECT oi."quantity" - oi."reserved" FROM "OfferInventory" oi JOIN "Offer" o ON o.id = oi."offerId" WHERE o."variantId" = $1 AND o.condition = 'NEW'), 0)) WHERE "id" = $1`,
+      `UPDATE "Variant" SET "stock" = GREATEST(0, COALESCE((SELECT oi."quantity" - oi."reserved" FROM "OfferInventory" oi JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId" WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY'), 0)) WHERE "id" = $1`,
       variantId);
     return { ok: true };
   } catch (err) {
@@ -102,7 +103,7 @@ async function dbTests() {
       await tx.offerInventory.create({ data: { offerId: o.id, sellerSku: `oi-${sfx}`, quantity: 5, reserved: 0, reorderPoint: 3 } });
 
       const probe = await tx.offerInventory.findMany({
-        where: { offer: { variantId: { in: [v.id] }, seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" } },
+        where: { offer: { variantId: { in: [v.id] }, seller: { is: { type: "FIRST_PARTY" } } } },
         select: { offer: { select: { variantId: true } } },
       });
       ok("A  probe flags the variant as restockable from OfferInventory (no Inventory row exists)", probe.length === 1 && probe[0].offer.variantId === v.id);
@@ -110,7 +111,7 @@ async function dbTests() {
       ok("A  fixture genuinely has no Inventory row — probe is Inventory-free", invRow === null);
 
       const probeMissing = await tx.offerInventory.findMany({
-        where: { offer: { variantId: { in: ["does-not-exist"] }, seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" } },
+        where: { offer: { variantId: { in: ["does-not-exist"] }, seller: { is: { type: "FIRST_PARTY" } } } },
         select: { offer: { select: { variantId: true } } },
       });
       ok("A  probe does NOT flag a non-existent variant", probeMissing.length === 0);

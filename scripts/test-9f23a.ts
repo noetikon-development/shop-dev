@@ -63,14 +63,17 @@ function staticTests() {
   ok("dashboard · low-stock tile SQL drops AND o.condition = 'NEW', keeps FIRST_PARTY", /WHERE s\.type = 'FIRST_PARTY'\s*\n\s*AND oi\."quantity" - oi\."reserved" <= oi\."reorderPoint"/.test(dash) && noNewInCode(dash));
 
   // 8 — untouched areas (no CMS control, no 1P sync/inventory/FILTER change)
-  ok("8 · offer-sync.ts NOT touched (still hardcodes FIRST_PARTY + condition 'NEW')", !/9F-23a/.test(read("src/lib/admin/offer-sync.ts")) && (read("src/lib/admin/offer-sync.ts").match(/condition = 'NEW'|condition: "NEW"/g) ?? []).length >= 5);
-  ok("8 · first-party-inventory.ts FIRST_PARTY_OFFER_FILTER still pins condition: \"NEW\"", /FIRST_PARTY_OFFER_FILTER = \{[\s\S]{0,120}condition: "NEW",/.test(read("src/lib/admin/first-party-inventory.ts")) && !/9F-23a/.test(read("src/lib/admin/first-party-inventory.ts")));
+  //   offer-sync.ts + first-party-inventory.ts: NOT touched by 9F-23a itself
+  //   (asserted here at ship time); 9F-23b later de-NEW'd them — that is the
+  //   next phase's scope, verified in test-9f23b.ts.
+  ok("8 · offer-sync.ts not touched by 9F-23a (9F-23b owns 1P discovery)", !/9F-23a/.test(read("src/lib/admin/offer-sync.ts")));
+  ok("8 · first-party-inventory.ts not touched by 9F-23a (9F-23b owns the FILTER)", !/9F-23a/.test(read("src/lib/admin/first-party-inventory.ts")));
   ok("8 · marketplace/offer-inventory.ts (checkout/cancel/return) NOT touched", !/9F-23a/.test(read("src/lib/marketplace/offer-inventory.ts")));
   ok("8 · admin/inventory.ts + inventory write paths NOT touched", !/9F-23a/.test(read("src/lib/admin/inventory.ts")) && !/9F-23a/.test(read("src/lib/inventory.ts")) && !/9F-23a/.test(read("src/lib/admin/inventory-actions.ts")));
   ok("8 · checkout.ts + OrderItem snapshot NOT touched", !/9F-23a/.test(read("src/lib/checkout.ts")));
   ok("8 · buy-box / seller-repository / email NOT touched", !/9F-23a/.test(read("src/lib/marketplace/buy-box-rule.ts")) && !/9F-23a/.test(read("src/lib/marketplace/seller-repository.ts")) && !/9F-23a/.test(read("src/lib/email/notifications.ts")));
   ok("9 · NO CMS/admin condition selector added (product-variants.tsx unchanged)", !/9F-23a/.test(read("src/components/admin/catalog/product-variants.tsx")) && !/conditionLabel|name="condition"/.test(read("src/components/admin/catalog/product-variants.tsx")));
-  ok("10 · ensureFirstPartyOffer still hardcodes condition: \"NEW\" (no offer can go non-NEW yet)", /condition: "NEW",/.test(read("src/lib/admin/offer-sync.ts")) && /sellerId_variantId_condition: \{ sellerId, variantId: variant\.id, condition: "NEW" \}/.test(read("src/lib/admin/offer-sync.ts")));
+  ok("10 · ensureFirstPartyOffer default condition is still NEW (no offer can go non-NEW yet)", /condition: opts\.condition \?\? "NEW"/.test(read("src/lib/admin/offer-sync.ts")) || /condition: "NEW",/.test(read("src/lib/admin/offer-sync.ts")));
   ok("scope · seed-rbac.ts untouched", !/9F-23a/.test(read("scripts/seed-rbac.ts")));
   ok("scope · schema unchanged (no 9F-23a marker)", !/9F-23a/.test(read("prisma/schema.prisma")));
 }

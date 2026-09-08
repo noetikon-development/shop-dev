@@ -5,8 +5,8 @@ import { prisma } from "@/lib/prisma";
 /**
  * FIRST_PARTY (Axiaro) operational inventory read layer — Phase 9E-3D-2.
  *
- * `OfferInventory`, reached through the Axiaro FIRST_PARTY `Offer` (condition
- * `NEW`, 1:1 with a Variant), is the AUTHORITATIVE operational store for
+ * `OfferInventory`, reached through the one Axiaro FIRST_PARTY `Offer` for the
+ * Variant (1:1), is the AUTHORITATIVE operational store for
  * Axiaro's own stock. `Inventory` + `Variant.stock` are synchronized
  * compatibility mirrors — every 1P mutation still writes them (checkout
  * 9E-3C-2, cancellation / return 9E-3D-1, admin adjustments 9D-D), so the
@@ -24,12 +24,17 @@ import { prisma } from "@/lib/prisma";
 
 /**
  * Prisma relation-filter that pins an `OfferInventory` / `OfferAdjustment`
- * query to the Axiaro FIRST_PARTY, condition-NEW offer. Compose into a larger
- * `where` on `offer: { ... }`.
+ * query to the one Axiaro FIRST_PARTY offer for a variant. Compose into a
+ * larger `where` on `offer: { ... }`.
+ *
+ * 9F-23b: keyed on the FIRST_PARTY seller type alone — there is exactly ONE
+ * FIRST_PARTY offer per variant, so this identifies it without pinning
+ * `condition`. That offer is `NEW` for every variant today; a future CMS
+ * control (9F-23c) may set another condition, and this filter must keep
+ * finding it.
  */
 export const FIRST_PARTY_OFFER_FILTER = {
   seller: { is: { type: "FIRST_PARTY" } },
-  condition: "NEW",
 } satisfies Prisma.OfferWhereInput;
 
 /** Shape returned by {@link getFirstPartyStock} — the operational current state. */
@@ -45,7 +50,7 @@ export type FirstPartyStock = {
 
 /**
  * Current operational stock for one variant, from its Axiaro FIRST_PARTY
- * `OfferInventory`. `null` when the variant has no FIRST_PARTY NEW offer
+ * `OfferInventory`. `null` when the variant has no FIRST_PARTY offer
  * (only possible for a pre-9C gap — `ensureFirstPartyOffer` covers creation).
  */
 export async function getFirstPartyStock(

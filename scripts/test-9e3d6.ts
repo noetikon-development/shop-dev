@@ -48,11 +48,12 @@ type StockResult =
   | { ok: false; error: string };
 
 async function syncVariantStock(tx: Prisma.TransactionClient, variantId: string) {
+  // 9F-23b: keyed on the FIRST_PARTY seller alone (one 1P offer per variant).
   await tx.$executeRawUnsafe(
     `UPDATE "Variant" SET "stock" = GREATEST(0, COALESCE((
        SELECT oi."quantity" - oi."reserved" FROM "OfferInventory" oi
        JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
-       WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' AND o.condition = 'NEW'), 0)) WHERE "id" = $1`,
+       WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY'), 0)) WHERE "id" = $1`,
     variantId);
 }
 
@@ -68,10 +69,11 @@ async function adminAdjust(
   const locked = await tx.$queryRawUnsafe<{ id: string; quantity: number; reserved: number }[]>(
     `SELECT oi."id", oi."quantity", oi."reserved" FROM "OfferInventory" oi
      JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
-     WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' AND o.condition = 'NEW' FOR UPDATE OF oi`,
+     WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' FOR UPDATE OF oi LIMIT 2`,
     variantId);
   const inv = locked[0];
   if (!inv) return { ok: false, error: "No inventory record for that variant." };
+  if (locked.length > 1) return { ok: false, error: "This variant has more than one Axiaro listing — stock can’t be adjusted until that’s resolved." };
   const previousQuantity = inv.quantity;
   const newQuantity = previousQuantity + delta;
   if (newQuantity < 0) return { ok: false, error: "Stock can’t go below zero." };
@@ -89,10 +91,11 @@ async function adminThreshold(tx: Prisma.TransactionClient, variantId: string, r
   const locked = await tx.$queryRawUnsafe<{ id: string; reorderPoint: number }[]>(
     `SELECT oi."id", oi."reorderPoint" FROM "OfferInventory" oi
      JOIN "Offer" o ON o.id = oi."offerId" JOIN "Seller" s ON s.id = o."sellerId"
-     WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' AND o.condition = 'NEW' FOR UPDATE OF oi`,
+     WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' FOR UPDATE OF oi LIMIT 2`,
     variantId);
   const inv = locked[0];
   if (!inv) return { ok: false as const, error: "No inventory record for that variant." };
+  if (locked.length > 1) return { ok: false as const, error: "This variant has more than one Axiaro listing — stock can’t be adjusted until that’s resolved." };
   await tx.offerInventory.update({ where: { id: inv.id }, data: { reorderPoint } });
   return { ok: true as const, previous: inv.reorderPoint };
 }
@@ -193,7 +196,7 @@ async function dbTests() {
       // Legacy row (InventoryAdjustment) on f2's Inventory + the new OfferAdjustment rows.
       await tx.inventoryAdjustment.create({ data: { inventoryId: (await tx.inventory.findUniqueOrThrow({ where: { variantId: f2.variantId }, select: { id: true } })).id, previousQuantity: 20, delta: 1, newQuantity: 21, reason: "RESTOCK", note: "legacy archive row" } });
       const legacyCount = await tx.inventoryAdjustment.count();
-      const currentCount = await tx.offerAdjustment.count({ where: { reason: { not: "MIGRATION_OPENING" }, offerInventory: { offer: { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" } } } });
+      const currentCount = await tx.offerAdjustment.count({ where: { reason: { not: "MIGRATION_OPENING" }, offerInventory: { offer: { seller: { is: { type: "FIRST_PARTY" } } } } } });
       ok("L  both ledgers have rows to union (legacy InventoryAdjustment ≥ 1, current OfferAdjustment ≥ 1)", legacyCount >= 1 && currentCount >= 1);
 
       throw new Rollback();
@@ -219,10 +222,14 @@ function staticChecks() {
   ok("C  updateThresholdAction calls syncFirstPartyOfferReorderPoint, NOT setReorderPoint",
     /syncFirstPartyOfferReorderPoint\s*\(/.test(actionsCode) && !/setReorderPoint\s*\(/.test(actionsCode));
   ok("A-F  syncFirstPartyOfferStock row-locks OfferInventory FOR UPDATE, writes OfferAdjustment + Variant.stock, NEVER Inventory", (() => {
+    // 9F-23b: the FOR UPDATE lock moved into the shared lockFirstPartyOfferInventory
+    // helper (same file); syncFirstPartyOfferStock delegates to it.
+    const lock = offerSync.match(/async function lockFirstPartyOfferInventory[\s\S]*?\n\}/);
     const m = offerSync.match(/export async function syncFirstPartyOfferStock[\s\S]*?\n\}/);
-    if (!m) return false;
+    if (!m || !lock) return false;
     const body = m[0];
-    return /FROM "OfferInventory" oi[\s\S]*?FOR UPDATE OF oi/.test(body)
+    return /FROM "OfferInventory" oi[\s\S]*?FOR UPDATE OF oi/.test(lock[0])
+      && /lockFirstPartyOfferInventory\(/.test(body)
       && /tx\.offerAdjustment\.create/.test(body)
       && /syncVariantStockFromFirstPartyOffer/.test(body)
       && !/tx\.inventory\.|prisma\.inventory\.|adjustStock\s*\(|"Inventory"/.test(body);

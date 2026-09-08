@@ -42,7 +42,9 @@ const strip = (s: string) => s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|\s)\
 // ── replicated reader query shapes — keep in sync with ────────────────────
 //   src/lib/admin/inventory.ts  (listInventory / getInventoryDetail)
 //   src/lib/analytics/queries.ts  (getInventoryInsights / getLowStockReport)
-const FP_FILTER = { seller: { is: { type: "FIRST_PARTY" } }, condition: "NEW" } as const;
+// 9F-23b: source FIRST_PARTY_OFFER_FILTER now keys on the seller type alone
+// (one 1P offer per variant); replica kept in sync.
+const FP_FILTER = { seller: { is: { type: "FIRST_PARTY" } } } as const;
 
 async function listQuery(tx: Prisma.TransactionClient, q?: string) {
   const offerWhere: Record<string, unknown> = { ...FP_FILTER };
@@ -156,9 +158,11 @@ async function dbTests() {
       const sync = await mkFixture(tx, axiaro.id, product.id, `sync-${sfx}`, 20, 20, 3);
       const delta = 10;
       // replicate: syncFirstPartyOfferStock (OfferInventory FOR UPDATE + OfferAdjustment) then adjustStock (Inventory + mirror)
+      // 9F-23b: lock the one Axiaro FIRST_PARTY OfferInventory by seller, not condition.
       const loi = await tx.$queryRawUnsafe<{ id: string; quantity: number }[]>(
         `SELECT oi."id", oi."quantity" FROM "OfferInventory" oi JOIN "Offer" o ON o.id = oi."offerId"
-         WHERE o."variantId" = $1 AND o.condition = 'NEW' FOR UPDATE OF oi`, sync.variantId);
+         JOIN "Seller" s ON s.id = o."sellerId"
+         WHERE o."variantId" = $1 AND s.type = 'FIRST_PARTY' FOR UPDATE OF oi LIMIT 2`, sync.variantId);
       await tx.offerInventory.update({ where: { id: loi[0].id }, data: { quantity: loi[0].quantity + delta } });
       await tx.offerAdjustment.create({ data: { offerInventoryId: loi[0].id, previousQuantity: loi[0].quantity, delta, newQuantity: loi[0].quantity + delta, reason: "RESTOCK", note: "admin" } });
       const linv = await tx.$queryRawUnsafe<{ id: string; quantity: number }[]>(
@@ -212,7 +216,7 @@ function staticChecks() {
   ok("A  inventory.ts listInventory no longer calls prisma.inventory.findMany", !/prisma\.inventory\.findMany/.test(adminInv));
   ok("B  inventory.ts getInventoryDetail uses prisma.offerInventory.findFirst, not prisma.inventory.findUnique", /prisma\.offerInventory\.findFirst/.test(adminInv) && !/prisma\.inventory\.findUnique/.test(adminInv));
   ok("A/B  the FIRST_PARTY offer filter is applied", /FIRST_PARTY_OFFER_FILTER/.test(adminInv));
-  ok("A/B  first-party-inventory.ts pins seller FIRST_PARTY + condition NEW", /type:\s*"FIRST_PARTY"/.test(fpInv) && /condition:\s*"NEW"/.test(fpInv));
+  ok("A/B  first-party-inventory.ts pins seller FIRST_PARTY (9F-23b: condition no longer pinned)", /type:\s*"FIRST_PARTY"/.test(fpInv) && !/FIRST_PARTY_OFFER_FILTER = \{[\s\S]{0,120}condition:\s*"NEW"/.test(fpInv));
   ok("A/B  first-party-inventory.ts is read-only (no offerInventory.update / adjustStock)", !/\.update\s*\(|\.create\s*\(|adjustStock|commitOfferStock|restoreOfferStock/.test(fpInv));
 
   // C / D — analytics
