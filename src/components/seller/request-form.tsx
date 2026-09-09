@@ -8,6 +8,7 @@ import {
   type SellerRequestActionState,
 } from "@/lib/seller/product-request-actions";
 import { FormField, Select, notify, usePersistentAction } from "@/components/seller/ui";
+import { CONDITION_OPTIONS } from "@/lib/marketplace/conditions";
 
 type Category = { id: string; name: string; parentName: string | null };
 type Variant = {
@@ -26,6 +27,7 @@ type Defaults = {
   proposedCategoryId: string | null;
   categoryNote: string | null;
   barcode: string | null;
+  condition: string | null;
   sellerNote: string | null;
   options: OptionDef[];
   variants: Variant[];
@@ -104,6 +106,26 @@ export function RequestForm({
           className="field text-sm"
           placeholder="e.g. Solid Oak Bedside Table"
         />
+      </FormField>
+
+      <FormField
+        label="Product condition"
+        htmlFor="proposedCondition"
+        required
+        hint="The condition Axiaro will use for your listing once it's approved."
+      >
+        <Select
+          id="proposedCondition"
+          name="proposedCondition"
+          required
+          defaultValue={defaults?.condition ?? "NEW"}
+        >
+          {CONDITION_OPTIONS.map((c) => (
+            <option key={c.value} value={c.value}>
+              {c.label}
+            </option>
+          ))}
+        </Select>
       </FormField>
 
       <div className="grid gap-4 sm:grid-cols-2">

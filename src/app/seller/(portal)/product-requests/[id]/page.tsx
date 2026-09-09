@@ -6,6 +6,7 @@ import { requireSellerSessionPermission } from "@/lib/seller/session";
 import { getSellerRequestDetail, listRequestCategoryOptions } from "@/lib/seller/product-requests";
 import { PageHeader, Card, StatusBadge } from "@/components/seller/ui";
 import { requestStatusTone, requestStatusLabel } from "@/lib/seller/format";
+import { conditionLabel } from "@/lib/marketplace/conditions";
 import { RequestForm } from "@/components/seller/request-form";
 import { RequestImagesPanel } from "@/components/seller/request-images-panel";
 import { RequestSubmitPanel } from "@/components/seller/request-submit-panel";
@@ -97,6 +98,7 @@ export default async function SellerProductRequestDetailPage({
                   proposedCategoryId: r.categoryId,
                   categoryNote: r.categoryNote,
                   barcode: r.barcode,
+                  condition: r.condition,
                   sellerNote: r.sellerNote,
                   options: r.options,
                   variants: r.variants,
@@ -105,6 +107,7 @@ export default async function SellerProductRequestDetailPage({
             ) : (
               <dl className="grid gap-3 text-sm sm:grid-cols-2">
                 <Field label="Brand">{r.brand}</Field>
+                <Field label="Condition">{r.condition ? conditionLabel(r.condition) : null}</Field>
                 <Field label="Barcode">{r.barcode}</Field>
                 <Field label="Category">{r.categoryName ?? r.categoryNote}</Field>
                 <Field label="Short description" full>{r.shortDesc}</Field>

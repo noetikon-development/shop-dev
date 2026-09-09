@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getStoreSetting } from "@/lib/marketplace/marketplace-settings";
+import { OFFER_CONDITIONS, type OfferCondition } from "@/lib/marketplace/conditions";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -47,9 +48,9 @@ export type SellerRepoError =
   | { ok: false; code: "INVARIANT"; error: string };
 
 const OFFER_STATUSES = ["DRAFT", "ACTIVE", "INACTIVE", "ARCHIVED"] as const;
-const OFFER_CONDITIONS = ["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"] as const;
 type OfferStatus = (typeof OFFER_STATUSES)[number];
-type OfferCondition = (typeof OFFER_CONDITIONS)[number];
+// 9F-36B: OFFER_CONDITIONS / OfferCondition now come from the single canonical
+// module `@/lib/marketplace/conditions` (imported above).
 
 // ---------------------------------------------------------------------------
 // 9F-24A — publish (→ ACTIVE) readiness

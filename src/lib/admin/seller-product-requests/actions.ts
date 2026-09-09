@@ -67,17 +67,19 @@ async function seedAndAuditSellerDraftOffers(
   sellerId: string,
   productId: string,
   productName: string,
+  /** 9F-36B — the request's `proposedCondition`; NULL/legacy → seeded as NEW. */
+  proposedCondition: string | null,
 ) {
   try {
-    const seeded = await seedSellerDraftOffers(sellerId, adminUserId, productId);
+    const seeded = await seedSellerDraftOffers(sellerId, adminUserId, productId, proposedCondition);
     if (seeded.created.length > 0) {
       await writeAudit({
         actorUserId: adminUserId,
         action: "seller_offer.seeded_from_request",
         targetType: "seller_product_request",
         targetId: requestId,
-        summary: `${adminEmail} created ${seeded.created.length} draft listing(s) for the seller from approved request "${productName}"`,
-        meta: { sellerId, productId, offerIds: seeded.created, skipped: seeded.skipped },
+        summary: `${adminEmail} created ${seeded.created.length} draft listing(s) (${seeded.condition}) for the seller from approved request "${productName}"`,
+        meta: { sellerId, productId, offerIds: seeded.created, skipped: seeded.skipped, condition: seeded.condition },
       });
     }
   } catch (err) {
@@ -208,6 +210,7 @@ export async function linkExistingProductAction(
     res.sellerId,
     res.productId,
     res.productName,
+    res.proposedCondition,
   );
 
   revalidate(parsed.data.requestId, res.sellerId);
@@ -326,6 +329,7 @@ export async function createProductFromRequestAction(
     res.sellerId,
     res.productId,
     res.productName,
+    res.proposedCondition,
   );
 
   revalidateStorefront();

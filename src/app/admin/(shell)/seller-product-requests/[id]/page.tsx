@@ -6,6 +6,7 @@ import { requireAnyPermission } from "@/lib/admin/rbac";
 import { getAdminProductRequest, searchCatalogForLink } from "@/lib/admin/seller-product-requests/repository";
 import { productColourChoices } from "@/lib/admin/seller-product-requests/promote-image";
 import { categorySelectOptions } from "@/lib/admin/catalog";
+import { conditionLabel } from "@/lib/marketplace/conditions";
 import { PageHeader, Card, StatusBadge } from "@/components/admin/ui";
 import { RequestReviewActions } from "@/components/admin/seller-product-requests/review-actions";
 import { LinkExistingPanel } from "@/components/admin/seller-product-requests/link-existing-panel";
@@ -99,6 +100,9 @@ export default async function AdminSellerProductRequestDetailPage({
             <dl className="grid gap-3 text-sm sm:grid-cols-2">
               <Detail label="Name">{r.proposedName}</Detail>
               <Detail label="Brand">{r.proposedBrand}</Detail>
+              <Detail label="Proposed condition">
+                {r.proposedCondition ? conditionLabel(r.proposedCondition) : null}
+              </Detail>
               <Detail label="Category">{r.categoryName ?? r.categoryNote}</Detail>
               <Detail label="Barcode">{r.barcode}</Detail>
               <Detail label="Short description" full>

@@ -11,17 +11,10 @@ export function offerStatusTone(status: string) {
   return OFFER_STATUS_TONE[status] ?? "neutral";
 }
 
-const CONDITION_LABEL: Record<string, string> = {
-  NEW: "New",
-  REFURBISHED: "Refurbished",
-  OPEN_BOX: "Open box",
-  USED_LIKE_NEW: "Used — like new",
-  USED_GOOD: "Used — good",
-};
-
-export function conditionLabel(condition: string) {
-  return CONDITION_LABEL[condition] ?? condition;
-}
+// 9F-36B: the condition vocabulary + labels now live in the single canonical
+// module `@/lib/marketplace/conditions`. Re-exported here so the ~15 existing
+// `conditionLabel` import sites don't have to change.
+export { conditionLabel } from "@/lib/marketplace/conditions";
 
 /** True for a real, non-"New" condition — the gate for showing a condition line/chip. */
 export function isNoteworthyCondition(condition: string | null | undefined): boolean {

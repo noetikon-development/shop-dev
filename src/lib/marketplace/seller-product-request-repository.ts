@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cleanUserText } from "@/lib/ugc";
 import { getSellerMedia } from "@/lib/marketplace/seller-media-repository";
+import { isOfferCondition, type OfferCondition } from "@/lib/marketplace/conditions";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -84,6 +85,12 @@ export type SellerRequestInput = {
   proposedOptions?: ProposedOption[];
   proposedVariants?: ProposedVariant[];
   sellerNote?: string | null;
+  /**
+   * 9F-36B — the seller's proposed product condition, one of `OFFER_CONDITIONS`.
+   * A DRAFT may leave it unset (`null` / `""` / undefined → stored NULL);
+   * `submitSellerRequest` requires it before DRAFT → PENDING.
+   */
+  proposedCondition?: string | null;
 };
 
 /**
@@ -173,6 +180,21 @@ function validateInput(
     return { ok: false, code: "VALIDATION", error: "Barcode must be 8–14 digits (GTIN / EAN / UPC)." };
   }
 
+  // 9F-36B — proposed condition. Optional on a DRAFT (stored NULL); when the
+  // seller does pick one it must be a canonical `OFFER_CONDITIONS` value, and
+  // `submitSellerRequest` enforces "must be set before PENDING". `undefined`
+  // means "not part of this write" — a partial edit preserves the stored value
+  // rather than clearing it; an explicit `""` / `null` clears it.
+  const conditionProvided = input.proposedCondition !== undefined;
+  const rawCondition =
+    conditionProvided && String(input.proposedCondition ?? "").trim() !== ""
+      ? String(input.proposedCondition).trim()
+      : null;
+  if (conditionProvided && rawCondition !== null && !isOfferCondition(rawCondition)) {
+    return { ok: false, code: "VALIDATION", error: "Choose a valid product condition." };
+  }
+  const proposedCondition = rawCondition as OfferCondition | null;
+
   // ── proposed option types (advisory — admin curates canonical rows in 9F-5c) ──
   const options: ProposedOption[] = [];
   for (const raw of input.proposedOptions ?? []) {
@@ -255,6 +277,8 @@ function validateInput(
       proposedCategoryId: input.proposedCategoryId?.trim() || null,
       categoryNote,
       barcode,
+      // Only written when this call carried a condition (see `conditionProvided`).
+      ...(conditionProvided ? { proposedCondition } : {}),
       proposedVariants: hasPayload ? (payload as unknown as Prisma.InputJsonValue) : undefined,
       sellerNote,
     },
@@ -386,6 +410,7 @@ const REQUEST_SELECT = {
   proposedCategoryId: true,
   categoryNote: true,
   barcode: true,
+  proposedCondition: true,
   proposedVariants: true,
   sellerNote: true,
   reviewStatusNote: true,
@@ -538,6 +563,7 @@ export async function submitSellerRequest(
         proposedBrand: true,
         proposedCategoryId: true,
         barcode: true,
+        proposedCondition: true,
         proposedVariants: true,
       },
     });
@@ -565,6 +591,14 @@ export async function submitSellerRequest(
         error: dup.blocks[0].message,
         blocks: dup.blocks,
       };
+    }
+
+    // 9F-36B — a DRAFT may be saved without a condition, but it can't be
+    // submitted for review without one (approval seeds the seller's offers
+    // with it). Checked after the hard SKU block so the more fundamental
+    // problem is reported first.
+    if (!current.proposedCondition || !isOfferCondition(current.proposedCondition)) {
+      return { ok: false, code: "VALIDATION", error: "Pick the product's condition before submitting." };
     }
 
     const advanced = await tx.sellerProductRequest.updateMany({

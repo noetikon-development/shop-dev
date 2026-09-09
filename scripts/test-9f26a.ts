@@ -128,7 +128,7 @@ async function dbTests() {
   async function seedRejected(tx: Tx, sellerId: string, name: string) {
     const created = await createSellerRequest(
       ctxFor(sellerId),
-      { proposedName: name, proposedCategoryId: category!.id, proposedVariants: [{ label: "Small" }, { label: "Large" }], sellerNote: "please" },
+      { proposedName: name, proposedCategoryId: category!.id, proposedCondition: "NEW", proposedVariants: [{ label: "Small" }, { label: "Large" }], sellerNote: "please" },
       tx,
     );
     if (!created.ok) throw new Error("seed create failed: " + JSON.stringify(created));
@@ -210,7 +210,7 @@ async function dbTests() {
       // ── existing admin flows unchanged ──
       {
         // REQUEST_CHANGES: PENDING → DRAFT still works, seller resubmits
-        const rc = await createSellerRequest(ctxFor(A.id), { proposedName: `RC ${sfx}`, proposedCategoryId: category!.id, proposedVariants: [{ label: "d" }] }, tx);
+        const rc = await createSellerRequest(ctxFor(A.id), { proposedName: `RC ${sfx}`, proposedCategoryId: category!.id, proposedCondition: "NEW", proposedVariants: [{ label: "d" }] }, tx);
         if (!rc.ok) throw new Error("rc seed");
         await submitSellerRequest(ctxFor(A.id), rc.requestId, tx);
         const changed = await requestChanges(rc.requestId, adminUser!.id, "Please add a brand.", tx);
@@ -220,7 +220,7 @@ async function dbTests() {
         ok("REQUEST_CHANGES · seller can resubmit the returned DRAFT", rcResubmit.ok === true);
 
         // ADMIN REJECT still terminal (admin plane)
-        const rej = await createSellerRequest(ctxFor(A.id), { proposedName: `Rej ${sfx}`, proposedCategoryId: category!.id, proposedVariants: [{ label: "d" }] }, tx);
+        const rej = await createSellerRequest(ctxFor(A.id), { proposedName: `Rej ${sfx}`, proposedCategoryId: category!.id, proposedCondition: "NEW", proposedVariants: [{ label: "d" }] }, tx);
         if (!rej.ok) throw new Error("rej seed");
         await submitSellerRequest(ctxFor(A.id), rej.requestId, tx);
         await rejectRequest(rej.requestId, adminUser!.id, "No.", tx);
@@ -233,7 +233,7 @@ async function dbTests() {
         ok("G7 · the owning seller CAN reopen that same admin-rejected request", sellerReopen.ok === true);
 
         // APPROVED via link still works
-        const appr = await createSellerRequest(ctxFor(B.id), { proposedName: `Appr ${sfx}`, proposedCategoryId: category!.id, proposedVariants: [{ label: "d" }] }, tx);
+        const appr = await createSellerRequest(ctxFor(B.id), { proposedName: `Appr ${sfx}`, proposedCategoryId: category!.id, proposedCondition: "NEW", proposedVariants: [{ label: "d" }] }, tx);
         if (!appr.ok) throw new Error("appr seed");
         await submitSellerRequest(ctxFor(B.id), appr.requestId, tx);
         const linked = await linkExistingProduct(appr.requestId, realProduct!.id, adminUser!.id, null, tx);

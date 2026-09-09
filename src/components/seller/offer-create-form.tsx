@@ -3,14 +3,7 @@
 import { Loader2 } from "lucide-react";
 import { createOfferAction, type SellerActionState } from "@/lib/seller/offer-actions";
 import { FormField, Select, usePersistentAction } from "@/components/seller/ui";
-
-const CONDITIONS = [
-  { value: "NEW", label: "New" },
-  { value: "REFURBISHED", label: "Refurbished" },
-  { value: "OPEN_BOX", label: "Open box" },
-  { value: "USED_LIKE_NEW", label: "Used — like new" },
-  { value: "USED_GOOD", label: "Used — good" },
-];
+import { CONDITION_OPTIONS as CONDITIONS } from "@/lib/marketplace/conditions";
 
 export function OfferCreateForm({
   variantId,

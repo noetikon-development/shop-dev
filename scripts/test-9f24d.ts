@@ -81,8 +81,11 @@ function staticTests() {
   ok("P1-1 · seedSellerDraftOffers reuses createSellerOffer (sanctioned seller path)",
     /import \{ createSellerOffer \} from "@\/lib\/marketplace\/seller-repository"/.test(create) &&
     /await createSellerOffer\(/.test(create));
-  ok("P1-1 · it only touches ACTIVE variants + always DRAFT / condition NEW",
-    /where: \{ productId, status: "ACTIVE" \}/.test(create) && /condition: "NEW", openingQuantity: 0/.test(create));
+  ok("P1-1 · it only touches ACTIVE variants + always DRAFT; condition comes from the request (9F-36B), not hard-coded",
+    /where: \{ productId, status: "ACTIVE" \}/.test(create) &&
+    /condition, openingQuantity: 0/.test(create) &&
+    !/condition: "NEW", openingQuantity: 0/.test(create) &&
+    /isOfferCondition\(conditionInput\) \? conditionInput : "NEW"/.test(create));
   ok("P1-1 · both approve paths seed the seller's draft listings",
     (reqActions.match(/seedAndAuditSellerDraftOffers\(/g) ?? []).length >= 2);
 
@@ -209,12 +212,13 @@ async function dbTests() {
         const v1 = await seedVariant(tx, p.id);
         const v2 = await seedVariant(tx, p.id);
         const vArch = await seedVariant(tx, p.id, "ARCHIVED");
-        const res = await seedSellerDraftOffers(s.id, someUser!.id, p.id, tx);
+        // 9F-36B: seed with a real proposed condition (was hard-coded NEW)
+        const res = await seedSellerDraftOffers(s.id, someUser!.id, p.id, "OPEN_BOX", tx);
         ok("P1-1 · one DRAFT offer per ACTIVE variant, ARCHIVED variant skipped",
-          res.created.length === 2, JSON.stringify(res));
+          res.created.length === 2 && res.condition === "OPEN_BOX", JSON.stringify(res));
         const offers = await tx.offer.findMany({ where: { sellerId: s.id }, select: { status: true, condition: true, variantId: true } });
-        ok("P1-1 · every seeded offer is DRAFT / NEW / THIRD_PARTY seller",
-          offers.length === 2 && offers.every((o) => o.status === "DRAFT" && o.condition === "NEW") &&
+        ok("P1-1 · every seeded offer is DRAFT / THIRD_PARTY seller / condition from the request (OPEN_BOX)",
+          offers.length === 2 && offers.every((o) => o.status === "DRAFT" && o.condition === "OPEN_BOX") &&
           new Set(offers.map((o) => o.variantId)).size === 2 &&
           !offers.some((o) => o.variantId === vArch.id));
         const invs = await tx.offerInventory.count({ where: { offer: { sellerId: s.id } } });
@@ -222,9 +226,18 @@ async function dbTests() {
         const opening = await tx.offerAdjustment.count({ where: { offerInventory: { offer: { sellerId: s.id } }, reason: "MIGRATION_OPENING" } });
         ok("P1-1 · opening OfferAdjustment written, never InventoryAdjustment", opening === 2);
         void v1; void v2;
-        const again = await seedSellerDraftOffers(s.id, someUser!.id, p.id, tx);
+        const again = await seedSellerDraftOffers(s.id, someUser!.id, p.id, "OPEN_BOX", tx);
         ok("P1-1 · idempotent — a second run creates nothing, counts the dupes",
           again.created.length === 0 && again.skipped === 2);
+
+        // 9F-36B: a legacy request with NULL condition → seeded offers fall back to NEW
+        const sLegacy = await seedSeller(tx);
+        const pLegacy = await seedProduct(tx, "DRAFT");
+        await seedVariant(tx, pLegacy.id);
+        const legacy = await seedSellerDraftOffers(sLegacy.id, someUser!.id, pLegacy.id, null, tx);
+        ok("P1-1 · NULL proposedCondition → seeded offers default to NEW",
+          legacy.condition === "NEW" &&
+          (await tx.offer.findMany({ where: { sellerId: sLegacy.id }, select: { condition: true } })).every((o) => o.condition === "NEW"));
       }
 
       // ── P1-2 ──

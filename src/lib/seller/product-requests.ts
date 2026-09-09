@@ -85,6 +85,8 @@ export type SellerRequestDetailView = {
   categoryName: string | null;
   categoryNote: string | null;
   barcode: string | null;
+  /** 9F-36B — the seller's proposed product condition (canonical Offer.condition value), or null on a DRAFT that hasn't chosen one. */
+  condition: string | null;
   options: ProposedOption[];
   variants: ProposedVariant[];
   sellerNote: string | null;
@@ -171,6 +173,7 @@ export async function getSellerRequestDetail(
     categoryName: r.proposedCategory?.name ?? null,
     categoryNote: r.categoryNote,
     barcode: r.barcode,
+    condition: r.proposedCondition,
     options,
     variants,
     sellerNote: r.sellerNote,

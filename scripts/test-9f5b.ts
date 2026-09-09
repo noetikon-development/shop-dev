@@ -139,6 +139,7 @@ async function dbTests() {
             proposedBrand: "Widgetco",
             proposedDescription: "A widget.",
             proposedCategoryId: category.id,
+            proposedCondition: "NEW", // 9F-36B: required before submission
             proposedVariants: [{ label: "Default" }],
           },
           tx,
@@ -190,7 +191,9 @@ async function dbTests() {
         const stillDraft = await tx.sellerProductRequest.findUnique({ where: { id: reqId }, select: { status: true } });
         ok("11 · request stays DRAFT after a blocked submit", stillDraft?.status === "DRAFT");
 
-        // 3 — DRAFT -> PENDING (fix the SKU first)
+        // 3 — DRAFT -> PENDING (fix the SKU first). 9F-36B: a condition is
+        // required before submission — it was set on the create below and a
+        // partial edit preserves it.
         const digits = String(Date.now()).slice(-10);
         await updateSellerRequest(ctxA, reqId, {
           proposedName: `Custom Widget ${t} final`,
@@ -220,6 +223,7 @@ async function dbTests() {
           proposedName: `Barcode Twin ${t}`,
           proposedCategoryId: category.id,
           barcode: "48210001",
+          proposedCondition: "NEW",
           proposedVariants: [{ label: "Default" }],
         }, tx);
         if (bcReq.ok) await submitSellerRequest(ctxA, bcReq.ok ? bcReq.requestId : "", tx);

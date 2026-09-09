@@ -70,14 +70,27 @@ function staticTests() {
   const pdp = read("src/components/pdp/product-viewer.tsx");
   const card = read("src/components/product-card.tsx");
 
-  // 1 — OPEN_BOX in all 6 lists
+  // 1 — OPEN_BOX in the vocabulary; 9F-36B consolidated the list into ONE module
+  const conditions = read("src/lib/marketplace/conditions.ts");
+  const conditionsFlat = conditions.replace(/\s+/g, " ");
   ok("union · OfferCondition includes OPEN_BOX", /"NEW" \| "REFURBISHED" \| "OPEN_BOX" \| "USED_LIKE_NEW" \| "USED_GOOD"/.test(types));
-  ok("repo · OFFER_CONDITIONS includes OPEN_BOX", /\["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"\]/.test(repo));
-  ok("zod · both offer-action enums include OPEN_BOX", (actions.match(/z\.enum\(\["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"\]\)/g) ?? []).length === 2);
-  ok("label · CONDITION_LABEL maps OPEN_BOX → 'Open box'", /OPEN_BOX: "Open box"/.test(format));
-  ok("form · create form lists OPEN_BOX", /\{ value: "OPEN_BOX", label: "Open box" \}/.test(createForm));
-  ok("form · edit form lists OPEN_BOX", /\{ value: "OPEN_BOX", label: "Open box" \}/.test(editForm));
-  ok("no PRE_OWNED / LIKE_NEW / OTHER token introduced", !/"PRE_OWNED"|"LIKE_NEW"|"OTHER"/.test(types + repo + actions + format));
+  ok("9F-36B · canonical module `marketplace/conditions.ts` holds the one OFFER_CONDITIONS list incl. OPEN_BOX",
+    /OFFER_CONDITIONS = \[ "NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD", \]/.test(conditionsFlat));
+  ok("9F-36B · canonical module maps OPEN_BOX → 'Open box'", /OPEN_BOX: "Open box"/.test(conditions));
+  ok("repo · seller-repository sources OFFER_CONDITIONS from the canonical module (no local literal)",
+    /import \{ OFFER_CONDITIONS.*\} from "@\/lib\/marketplace\/conditions"/.test(repo) &&
+    !/const OFFER_CONDITIONS = \[/.test(repo));
+  ok("zod · both offer-action enums come from OFFER_CONDITIONS (no inline literal)",
+    (actions.match(/z\.enum\(OFFER_CONDITIONS\)/g) ?? []).length === 2 &&
+    !/z\.enum\(\["NEW", "REFURBISHED"/.test(actions));
+  ok("label · format.ts re-exports conditionLabel from the canonical module",
+    /export \{ conditionLabel \} from "@\/lib\/marketplace\/conditions"/.test(format));
+  ok("form · create + edit forms use the shared CONDITION_OPTIONS (no local list)",
+    /CONDITION_OPTIONS as CONDITIONS \} from "@\/lib\/marketplace\/conditions"/.test(createForm) &&
+    /CONDITION_OPTIONS as CONDITIONS \} from "@\/lib\/marketplace\/conditions"/.test(editForm) &&
+    !/\{ value: "OPEN_BOX", label: "Open box" \}/.test(createForm) &&
+    !/\{ value: "OPEN_BOX", label: "Open box" \}/.test(editForm));
+  ok("no PRE_OWNED / LIKE_NEW / OTHER token introduced", !/"PRE_OWNED"|"LIKE_NEW"|"OTHER"/.test(types + repo + actions + format + conditions));
 
   // schema
   ok("schema · OrderItem.condition String? added", /model OrderItem \{[\s\S]{0,900}\n\s*condition\s+String\?/.test(schema));

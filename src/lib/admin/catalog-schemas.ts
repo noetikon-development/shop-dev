@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { OFFER_CONDITIONS } from "@/lib/marketplace/conditions";
 
 /**
  * Server-side validation for catalog management (Step 5). Every product,
@@ -15,19 +16,12 @@ export type VariantStatus = (typeof VARIANT_STATUSES)[number];
 
 /**
  * Supported condition values for the single Axiaro FIRST_PARTY (1P) Offer on a
- * variant (9F-23c). Must stay in step with `OfferCondition` in
- * `src/lib/marketplace/types.ts` and `OFFER_CONDITIONS` in
- * `src/lib/marketplace/seller-repository.ts` (the 3P list). Labels live in
- * `conditionLabel()` (`src/lib/seller/format.ts`). Client-safe.
+ * variant (9F-23c). 9F-36B: the vocabulary is now defined once in
+ * `@/lib/marketplace/conditions` and re-exported here (the 3P seller path,
+ * the seller forms and `conditionLabel()` all source the same module).
  */
-export const OFFER_CONDITIONS = [
-  "NEW",
-  "REFURBISHED",
-  "OPEN_BOX",
-  "USED_LIKE_NEW",
-  "USED_GOOD",
-] as const;
-export type OfferConditionValue = (typeof OFFER_CONDITIONS)[number];
+export { OFFER_CONDITIONS };
+export type { OfferCondition as OfferConditionValue } from "@/lib/marketplace/conditions";
 
 /** URL-safe, lowercase, hyphen-separated. */
 export const slugSchema = z

@@ -6,14 +6,7 @@ import { updateOfferAction, type SellerActionState } from "@/lib/seller/offer-ac
 import { FormField, Select, notify, usePersistentAction } from "@/components/seller/ui";
 
 import { conditionLabel } from "@/lib/seller/format";
-
-const CONDITIONS = [
-  { value: "NEW", label: "New" },
-  { value: "REFURBISHED", label: "Refurbished" },
-  { value: "OPEN_BOX", label: "Open box" },
-  { value: "USED_LIKE_NEW", label: "Used — like new" },
-  { value: "USED_GOOD", label: "Used — good" },
-];
+import { CONDITION_OPTIONS as CONDITIONS } from "@/lib/marketplace/conditions";
 
 export function OfferEditForm({
   offerId,

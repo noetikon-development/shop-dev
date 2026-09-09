@@ -7,6 +7,7 @@ import { generateProductSlug, generateVariantSku } from "@/lib/admin/catalog";
 import { ensureFirstPartyOffer } from "@/lib/admin/offer-sync";
 import { regenerateVariants } from "@/lib/admin/variants";
 import { createSellerOffer } from "@/lib/marketplace/seller-repository";
+import { isOfferCondition, type OfferCondition } from "@/lib/marketplace/conditions";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -81,6 +82,8 @@ export type CreateFromRequestResult =
       sellerId: string;
       productName: string;
       reviewedAt: Date;
+      /** 9F-36B — the seller's proposed condition, carried through for offer seeding. */
+      proposedCondition: string | null;
     }
   | { ok: false; code: "NOT_FOUND" | "CONFLICT" | "VALIDATION"; error: string; fieldErrors?: Record<string, string> };
 
@@ -159,13 +162,21 @@ export async function approveByCreatingProduct(
 
   // ── claim + create, atomically ───────────────────────────────────────────
   let outcome:
-    | { productId: string; productSlug: string; hasOptions: boolean; sellerId: string; productName: string; reviewedAt: Date }
+    | {
+        productId: string;
+        productSlug: string;
+        hasOptions: boolean;
+        sellerId: string;
+        productName: string;
+        reviewedAt: Date;
+        proposedCondition: string | null;
+      }
     | { conflict: true }
     | { notFound: true };
   const claimAndCreate = async (tx: Prisma.TransactionClient) => {
       const req = await tx.sellerProductRequest.findUnique({
         where: { id: requestId },
-        select: { status: true, sellerId: true, proposedName: true },
+        select: { status: true, sellerId: true, proposedName: true, proposedCondition: true },
       });
       if (!req) return { notFound: true as const };
       if (req.status !== "PENDING") return { conflict: true as const };
@@ -248,6 +259,7 @@ export async function approveByCreatingProduct(
         sellerId: req.sellerId,
         productName: req.proposedName,
         reviewedAt,
+        proposedCondition: req.proposedCondition,
       };
   };
 
@@ -287,10 +299,12 @@ export async function approveByCreatingProduct(
 type SeedClient = Prisma.TransactionClient | typeof prisma;
 
 export type SeedSellerDraftOffersResult = {
-  /** Offer ids created for the seller (DRAFT, THIRD_PARTY, condition NEW). */
+  /** Offer ids created for the seller (DRAFT, THIRD_PARTY). */
   created: string[];
   /** Variants where the seller already had an offer for this condition. */
   skipped: number;
+  /** The condition the offers were seeded with (9F-36B). */
+  condition: OfferCondition;
 };
 
 /**
@@ -300,11 +314,16 @@ export type SeedSellerDraftOffersResult = {
  * opening stock. The seller then only has to set their price and stock, instead
  * of hunting for the product in an empty "create listing" form.
  *
+ * 9F-36B — the offers are seeded with the seller's proposed condition
+ * (`request.proposedCondition`), falling back to `"NEW"` for a legacy request
+ * that never carried one. The Axiaro FIRST_PARTY offer stays NEW (that is
+ * `ensureFirstPartyOffer`'s job, not this function's).
+ *
  * Reuses `createSellerOffer` (the sanctioned seller-plane path) with a synthetic
  * `SellerContext` for the proposing seller — it does its own dedupe on
  * `(sellerId, variantId, condition)`, so calling this twice (or after the seller
- * already listed one variant) is safe. Best-effort: a per-variant failure is
- * logged and skipped, never thrown.
+ * already listed that variant/condition) is safe. Best-effort: a per-variant
+ * failure is logged and skipped, never thrown.
  *
  * Pass a transaction client for tests (each `createSellerOffer` then runs inside
  * it); production callers omit it and each offer gets its own transaction.
@@ -313,8 +332,11 @@ export async function seedSellerDraftOffers(
   sellerId: string,
   actorUserId: string,
   productId: string,
+  conditionInput?: string | null,
   client: SeedClient = prisma,
 ): Promise<SeedSellerDraftOffersResult> {
+  // Legacy / unset proposed condition → NEW (preserves pre-9F-36B behaviour).
+  const condition: OfferCondition = isOfferCondition(conditionInput) ? conditionInput : "NEW";
   const txArg = client === prisma ? undefined : (client as Prisma.TransactionClient);
   const ctx: SellerContext = {
     sellerId,
@@ -336,12 +358,12 @@ export async function seedSellerDraftOffers(
     if (!Number.isInteger(v.price) || v.price <= 0) continue;
     const res = await createSellerOffer(
       ctx,
-      { variantId: v.id, price: v.price, condition: "NEW", openingQuantity: 0, reorderPoint: 3 },
+      { variantId: v.id, price: v.price, condition, openingQuantity: 0, reorderPoint: 3 },
       txArg,
     );
     if (res.ok) created.push(res.offerId);
     else if (res.code === "CONFLICT") skipped += 1;
     else console.error("[seedSellerDraftOffers] createSellerOffer failed", v.id, res.error);
   }
-  return { created, skipped };
+  return { created, skipped, condition };
 }

@@ -127,9 +127,14 @@ function staticTests() {
   const format = read("src/lib/seller/format.ts");
   const data = read("src/lib/data.ts");
 
-  // C — supported values + labels
-  ok("schemas · OFFER_CONDITIONS = the five approved values in order",
-    /OFFER_CONDITIONS = \[\s*"NEW",\s*"REFURBISHED",\s*"OPEN_BOX",\s*"USED_LIKE_NEW",\s*"USED_GOOD",\s*\]/.test(schemas));
+  // C — supported values + labels (9F-36B: the list lives in the one canonical
+  // module `@/lib/marketplace/conditions`; catalog-schemas.ts re-exports it).
+  const conditionsMod = read("src/lib/marketplace/conditions.ts");
+  ok("conditions · OFFER_CONDITIONS = the five approved values in order",
+    /OFFER_CONDITIONS = \[\s*"NEW",\s*"REFURBISHED",\s*"OPEN_BOX",\s*"USED_LIKE_NEW",\s*"USED_GOOD",\s*\]/.test(conditionsMod));
+  ok("schemas · catalog-schemas re-exports OFFER_CONDITIONS from the canonical module",
+    /import \{ OFFER_CONDITIONS \} from "@\/lib\/marketplace\/conditions"/.test(schemas) &&
+    /export \{ OFFER_CONDITIONS \}/.test(schemas));
   ok("schemas · variantUpdateSchema gains optional condition: z.enum(OFFER_CONDITIONS)",
     /condition: z\.enum\(OFFER_CONDITIONS\)\.optional\(\)/.test(schemas));
   ok("format · conditionLabel covers all five values",

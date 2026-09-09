@@ -55,6 +55,9 @@ const fieldsSchema = z.object({
   proposedCategoryId: z.string().trim().max(64).optional(),
   categoryNote: z.string().trim().max(600).optional(),
   barcode: z.string().trim().max(20).optional(),
+  // 9F-36B — advisory here; the canonical-value check + the "required before
+  // PENDING" rule live in the repository (`validateInput` / `submitSellerRequest`).
+  proposedCondition: z.string().trim().max(24).optional(),
   sellerNote: z.string().trim().max(2200).optional(),
 });
 
@@ -124,6 +127,7 @@ function readFields(formData: FormData) {
     proposedCategoryId: s("proposedCategoryId"),
     categoryNote: s("categoryNote"),
     barcode: s("barcode"),
+    proposedCondition: s("proposedCondition"),
     sellerNote: s("sellerNote"),
   });
 }
@@ -154,6 +158,10 @@ export async function createRequestAction(
     proposedCategoryId: parsed.data.proposedCategoryId ?? null,
     categoryNote: parsed.data.categoryNote ?? null,
     barcode: parsed.data.barcode ?? null,
+    // 9F-36B — pass through as-is: a string when the form carried the select
+    // (the normal case), `undefined` when it didn't (then the repo preserves
+    // the stored value on an edit / leaves NULL on a create).
+    proposedCondition: parsed.data.proposedCondition,
     proposedOptions: parseOptionForm(formData),
     proposedVariants: parseVariantForm(formData),
     sellerNote: parsed.data.sellerNote ?? null,
@@ -183,6 +191,10 @@ export async function updateRequestAction(
     proposedCategoryId: parsed.data.proposedCategoryId ?? null,
     categoryNote: parsed.data.categoryNote ?? null,
     barcode: parsed.data.barcode ?? null,
+    // 9F-36B — pass through as-is: a string when the form carried the select
+    // (the normal case), `undefined` when it didn't (then the repo preserves
+    // the stored value on an edit / leaves NULL on a create).
+    proposedCondition: parsed.data.proposedCondition,
     proposedOptions: parseOptionForm(formData),
     proposedVariants: parseVariantForm(formData),
     sellerNote: parsed.data.sellerNote ?? null,

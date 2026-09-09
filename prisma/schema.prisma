@@ -1575,6 +1575,13 @@ model SellerProductRequest {
   // [{ label, proposedSku?, barcode?, attributes? }] — one entry minimum.
   proposedVariants    Json?
   sellerNote          String?
+  // 9F-36B — the seller's proposed product condition, one of the canonical
+  // Offer.condition values (NEW | REFURBISHED | OPEN_BOX | USED_LIKE_NEW |
+  // USED_GOOD). NULL on a DRAFT that hasn't chosen one yet and on every
+  // pre-9F-36B row; `submitSellerRequest` requires it before DRAFT → PENDING,
+  // and approval seeds the THIRD_PARTY offers with `proposedCondition ?? "NEW"`.
+  // Reuses the existing condition system — NOT a second enum.
+  proposedCondition   String?
 
   // -- Admin review (written by 9F-5c; stored here now for the data shape). --
   reviewStatusNote String?

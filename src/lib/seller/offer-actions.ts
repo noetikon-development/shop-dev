@@ -3,6 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
+import { OFFER_CONDITIONS } from "@/lib/marketplace/conditions";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
@@ -61,7 +62,7 @@ function parsePesosToCentavos(raw: FormDataEntryValue | null): number | null {
 
 const createSchema = z.object({
   variantId: z.string().min(1, "Choose a catalog product option"),
-  condition: z.enum(["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"]).default("NEW"),
+  condition: z.enum(OFFER_CONDITIONS).default("NEW"),
   sellerSku: z.string().trim().max(64).optional().or(z.literal("")),
   handlingTimeDays: z.coerce.number().int().min(0).max(30).default(2),
   openingQuantity: z.coerce.number().int().min(0).max(1_000_000).default(0),
@@ -145,7 +146,7 @@ export async function updateOfferAction(
   const schema = z.object({
     sellerSku: z.string().trim().max(64).optional().or(z.literal("")),
     handlingTimeDays: z.coerce.number().int().min(0).max(30),
-    condition: z.enum(["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"]),
+    condition: z.enum(OFFER_CONDITIONS),
   });
   const parsed = schema.safeParse({
     sellerSku: formData.get("sellerSku") ?? "",

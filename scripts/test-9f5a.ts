@@ -244,8 +244,12 @@ function staticTests() {
   ok('7 · new page handles the "archived" state read-only', /v\.state === "archived"/.test(newPage) && /can&rsquo;t create a listing/.test(newPage));
   ok("7 · getListableVariantState returns not_found | archived | ok", /state: "not_found"/.test(offersLib) && /state: "archived"/.test(offersLib) && /state: "ok"/.test(offersLib));
 
-  // 8 — all conditions
-  ok("8 · create form exposes all four conditions", /NEW/.test(createForm) && /REFURBISHED/.test(createForm) && /USED_LIKE_NEW/.test(createForm) && /USED_GOOD/.test(createForm));
+  // 8 — all conditions (9F-36B: the vocabulary is the shared CONDITION_OPTIONS
+  // from @/lib/marketplace/conditions, not a list inlined per form)
+  ok("8 · create form exposes every condition via the shared CONDITION_OPTIONS",
+    /CONDITION_OPTIONS as CONDITIONS \} from "@\/lib\/marketplace\/conditions"/.test(createForm) && /CONDITIONS\.map/.test(createForm));
+  ok("8 · the shared module lists all five approved conditions",
+    ["NEW", "REFURBISHED", "OPEN_BOX", "USED_LIKE_NEW", "USED_GOOD"].every((c) => new RegExp(`"${c}"`).test(read("src/lib/marketplace/conditions.ts"))));
   ok("8 · create form disables already-listed conditions", /takenConditions/.test(createForm) && /disabled=\{taken\.has/.test(createForm));
 
   // 12 — 3P ACTIVE gate unchanged (do not re-implement)

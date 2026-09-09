@@ -119,6 +119,8 @@ export type AdminRequestDetail = {
   categoryName: string | null;
   categoryNote: string | null;
   barcode: string | null;
+  /** 9F-36B — the seller's proposed product condition (read-only for the reviewer). */
+  proposedCondition: string | null;
   options: ProposedOption[];
   variants: ProposedVariant[];
   sellerNote: string | null;
@@ -160,6 +162,7 @@ export async function getAdminProductRequest(
       proposedCategoryId: true,
       categoryNote: true,
       barcode: true,
+      proposedCondition: true,
       proposedVariants: true,
       sellerNote: true,
       reviewStatusNote: true,
@@ -232,6 +235,7 @@ export async function getAdminProductRequest(
     categoryName: r.proposedCategory?.name ?? null,
     categoryNote: r.categoryNote,
     barcode: r.barcode,
+    proposedCondition: r.proposedCondition,
     options,
     variants,
     sellerNote: r.sellerNote,
@@ -369,7 +373,16 @@ async function advanceFromPending(
 }
 
 export type LinkResult =
-  | { ok: true; sellerId: string; productName: string; productId: string; productSlug: string; reviewedAt: Date }
+  | {
+      ok: true;
+      sellerId: string;
+      productName: string;
+      productId: string;
+      productSlug: string;
+      reviewedAt: Date;
+      /** 9F-36B — carried through so the caller seeds the seller's offers with it. */
+      proposedCondition: string | null;
+    }
   | AdminRequestError;
 
 /**
@@ -394,7 +407,7 @@ export async function linkExistingProduct(
 
   const current = await client.sellerProductRequest.findUnique({
     where: { id: requestId },
-    select: { status: true, proposedName: true, sellerId: true },
+    select: { status: true, proposedName: true, sellerId: true, proposedCondition: true },
   });
   if (!current) return { ok: false, code: "NOT_FOUND", error: "That request no longer exists." };
   if (current.status !== "PENDING") {
@@ -422,5 +435,6 @@ export async function linkExistingProduct(
     productId: product.id,
     productSlug: product.slug,
     reviewedAt,
+    proposedCondition: current.proposedCondition,
   };
 }
