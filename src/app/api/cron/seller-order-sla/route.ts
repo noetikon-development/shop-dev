@@ -4,7 +4,12 @@ import { runSellerOrderAcceptanceSla } from "@/lib/marketplace/seller-order-sla-
  * 3P seller-order acceptance SLA sweep (Phase 9F-32A).
  *
  *   Production URL: https://axiaro.shop/api/cron/seller-order-sla
- *   Schedule:       hourly (see vercel.json `crons`)
+ *   Schedule:       daily 09:00 UTC (see vercel.json `crons`). The Vercel Hobby
+ *                   plan caps crons at once/day; for finer cadence (the SLA
+ *                   thresholds are 4h / 24h) either upgrade to Pro and set the
+ *                   schedule to `0 * * * *`, or point any external scheduler at
+ *                   this URL with `Authorization: Bearer $CRON_SECRET`. The sweep
+ *                   is idempotent, so running it more often is harmless.
  *
  * - GET only (Vercel Cron issues GET). POST/others → 405.
  * - Node runtime (Prisma), always dynamic, never cached.

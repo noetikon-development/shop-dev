@@ -95,7 +95,8 @@ function staticTests() {
   ok("route · fails CLOSED + inert without CRON_SECRET (503), else Bearer check (401)",
     /if \(!secret\) \{[\s\S]{0,120}status: 503/.test(route) && /request\.headers\.get\("authorization"\) !== `Bearer \$\{secret\}`/.test(route));
   ok("route · nodejs runtime, force-dynamic", /export const runtime = "nodejs";/.test(route) && /export const dynamic = "force-dynamic";/.test(route));
-  ok("vercel.json · hourly cron registered for the sweep path", /"path": "\/api\/cron\/seller-order-sla"/.test(vercel) && /"schedule": "0 \* \* \* \*"/.test(vercel));
+  ok("vercel.json · cron registered for the sweep path (daily on Hobby; job is idempotent so cadence is safe to change)",
+    /"path": "\/api\/cron\/seller-order-sla"/.test(vercel) && /"schedule": "0 9 \* \* \*"/.test(vercel));
   ok("proxy · api/cron excluded from the session middleware (like api/webhooks)", /api\/webhooks\|api\/cron/.test(proxy));
 
   ok("email · two new EmailTypes", /\| "seller_order_acceptance_reminder"/.test(send) && /\| "seller_order_acceptance_overdue_ops"/.test(send));
