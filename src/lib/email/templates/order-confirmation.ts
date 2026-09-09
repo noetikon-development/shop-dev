@@ -12,6 +12,7 @@ import {
   textFooter,
   reasonFor,
 } from "@/lib/email/html";
+import { discountPercent } from "@/lib/utils";
 
 /**
  * Order confirmation (Step 17 §6; Batch 3 Phase 2). Built ONLY from the
@@ -30,7 +31,21 @@ export type OrderConfirmationData = {
   orderNumber: string;
   placedAt: Date;
   customerName: string;
-  items: { name: string; variantLabel: string | null; quantity: number; unitPrice: number; lineTotal: number }[];
+  items: {
+    name: string;
+    variantLabel: string | null;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    /**
+     * 9F-38B: the frozen compare-at ("was") unit price at purchase time, from
+     * `OrderItem.originalUnitPrice`. When present and greater than `unitPrice`
+     * the row shows a "was ₱X" indicator + the derived discount %. NULL /
+     * undefined / <= unitPrice → the row renders exactly as before. NEVER a
+     * live-Offer read; never added to a total.
+     */
+    originalUnitPrice?: number | null;
+  }[];
   subtotal: number;
   discountTotal: number;
   couponCode: string | null;
@@ -91,10 +106,16 @@ export function renderOrderConfirmation(d: OrderConfirmationData) {
     `Order date:   ${dateStr}`,
     ``,
     `Items:`,
-    ...d.items.map(
-      (it) =>
-        `  - ${it.name}${it.variantLabel ? ` (${it.variantLabel})` : ""} x${it.quantity}  ${peso(it.lineTotal)}`,
-    ),
+    ...d.items.map((it) => {
+      // 9F-38B: historical "was" line total + derived % from the frozen snapshot.
+      const off =
+        it.originalUnitPrice != null && it.originalUnitPrice > it.unitPrice
+          ? discountPercent(it.unitPrice, it.originalUnitPrice)
+          : 0;
+      const wasNote =
+        off > 0 ? `  (was ${peso(it.originalUnitPrice! * it.quantity)}, -${off}%)` : "";
+      return `  - ${it.name}${it.variantLabel ? ` (${it.variantLabel})` : ""} x${it.quantity}  ${peso(it.lineTotal)}${wasNote}`;
+    }),
     ``,
     `Subtotal:  ${peso(d.subtotal)}`,
     ...(d.discountTotal > 0 ? [`Discount:  -${peso(d.discountTotal)}${d.couponCode ? ` (${d.couponCode})` : ""}`] : []),

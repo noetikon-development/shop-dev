@@ -8,7 +8,7 @@ import { ORDER_STATUS_META, PAYMENT_METHODS } from "@/lib/constants";
 import { orderStatusTone } from "@/lib/orders/status";
 import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
 import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
-import { formatPrice, formatDate } from "@/lib/utils";
+import { formatPrice, formatDate, discountPercent } from "@/lib/utils";
 import type { OrderView } from "@/lib/data";
 
 export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
@@ -59,24 +59,44 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
         <div className="card-surface p-5">
           <h2 className="text-subtitle">Items</h2>
           <ul className="mt-4 divide-y divide-line">
-            {order.items.map((it) => (
-              <li key={it.id} className="flex gap-4 py-4">
-                <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                  <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} compact sizes="64px" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{it.name}</p>
-                  {it.variantLabel && (
-                    <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>
-                  )}
-                  {isNoteworthyCondition(it.condition) && (
-                    <p className="mt-0.5 text-meta text-ink-soft">Condition: {conditionLabel(it.condition!)}</p>
-                  )}
-                  <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
-                </div>
-                <span className="text-sm font-medium tabular-nums">{formatPrice(it.lineTotal)}</span>
-              </li>
-            ))}
+            {order.items.map((it) => {
+              // 9F-38B: show the historical markdown ONLY from the frozen snapshot
+              // (`originalUnitPrice`) — never the current Offer. NULL / <= unitPrice
+              // (pre-9F-38B lines, or no compare-at at purchase) → display exactly
+              // as before. The percentage is DERIVED via discountPercent().
+              const hadMarkdown =
+                it.originalUnitPrice != null && it.originalUnitPrice > it.unitPrice;
+              const wasLineTotal = hadMarkdown ? it.originalUnitPrice! * it.quantity : 0;
+              const offPercent = hadMarkdown
+                ? discountPercent(it.unitPrice, it.originalUnitPrice)
+                : 0;
+              return (
+                <li key={it.id} className="flex gap-4 py-4">
+                  <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
+                    <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} compact sizes="64px" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">{it.name}</p>
+                    {it.variantLabel && (
+                      <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>
+                    )}
+                    {isNoteworthyCondition(it.condition) && (
+                      <p className="mt-0.5 text-meta text-ink-soft">Condition: {conditionLabel(it.condition!)}</p>
+                    )}
+                    <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <span className="text-sm font-medium tabular-nums">{formatPrice(it.lineTotal)}</span>
+                    {hadMarkdown && offPercent > 0 && (
+                      <p className="mt-0.5 text-meta text-ink-faint tabular-nums">
+                        <s>{formatPrice(wasLineTotal)}</s>{" "}
+                        <span className="text-success">−{offPercent}%</span>
+                      </p>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         </div>
       </div>

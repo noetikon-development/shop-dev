@@ -486,6 +486,10 @@ export async function sendOrderConfirmation(
             quantity: i.quantity,
             unitPrice: i.unitPrice,
             lineTotal: i.lineTotal,
+            // 9F-38B: frozen compare-at ("was") snapshot — the email shows the
+            // historical markdown only from this, never the live Offer. NULL for
+            // pre-9F-38B lines / no compare-at → email byte-identical to today.
+            originalUnitPrice: i.originalUnitPrice,
           })),
           subtotal: order.subtotal,
           discountTotal: order.discountTotal,

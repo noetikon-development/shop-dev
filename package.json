@@ -46,6 +46,8 @@
     "test:9f35b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f35b.ts",
     "test:9f36b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f36b.ts",
     "test:9f37b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f37b.ts",
+    "db:migrate:9f38b": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260909200000_orderitem_original_price.sql",
+    "test:9f38b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f38b.ts",
     "test:9f20": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f20.ts",
     "test:9f21": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f21.ts",
     "test:9f22": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f22.ts",

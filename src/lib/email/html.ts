@@ -10,6 +10,7 @@
  *
  * The written brand is "Axiaro" — it is never upper-cased programmatically.
  */
+import { discountPercent } from "@/lib/utils";
 
 const PALETTE = {
   paper: "#faf7f2",
@@ -257,19 +258,40 @@ export function kvRow(key: string, value: string, opts: { strong?: boolean; last
 }
 
 export function itemsTable(
-  items: { name: string; variantLabel?: string | null; quantity: number; unitPrice: number; lineTotal: number }[],
+  items: {
+    name: string;
+    variantLabel?: string | null;
+    quantity: number;
+    unitPrice: number;
+    lineTotal: number;
+    /**
+     * 9F-38B: frozen compare-at ("was") unit price at purchase time. When
+     * present and greater than `unitPrice`, the Price cell adds a struck-through
+     * "was ₱X" and the derived discount %. NULL / undefined / <= unitPrice
+     * renders the cell exactly as before. Never a live-Offer read.
+     */
+    originalUnitPrice?: number | null;
+  }[],
 ): string {
   const rows = items
-    .map(
-      (it) => `<tr>
+    .map((it) => {
+      const hadMarkdown =
+        it.originalUnitPrice != null && it.originalUnitPrice > it.unitPrice;
+      const off = hadMarkdown ? discountPercent(it.unitPrice, it.originalUnitPrice) : 0;
+      const wasCell =
+        hadMarkdown && off > 0
+          ? `<br><span style="color:${PALETTE.inkFaint};text-decoration:line-through;">${esc(peso(it.originalUnitPrice!))}</span>` +
+            ` <span style="color:${PALETTE.clay};">-${off}%</span>`
+          : "";
+      return `<tr>
         <td style="padding:10px 14px;border-bottom:1px solid ${PALETTE.line};color:${PALETTE.ink};font-size:13px;">
           ${esc(it.name)}${it.variantLabel ? `<br><span style="color:${PALETTE.inkFaint};">${esc(it.variantLabel)}</span>` : ""}
         </td>
         <td style="padding:10px 8px;border-bottom:1px solid ${PALETTE.line};color:${PALETTE.inkSoft};font-size:13px;text-align:center;">${it.quantity}</td>
-        <td style="padding:10px 8px;border-bottom:1px solid ${PALETTE.line};color:${PALETTE.inkSoft};font-size:13px;text-align:right;">${esc(peso(it.unitPrice))}</td>
+        <td style="padding:10px 8px;border-bottom:1px solid ${PALETTE.line};color:${PALETTE.inkSoft};font-size:13px;text-align:right;">${esc(peso(it.unitPrice))}${wasCell}</td>
         <td style="padding:10px 14px;border-bottom:1px solid ${PALETTE.line};color:${PALETTE.ink};font-size:13px;text-align:right;">${esc(peso(it.lineTotal))}</td>
-      </tr>`,
-    )
+      </tr>`;
+    })
     .join("");
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:0 0 18px;border:1px solid ${PALETTE.line};border-radius:8px;overflow:hidden;">
     <tr style="background:${PALETTE.paper};">

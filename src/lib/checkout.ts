@@ -497,6 +497,9 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     quantity: number;
     lineTotal: number;
     condition: string;
+    // 9F-38B: the bound Offer's compare-at ("was") price snapshot, or null when
+    // the Offer has no compare-at. Display/history only — never enters a total.
+    originalUnitPrice: number | null;
   }[] = [];
 
   for (const item of cart.items) {
@@ -556,6 +559,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       quantity: item.quantity,
       lineTotal: o.price * item.quantity,
       condition: o.condition, // 9F-22 snapshot — the bound offer's condition
+      // 9F-38B snapshot — the bound Offer's compare-at ("was") price at purchase
+      // time. Already loaded on `o` (never re-picked). Null when the Offer had no
+      // compare-at. Display/history only; never summed into a total.
+      originalUnitPrice: o.compareAtPrice ?? null,
     });
   }
 
@@ -857,6 +864,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           // time (incl. "NEW"). Display code shows a condition line only when this
           // is a non-NEW value; nothing re-picks the offer.
           condition: l.condition,
+          // 9F-38B: the bound Offer's compare-at ("was") price snapshot (null when
+          // the Offer had no compare-at). Historical/display only — the customer
+          // pays `unitPrice`; this value is never added to any total.
+          originalUnitPrice: l.originalUnitPrice,
         })),
       });
 

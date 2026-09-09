@@ -774,6 +774,15 @@ model OrderItem {
   // Offer.condition edit or a deleted Offer. NULL only for pre-9F-22 lines.
   // Display code shows a condition line only when this is a non-NEW value.
   condition    String?
+  // 9F-38B: the bound Offer's compare-at ("was") price at purchase time — a
+  // historical snapshot so order/receipt/email display can show the markdown
+  // the customer actually received, surviving a later Offer.compareAtPrice edit
+  // or a deleted Offer. DISPLAY / HISTORY ONLY — it is NEVER added to any total;
+  // the customer always pays `unitPrice`. NULL for every pre-9F-38B line and for
+  // any line whose Offer had no compare-at (intentionally unrecoverable — never
+  // backfilled from current Offer data). The discount amount/percent are DERIVED
+  // (max(0, originalUnitPrice - unitPrice) / discountPercent()), never stored.
+  originalUnitPrice Int?
 
   // Marketplace snapshot (Phase 9E-3C-1). NULLABLE during the additive
   // migration; the 9E-3C-1 backfill populates them for every historical line
