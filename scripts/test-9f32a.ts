@@ -28,6 +28,10 @@ import {
   sendSellerOrderAcceptanceReminder,
   sendSellerOrderAcceptanceOverdueOps,
 } from "@/lib/email/notifications";
+import {
+  renderSellerOrderAcceptanceReminder,
+} from "@/lib/email/templates/seller-order-notifications";
+import { renderSellerOrderAcceptanceOverdueOps } from "@/lib/email/templates/ops-notifications";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -115,6 +119,43 @@ function staticTests() {
     /renderSellerOrderAcceptanceReminder/.test(sellerTpl) &&
     /Accept.{0,40}Decline|accept or decline/i.test(sellerTpl.slice(sellerTpl.indexOf("renderSellerOrderAcceptanceReminder"), sellerTpl.indexOf("renderSellerOrderAcceptanceReminder") + 2200)) &&
     !/being packed|picked and packed/i.test(sellerTpl.slice(sellerTpl.indexOf("renderSellerOrderAcceptanceReminder"), sellerTpl.indexOf("renderSellerOrderAcceptanceReminder") + 2200)));
+  // 9F-34A — inline <strong> in the reminder body must be RENDERED HTML, not
+  // escaped literal tags (the 9F-32A bug: <strong> went through paragraph() →
+  // esc() → &lt;strong&gt;). Dynamic values still escaped.
+  ok("email · 9F-34A · reminder body emits <strong> via paragraphHtml + esc()s dynamic values (never raw paragraph())",
+    /paragraphHtml\(/.test(sellerTpl) &&
+    /<strong>\$\{esc\(d\.waitedLabel\)\}<\/strong>/.test(sellerTpl) &&
+    !/paragraph\(`[^`]*<strong>/.test(sellerTpl) &&
+    /export function paragraphHtml\(html: string\): string/.test(read("src/lib/email/html.ts")));
+  {
+    const r = renderSellerOrderAcceptanceReminder({
+      brand: "Axiaro", siteUrl: "https://x.test", sellerName: "Style & Co", orderNumber: "AX-1<2",
+      ordersUrl: "https://x.test/seller/orders", orderUrl: "https://x.test/seller/orders/so1",
+      waitedLabel: "1 day 8 hours", itemCount: 2,
+    });
+    ok("email · 9F-34A · rendered HTML body contains real <strong> tags, NOT &lt;strong&gt;",
+      r.html.includes("<strong>1 day 8 hours</strong>") &&
+      r.html.includes("<strong>Accept</strong>") &&
+      r.html.includes("<strong>Decline</strong>") &&
+      !r.html.includes("&lt;strong&gt;"));
+    ok("email · 9F-34A · dynamic values in the rich paragraph ARE still escaped",
+      r.html.includes("AX-1&lt;2") && r.html.includes("Style &amp; Co") && !r.html.includes(">AX-1<2<"));
+    ok("email · 9F-34A · plain-text body is readable, no raw HTML tags",
+      r.text.includes("1 day 8 hours") && r.text.includes("Accept it to start preparing") &&
+      !/<\/?strong>|<\/?p>|&lt;|&amp;lt;/.test(r.text));
+    ok("email · 9F-34A · subject / link / recipient-reason wording unchanged",
+      r.subject === "Action needed: accept or decline order AX-1<2" &&
+      r.html.includes("https://x.test/seller/orders/so1") &&
+      r.html.includes("you manage a seller account on Axiaro"));
+    // the ops escalation template was already plain paragraph() — regression-guard it stays tag-free
+    const o = renderSellerOrderAcceptanceOverdueOps({
+      brand: "Axiaro", siteUrl: "https://x.test", adminUrl: "https://x.test/admin/orders/o1",
+      sellerName: "Style Avenue", orderNumber: "AX-2", sellerOrderStatus: "PENDING_PAYMENT",
+      waitedLabel: "1 day 8 hours", thresholdLabel: "1 day", itemCount: 1, placedAt: new Date("2026-09-07T10:00:00Z"),
+    });
+    ok("email · 9F-34A · ops escalation body has no <strong>/literal-tag issue (was already plain paragraph())",
+      !o.html.includes("&lt;strong&gt;") && !/<\/?strong>|<\/?p>|&lt;/.test(o.text));
+  }
   ok("email · ops template carries NO customer PII",
     /renderSellerOrderAcceptanceOverdueOps/.test(opsTpl) &&
     !/customerName|customerEmail|\bphone\b|shippingAddress/.test(opsTpl.slice(opsTpl.indexOf("renderSellerOrderAcceptanceOverdueOps"), opsTpl.indexOf("renderSellerOrderAcceptanceOverdueOps") + 2400)));

@@ -215,6 +215,16 @@ export function paragraph(text: string): string {
   return `<p style="margin:0 0 14px;color:${PALETTE.inkSoft};">${esc(text)}</p>`;
 }
 
+/**
+ * Same `<p>` as `paragraph()` but the argument is TRUSTED HTML — use it when a
+ * sentence needs inline markup (e.g. `<strong>`). The CALLER is responsible for
+ * escaping every dynamic value it interpolates (`esc(...)`); only fixed template
+ * copy and known-safe tags may be passed raw. Never pass user input here.
+ */
+export function paragraphHtml(html: string): string {
+  return `<p style="margin:0 0 14px;color:${PALETTE.inkSoft};">${html}</p>`;
+}
+
 /** A CTA button. `href` must already be a trusted absolute URL. */
 export function button(label: string, href: string): string {
   return `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;">

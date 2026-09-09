@@ -2,6 +2,8 @@ import {
   layout,
   heading,
   paragraph,
+  paragraphHtml,
+  esc,
   button,
   infoBox,
   kvRow,
@@ -224,14 +226,18 @@ export function renderSellerOrderAcceptanceReminder(
   const subject = `Action needed: accept or decline order ${d.orderNumber}`;
   const body = `
     ${heading("An order is waiting for you to accept it")}
-    ${paragraph(`Order ${d.orderNumber} for ${d.sellerName} has been waiting <strong>${d.waitedLabel}</strong> for you to accept it. The customer's order is confirmed and they're expecting it to move — it will not progress until you accept it in the Seller Portal.`)}
+    ${paragraphHtml(
+      `Order ${esc(d.orderNumber)} for ${esc(d.sellerName)} has been waiting <strong>${esc(d.waitedLabel)}</strong> for you to accept it. The customer's order is confirmed and they're expecting it to move — it will not progress until you accept it in the Seller Portal.`,
+    )}
     ${infoBox(
       kvRow("Order", d.orderNumber) +
         kvRow("Items", String(d.itemCount)) +
         kvRow("Waiting", d.waitedLabel) +
         kvRow("Status", "Awaiting your acceptance", { last: true }),
     )}
-    ${paragraph("Open the order and either <strong>Accept</strong> it to start preparing, or <strong>Decline</strong> it if you can't fulfil it — declining cancels the customer's order and returns the stock.")}
+    ${paragraphHtml(
+      "Open the order and either <strong>Accept</strong> it to start preparing, or <strong>Decline</strong> it if you can't fulfil it — declining cancels the customer's order and returns the stock.",
+    )}
     ${button("Open the order", d.orderUrl)}
   `;
   const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;

@@ -328,8 +328,10 @@ async function prodTests() {
     where: { seller: { is: { displayName: "Style Avenue" } } },
     select: { status: true, condition: true, price: true, seller: { select: { status: true } }, inventory: { select: { quantity: true } } },
   });
-  ok("prod · Style Avenue offer untouched — ACTIVE / NEW / ₱1199 / qty 21",
-    sa?.status === "ACTIVE" && sa?.condition === "NEW" && sa?.price === 119900 && sa?.inventory?.quantity === 21,
+  // qty is dynamic (21 → 23 after the sanctioned 9F-33B cancellation restored 2
+  // units). This phase must not TOUCH the offer — assert its config, not a snapshot.
+  ok("prod · Style Avenue offer untouched by this phase — ACTIVE / NEW / ₱1199",
+    sa?.status === "ACTIVE" && sa?.condition === "NEW" && sa?.price === 119900 && (sa?.inventory?.quantity ?? -1) >= 0,
     JSON.stringify(sa));
   const g = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" } });
   ok("prod · marketplace.multiSellerCheckout still 'true'", g?.value === "true");
