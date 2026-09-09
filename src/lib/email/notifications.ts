@@ -47,12 +47,13 @@ import {
 import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
+  renderSellerReturnRequested,
   renderSellerReturnReceived,
   renderSellerOrderReceived,
   renderSellerSettlementRecorded,
   type ClawbackNote,
 } from "@/lib/email/templates/seller-order-notifications";
-import { returnReasonLabel } from "@/lib/returns/status";
+import { returnReasonLabel, returnStatusLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
 import { maskEmail, setEmailFooterContext } from "@/lib/email/html";
@@ -2062,6 +2063,16 @@ export async function retryEmailByLog(
       if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
       return sendSellerReturnReceived(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
     }
+    // 9F-31B — key: SELLER_RETURN_REQUESTED:<returnId>:<sellerId>. Both ids
+    // parsed straight back out of the key; the ReturnRequest + seller rows are
+    // re-read (deterministic). Retry reuses the same EmailLog row.
+    case "seller_return_requested": {
+      const parts = log.idempotencyKey.split(":");
+      const returnId = parts[1];
+      const sellerId = parts[2];
+      if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
+      return sendSellerReturnRequested(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
     // 9F-24D P1-7 — key: SELLER_OFFER_PUBLISHED:<offerId>:<auditLogId>. Both ids
     // are parsed straight back out of the key; the offer row is re-read
     // (deterministic). Retry reuses the same EmailLog row.
@@ -2789,6 +2800,88 @@ export async function getReturnAffectedSellerIds(
     select: { orderItem: { select: { sellerId: true } } },
   });
   return [...new Set(rows.map((r) => r.orderItem.sellerId).filter((v): v is string => Boolean(v)))];
+}
+
+/**
+ * Seller — a customer just OPENED a return covering (at least) one of this
+ * seller's lines (9F-31B P2). Fired from BOTH return-create paths — the customer
+ * self-service `requestReturnAction` and the admin-assisted create — one email
+ * per affected THIRD_PARTY seller. A FIRST_PARTY line resolves no seller here,
+ * so Axiaro's own returns never trigger it.
+ *
+ * Keyed `(returnId, sellerId)`: `ReturnRequest` is created once and its status
+ * transitions are forward-only + guarded, so this can never double-send — never
+ * `Seller.updatedAt`. Carries only the seller's own returned line(s) + the
+ * reason + status; no customer PII.
+ * Key: SELLER_RETURN_REQUESTED:<returnId>:<sellerId>.
+ */
+export async function sendSellerReturnRequested(
+  returnId: string,
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: {
+        id: true,
+        returnNumber: true,
+        reason: true,
+        status: true,
+        order: { select: { orderNumber: true } },
+      },
+    });
+    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+
+    // FIRST_PARTY (Axiaro's own) lines: Axiaro processes its own returns and has
+    // no seller mailbox to notify — skip, exactly as `sendSellerOrderReceived`
+    // does for a 1P order. `getReturnAffectedSellerIds` returns every snapshotted
+    // `OrderItem.sellerId`, Axiaro's included, so this is where 1P is filtered.
+    const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { type: true } });
+    if (seller?.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_return_requested",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_REQUESTED:${returnId}:${sellerId}`,
+        subject: `Return ${ret.returnNumber} requested — seller notification`,
+        client: opts.client,
+      });
+    const items = await db.returnItem.findMany({
+      where: { returnRequestId: returnId, orderItem: { sellerId } },
+      select: { name: true, variantLabel: true, quantity: true },
+    });
+    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+
+    return renderAndDispatch(
+      {
+        type: "seller_return_requested",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_REQUESTED:${returnId}:${sellerId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerReturnRequested({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          returnNumber: ret.returnNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          reasonLabel: returnReasonLabel(ret.reason),
+          status: returnStatusLabel(ret.status),
+          items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerReturnRequested", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
 }
 
 /**

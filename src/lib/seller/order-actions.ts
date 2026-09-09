@@ -15,6 +15,7 @@ import { scheduleEmail } from "@/lib/email/schedule";
 import {
   sendOrderShipped,
   sendOrderDelivered,
+  sendOrderProcessing,
   sendOrderCancelled,
   sendSellerOrderCancelledOps,
 } from "@/lib/email/notifications";
@@ -86,6 +87,19 @@ export async function advanceSellerOrderAction(
     revalidateOrderPaths(res.parentOrder.orderNumber, res.parentOrder.id);
     const { id, rolledTo } = res.parentOrder;
     scheduleEmail(() => (rolledTo === "SHIPPED" ? sendOrderShipped(id) : sendOrderDelivered(id)));
+  }
+
+  // 9F-31B (P1): the "we're preparing your order" email belongs HERE — when the
+  // 3P seller actually accepts — not at checkout. A THIRD_PARTY COD order is
+  // auto-confirmed to `Order.status = PROCESSING` at checkout while its
+  // SellerOrder is still `PENDING_PAYMENT`; checkout no longer sends the
+  // processing email, so the customer only hears "being packed" once the seller
+  // has picked it up. `ORDER_PROCESSING:<orderId>` keeps it one-send even if an
+  // admin also confirms the same order, and the customer timeline rung is
+  // already reworded until this point. Only fires on the accept transition.
+  if (res.from === "PENDING_PAYMENT" && parsed.data.to === "PROCESSING") {
+    revalidateOrderPaths(res.orderNumber, res.orderId);
+    scheduleEmail(() => sendOrderProcessing(res.orderId));
   }
 
   // 9F-14: "accepted" when this was PENDING_PAYMENT → PROCESSING, not the

@@ -65,7 +65,17 @@ function staticTests() {
   ok("paymentMethod / paymentStatus are UNCHANGED (still NONE / PENDING literals)", /paymentMethod: "NONE",\s*\n\s*paymentStatus: "PENDING",/.test(checkout));
   ok("a PROCESSING OrderEvent is added only when autoConfirmParent", /\.\.\.\(autoConfirmParent\s*\n?\s*\? \[\s*\n?\s*\{\s*\n?\s*status: "PROCESSING",\s*\n?\s*title: "Preparing your order",\s*\n?\s*detail: ORDER_STATUS_META\.PROCESSING\?\.description \?\? null,/.test(checkout));
   ok("post-commit audit: order.confirmed, system actor, trigger tag", /if \(autoConfirmParent\) \{[\s\S]{0,400}writeAudit\(\{\s*\n?\s*actorUserId: null,\s*\n?\s*action: "order\.confirmed",[\s\S]{0,400}trigger: "checkout_3p_cod_autoconfirm"/.test(checkout));
-  ok("post-commit: existing 'preparing your order' email, guarded, key-deduped", /if \(autoConfirmParent\) \{[\s\S]{0,700}scheduleEmail\(\(\) => sendOrderProcessing\(created\.id\)\)/.test(checkout));
+  // 9F-31B (P1): the auto-confirm block NO LONGER sends the "preparing your
+  // order" email — a THIRD_PARTY SellerOrder is still PENDING_PAYMENT here
+  // (unaccepted), so "being picked and packed" would be untrue. That email now
+  // fires from advanceSellerOrderAction when the seller actually accepts.
+  ok("post-commit: auto-confirm block does NOT send sendOrderProcessing (moved to seller-accept in 9F-31B)",
+    !/if \(autoConfirmParent\) \{[\s\S]{0,900}sendOrderProcessing/.test(checkout) &&
+    !/sendOrderProcessing/.test(checkout));
+  ok("9F-31B · the 3P 'preparing' email fires on the seller-accept transition instead",
+    /if \(res\.from === "PENDING_PAYMENT" && parsed\.data\.to === "PROCESSING"\) \{[\s\S]{0,200}scheduleEmail\(\(\) => sendOrderProcessing\(res\.orderId\)\)/.test(
+      read("src/lib/seller/order-actions.ts"),
+    ));
   ok("no Payment row / PayMongo / OfferInventory touched by the auto-confirm block", !/tx\.payment\.|prisma\.payment\.|PAYMONGO_|checkout-session|paymentRefund/i.test(checkout.slice(checkout.indexOf("autoConfirmParent"), checkout.indexOf("autoConfirmParent") + 4000)));
 
   // parity with the admin confirm flow

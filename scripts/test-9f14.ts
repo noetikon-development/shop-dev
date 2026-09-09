@@ -159,7 +159,7 @@ function staticTests() {
   ok("panel button label comes from sellerAdvanceLabels(status, to)", /const \{ button, primary \} = sellerAdvanceLabels\(status, to\);/.test(panel));
   ok("panel no longer hard-codes 'Move back to preparing' as the PENDING_PAYMENT label", !/to === "PROCESSING"\s*\n?\s*\? "Move back to preparing"/.test(panel));
   ok("seller action toast uses res.from + sellerAdvanceLabels", /const \{ done \} = sellerAdvanceLabels\(res\.from, parsed\.data\.to\);/.test(actions));
-  ok("advanceSellerOrderStatus returns `from` on success", /return \{ ok: true, status: to, from: so\.status as SellerOrderStatus, parentOrder \};/.test(repo));
+  ok("advanceSellerOrderStatus returns `from` on success (+ orderId/orderNumber, 9F-31B)", /return \{\s*\n\s*ok: true,\s*\n\s*status: to,\s*\n\s*from: so\.status as SellerOrderStatus,\s*\n\s*orderId: so\.order\.id,\s*\n\s*orderNumber: so\.order\.orderNumber,\s*\n\s*parentOrder,\s*\n\s*\};/.test(repo));
 
   // guardrails — 9F-12b rollup + its emails untouched
   ok("9F-12b rollup helper unchanged (still keyed on ORDER_SHIPPED / ORDER_DELIVERED via existing senders)", /rollUpParentOrder/.test(repo) && /sendOrderShipped\(id\) : sendOrderDelivered\(id\)/.test(actions));

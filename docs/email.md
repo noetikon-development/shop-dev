@@ -46,16 +46,17 @@ trigger (checkout / order / fulfilment / returns / auth / contact / webhook)
 
 | Admin / system action | `Order.status` | Email |
 |---|---|---|
-| checkout (`createOrderFromCart`) | `PENDING_PAYMENT` | `order_confirmation` |
-| **Confirm order** (pay-on-delivery) | `PENDING_PAYMENT → PROCESSING` | `order_processing` |
+| checkout (`createOrderFromCart`) | `PENDING_PAYMENT` (1P) / auto-`PROCESSING` (3P COD) | `order_confirmation` + `order_received_ops` + `seller_order_received` (3P) |
+| **Confirm order** (pay-on-delivery, 1P) | `PENDING_PAYMENT → PROCESSING` | `order_processing` |
 | Move to Processing (online-paid order) | `PENDING`/`PAID → PROCESSING` | `order_processing` |
-| Mark as shipped | `PROCESSING → SHIPPED` | `order_shipped` (courier + tracking) |
-| Mark out for delivery | `SHIPPED → OUT_FOR_DELIVERY` | `out_for_delivery` |
+| **3P seller accepts** (`SellerOrder PENDING_PAYMENT → PROCESSING`) | `Order.status` already `PROCESSING` | `order_processing` (9F-31B — NOT sent at 3P checkout; the seller must accept first) |
+| Mark as shipped (1P admin, or 3P seller advance → rollup) | `PROCESSING → SHIPPED` | `order_shipped` (courier + tracking) |
+| Mark out for delivery (1P admin only) | `SHIPPED → OUT_FOR_DELIVERY` | `out_for_delivery` |
 | Mark delivered / collected | `… → DELIVERED` | `order_delivered` |
-| Cancel order | `… → CANCELLED` | `order_cancelled` |
+| Cancel order (admin / 3P seller / customer) | `… → CANCELLED` | `order_cancelled` + `seller_order_cancelled` (cascaded 3P sellers, except a seller's own cancel) |
 | PayMongo webhook `payment.paid` *(dormant)* | `… → PAID`, then `PROCESSING` | `payment_confirmation` + `order_processing` |
 
-Return / RMA emails follow the same shape against `ReturnRequest` (keys `RETURN_*:<returnId>`).
+Return / RMA emails follow the same shape against `ReturnRequest` (keys `RETURN_*:<returnId>`). A return that covers a **THIRD_PARTY** seller's line also fires `seller_return_requested` at creation (9F-31B) and `seller_return_received` when the goods are received.
 
 ---
 

@@ -13,7 +13,6 @@ import {
   sendOrderConfirmation,
   sendOrderReceivedOps,
   sendSellerOrderReceived,
-  sendOrderProcessing,
 } from "@/lib/email/notifications";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { writeAudit } from "@/lib/admin/audit";
@@ -892,8 +891,16 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
 
     // 9F-15B: a THIRD_PARTY COD order was auto-confirmed above — record the
     // `order.confirmed` audit row (system actor, best-effort — same posture as
-    // confirmOrderAction) and send the existing "preparing your order" email
-    // (key ORDER_PROCESSING:<orderId>, so it can never duplicate).
+    // confirmOrderAction).
+    //
+    // 9F-31B (P1): this branch NO LONGER sends the "we're preparing your order"
+    // email. `Order.status` is PROCESSING here only so the customer-facing
+    // timeline can progress, but the SellerOrder is still PENDING_PAYMENT — the
+    // seller has not accepted, nothing is being packed. That email now fires
+    // from `advanceSellerOrderAction` when the seller actually accepts
+    // (PENDING_PAYMENT → PROCESSING); its `ORDER_PROCESSING:<orderId>` key is
+    // unchanged, so it still sends exactly once. The 1P path (admin "Confirm
+    // order" / status → PROCESSING) is untouched and still sends it.
     if (autoConfirmParent) {
       await writeAudit({
         actorUserId: null,
@@ -910,7 +917,6 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           sellerId: soSeller.id,
         },
       });
-      scheduleEmail(() => sendOrderProcessing(created.id));
     }
 
     return { ok: true, orderNumber: created.orderNumber, duplicate: false };

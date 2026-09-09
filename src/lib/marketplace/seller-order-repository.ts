@@ -224,7 +224,16 @@ export type ParentOrderRollup = {
 };
 
 export type SellerOrderMutationResult =
-  | { ok: true; status: SellerOrderStatus; from: SellerOrderStatus; parentOrder?: ParentOrderRollup }
+  | {
+      ok: true;
+      status: SellerOrderStatus;
+      from: SellerOrderStatus;
+      /** The parent customer Order this SellerOrder belongs to — always present. */
+      orderId: string;
+      orderNumber: string;
+      /** Set only when this transition ALSO rolled the parent Order forward (9F-12b). */
+      parentOrder?: ParentOrderRollup;
+    }
   | SellerOrderRepoError;
 
 /** SellerOrder statuses that count as "shipped or beyond" for the SHIPPED rollup. */
@@ -384,7 +393,7 @@ export async function advanceSellerOrderStatus(
       select: {
         id: true,
         status: true,
-        order: { select: { status: true } },
+        order: { select: { id: true, orderNumber: true, status: true } },
         shipments: { select: { carrier: true, trackingNumber: true } },
       },
     });
@@ -431,7 +440,14 @@ export async function advanceSellerOrderStatus(
       parentOrder = (await rollUpParentOrder(tx, sellerOrderId, to)) ?? undefined;
     }
 
-    return { ok: true, status: to, from: so.status as SellerOrderStatus, parentOrder };
+    return {
+      ok: true,
+      status: to,
+      from: so.status as SellerOrderStatus,
+      orderId: so.order.id,
+      orderNumber: so.order.orderNumber,
+      parentOrder,
+    };
   };
 
   try {

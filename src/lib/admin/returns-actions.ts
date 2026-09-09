@@ -22,6 +22,7 @@ import {
   sendReturnRefundInitiatedOps,
   sendReturnRefundCompletedOps,
   sendSellerReturnReceived,
+  sendSellerReturnRequested,
   getReturnAffectedSellerIds,
 } from "@/lib/email/notifications";
 import {
@@ -914,6 +915,13 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
 
   scheduleEmail(() => sendReturnRequested(created.id));
   scheduleEmail(() => sendReturnInbound(created.id));
+
+  // 9F-31B (P2) — same seller heads-up the customer path sends. One email per
+  // affected THIRD_PARTY seller; FIRST_PARTY is skipped inside the sender.
+  const affectedSellerIds = await getReturnAffectedSellerIds(created.id);
+  for (const sellerId of affectedSellerIds) {
+    scheduleEmail(() => sendSellerReturnRequested(created.id, sellerId));
+  }
 
   revalidateReturn(created.id, created.returnNumber, order.orderNumber);
   return { ok: true, message: `Return ${created.returnNumber} created.`, returnId: created.id };

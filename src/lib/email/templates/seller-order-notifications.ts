@@ -205,6 +205,64 @@ export function renderSellerReturnReceived(
 }
 
 /**
+ * 9F-31B (P2) — a customer opened a return that covers one or more of this
+ * seller's lines. Sent the moment the return is CREATED (customer self-service
+ * or admin-assisted), so the seller can expect the goods back and prepare a
+ * resolution — the seller's own inspection / receipt confirmation happens later
+ * via `renderSellerReturnReceived`.
+ *
+ * Carries ONLY return metadata the seller needs: the Axiaro order number, the
+ * seller's own returned line(s), the reason, and the current status. NO customer
+ * name / email / phone / address / note.
+ */
+export function renderSellerReturnRequested(
+  d: SellerOrderBase & {
+    returnNumber: string;
+    returnsUrl: string;
+    reasonLabel: string;
+    status: string;
+    items: { name: string; variantLabel: string | null; quantity: number }[];
+  },
+) {
+  const subject = `Return requested: ${d.returnNumber} (order ${d.orderNumber})`;
+  const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const body = `
+    ${heading("A customer requested a return")}
+    ${paragraph(`A customer opened a return that includes item(s) from ${d.sellerName}. Axiaro reviews every return request; you don't need to act yet — this is a heads-up so you can expect the item(s) back.`)}
+    ${infoBox(
+      kvRow("Return", d.returnNumber) +
+        kvRow("Order", d.orderNumber) +
+        kvRow("Reason", d.reasonLabel) +
+        kvRow("Status", d.status) +
+        kvRow("Your item(s)", itemLines.join("; ") || "—", { last: true }),
+    )}
+    ${paragraph("You'll get another email once the returned item(s) are received back. Track it any time in the Seller Portal.")}
+    ${button("View your returns", d.returnsUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "A customer requested a return",
+      ``,
+      `A customer opened a return that includes item(s) from ${d.sellerName}. Axiaro reviews every return request — you don't need to act yet.`,
+      ``,
+      `Return: ${d.returnNumber}`,
+      `Order: ${d.orderNumber}`,
+      `Reason: ${d.reasonLabel}`,
+      `Status: ${d.status}`,
+      `Your item(s): ${itemLines.join("; ") || "—"}`,
+      ``,
+      "You'll get another email once the returned item(s) are received back.",
+      ``,
+      `Your returns: ${d.returnsUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
  * 9F-20 — a bookkeeping settlement was recorded for this THIRD_PARTY seller.
  *
  * IMPORTANT: this describes a RECORD Axiaro entered, not an electronic transfer.

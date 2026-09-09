@@ -8,7 +8,12 @@ import { getCurrentUser } from "@/lib/auth";
 import { cleanUserText } from "@/lib/ugc";
 import { hitRateLimit } from "@/lib/rate-limit";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendReturnRequested, sendReturnInbound } from "@/lib/email/notifications";
+import {
+  sendReturnRequested,
+  sendReturnInbound,
+  sendSellerReturnRequested,
+  getReturnAffectedSellerIds,
+} from "@/lib/email/notifications";
 import {
   returnEligibility,
   describeIneligibility,
@@ -134,6 +139,15 @@ export async function requestReturnAction(
 
   scheduleEmail(() => sendReturnRequested(created.id));
   scheduleEmail(() => sendReturnInbound(created.id));
+
+  // 9F-31B (P2) — a 3P seller whose line(s) are in this return needs to know a
+  // return was opened (they only learned at RECEIVED before). One email per
+  // affected THIRD_PARTY seller; a FIRST_PARTY line resolves no seller id, so
+  // Axiaro's own returns never trigger this. Key SELLER_RETURN_REQUESTED:<id>:<sellerId>.
+  const affectedSellerIds = await getReturnAffectedSellerIds(created.id);
+  for (const sellerId of affectedSellerIds) {
+    scheduleEmail(() => sendSellerReturnRequested(created.id, sellerId));
+  }
 
   revalidatePath("/account/returns");
   revalidatePath(`/account/orders/${orderNumber}`);
