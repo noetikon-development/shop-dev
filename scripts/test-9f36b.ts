@@ -325,7 +325,7 @@ async function dbTests() {
         (await tx.offer.findUnique({ where: { id: offId }, select: { condition: true } }))?.condition === "REFURBISHED");
 
       throw new Rollback();
-    });
+    }, { timeout: 120_000, maxWait: 15_000 });
   } catch (e) {
     if (!(e instanceof Rollback)) throw e;
   }
