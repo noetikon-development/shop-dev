@@ -869,6 +869,17 @@ model ReturnRequest {
   refundInitiatedAt DateTime?
   refundCompletedAt DateTime?
 
+  // 9F-41B — where the customer was told to send the goods, resolved + frozen at
+  // approval. IMMUTABLE: a later Seller.returnAddress / returns.instructions edit
+  // never changes this. Shape (JSON):
+  //   { kind: "seller"|"store", manualHandling: bool, sellerIds: string[],
+  //     sellerId?, sellerName?, returnPolicy?, address?{…}, instructions?, policyUrl? }
+  // NULL on every pre-9F-41B row and on a return that was never approved — the
+  // customer/seller/admin surfaces fall back to the store-wide instructions,
+  // byte-identical to pre-9F-41B behaviour.
+  returnDestination      Json?
+  returnDestinationSetAt DateTime?
+
   restockedAt DateTime? // set once, on -> RECEIVED (second idempotency guard for the restock)
 
   createdAt DateTime @default(now())
@@ -1249,6 +1260,12 @@ model Seller {
   shippingPolicy     String?
   shipFromCity       String?
   shipFromCountry    String?
+  // 9F-41B — structured destination customers ship 3P returns back to.
+  // { recipient, line1, line2?, barangay?, city, province, postalCode, country, phone }.
+  // Part of the MODERATED bundle (contentStatus gate); only used, once APPROVED,
+  // by the return-routing snapshot in `approveReturnAction`. Never rendered on
+  // the public storefront.
+  returnAddress      Json?
   socialLinks        Json?
   notifyEmail        String?
   contentStatus      String    @default("DRAFT") // DRAFT | PENDING | APPROVED

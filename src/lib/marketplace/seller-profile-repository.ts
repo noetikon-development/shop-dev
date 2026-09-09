@@ -1,8 +1,12 @@
 import "server-only";
-import type { Prisma } from "@prisma/client";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cleanUserText } from "@/lib/ugc";
 import { isSupportedCountry } from "@/lib/countries";
+import {
+  validateSellerReturnAddress,
+  parseSellerReturnAddress,
+} from "@/lib/marketplace/return-destination";
 import {
   SELLER_SOCIAL_KEYS,
   type SellerContext,
@@ -68,6 +72,7 @@ const PROFILE_SELECT = {
   shippingPolicy: true,
   shipFromCity: true,
   shipFromCountry: true,
+  returnAddress: true,
   socialLinks: true,
   contentStatus: true,
   contentSubmittedAt: true,
@@ -116,6 +121,7 @@ export async function getSellerSettings(
       shippingPolicy: row.shippingPolicy,
       shipFromCity: row.shipFromCity,
       shipFromCountry: row.shipFromCountry,
+      returnAddress: parseSellerReturnAddress(row.returnAddress),
       socialLinks: parseSocial(row.socialLinks),
     },
     logoUrl: isImg(row.logoMedia),
@@ -149,6 +155,8 @@ export type SellerProfilePatch = Partial<{
   shippingPolicy: string | null;
   shipFromCity: string | null;
   shipFromCountry: string | null;
+  /** 9F-41B — raw `{ field: string }` map from the return-address form; validated here. */
+  returnAddress: Record<string, unknown> | null;
   socialLinks: SellerSocialLinks;
 }>;
 
@@ -183,6 +191,18 @@ function validateAndCleanPatch(
       return { ok: false, code: "VALIDATION", error: "That country isn't on the supported list." };
     } else {
       data.shipFromCountry = c;
+    }
+  }
+
+  // 9F-41B — the structured 3P return address (moderated with the rest of the
+  // bundle). Blank map → cleared; otherwise every required field must validate.
+  if ("returnAddress" in patch) {
+    if (patch.returnAddress == null) {
+      data.returnAddress = Prisma.JsonNull;
+    } else {
+      const v = validateSellerReturnAddress(patch.returnAddress);
+      if (!v.ok) return { ok: false, code: "VALIDATION", error: v.error };
+      data.returnAddress = v.value == null ? Prisma.JsonNull : (v.value as unknown as Prisma.InputJsonValue);
     }
   }
 

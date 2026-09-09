@@ -88,6 +88,29 @@ export default async function SellerReturnDetailPage({ params }: PageProps<"/sel
             )}
           </Card>
 
+          {ret.destination && (
+            <Card>
+              <h2 className="mb-3 text-sm font-semibold">Return destination (given to the customer)</h2>
+              <p className="mb-2 text-xs text-ink-soft">
+                {ret.destination.shipsToThisSeller
+                  ? "The customer was told to ship the item(s) to your return address."
+                  : "Axiaro is coordinating where the item(s) go."}
+              </p>
+              {ret.destination.lines.length > 0 && (
+                <address className="not-italic text-sm text-ink-soft">
+                  {ret.destination.lines.map((l, i) => (
+                    <span key={i} className="block">
+                      {l}
+                    </span>
+                  ))}
+                </address>
+              )}
+              {ret.destination.note && (
+                <p className="mt-2 whitespace-pre-wrap text-xs text-ink-faint">{ret.destination.note}</p>
+              )}
+            </Card>
+          )}
+
           <Card>
             <h2 className="mb-3 text-sm font-semibold">Ship-from (customer)</h2>
             {ret.ship ? (

@@ -2,8 +2,9 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { cleanUserText } from "@/lib/ugc";
-import type { SellerContentStatus, SellerSocialLinks } from "@/lib/marketplace/types";
+import type { SellerContentStatus, SellerSocialLinks, SellerReturnAddress } from "@/lib/marketplace/types";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
+import { parseSellerReturnAddress } from "@/lib/marketplace/return-destination";
 import {
   canTransitionSeller,
   validateSellerSlug,
@@ -256,6 +257,7 @@ export type AdminSellerDetail = {
     shippingPolicy: string | null;
     shipFromCity: string | null;
     shipFromCountry: string | null;
+    returnAddress: SellerReturnAddress | null;
     socialLinks: SellerSocialLinks;
     logoUrl: string | null;
     bannerUrl: string | null;
@@ -308,6 +310,7 @@ export async function getAdminSeller(id: string, client: Client = prisma): Promi
       shippingPolicy: true,
       shipFromCity: true,
       shipFromCountry: true,
+      returnAddress: true,
       socialLinks: true,
       logoMedia: { select: { url: true, mimeType: true } },
       bannerMedia: { select: { url: true, mimeType: true } },
@@ -376,6 +379,7 @@ export async function getAdminSeller(id: string, client: Client = prisma): Promi
       shippingPolicy: s.shippingPolicy,
       shipFromCity: s.shipFromCity,
       shipFromCountry: s.shipFromCountry,
+      returnAddress: parseSellerReturnAddress(s.returnAddress),
       socialLinks: socialFrom(s.socialLinks),
       logoUrl: isImg(s.logoMedia),
       bannerUrl: isImg(s.bannerMedia),

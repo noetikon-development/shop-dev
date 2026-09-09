@@ -19,6 +19,7 @@ import {
   type SellerMediaError,
 } from "@/lib/marketplace/seller-media-repository";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
+import { SELLER_RETURN_ADDRESS_FIELDS } from "@/lib/marketplace/return-destination";
 
 /**
  * `/seller/settings` server actions (Phase 9F-4a).
@@ -82,12 +83,25 @@ export async function saveSellerProfileAction(
     if (typeof v === "string" && v.trim()) socialLinks[k] = v.trim();
   }
 
+  // 9F-41B — the structured 3P return address (`returnAddress.<field>` inputs).
+  // Only touch it when the form actually carried the fields, so an unrelated
+  // profile save never wipes a stored address.
+  const returnAddressSubmitted = SELLER_RETURN_ADDRESS_FIELDS.some((k) => formData.has(`returnAddress.${k}`));
+  const returnAddress: Record<string, string> = {};
+  if (returnAddressSubmitted) {
+    for (const k of SELLER_RETURN_ADDRESS_FIELDS) {
+      const v = formData.get(`returnAddress.${k}`);
+      returnAddress[k] = typeof v === "string" ? v : "";
+    }
+  }
+
   const res = await updateSellerProfileDraft(ctx, {
     bio: parsed.data.bio ?? null,
     returnPolicy: parsed.data.returnPolicy ?? null,
     shippingPolicy: parsed.data.shippingPolicy ?? null,
     shipFromCity: parsed.data.shipFromCity ?? null,
     shipFromCountry: parsed.data.shipFromCountry ?? null,
+    ...(returnAddressSubmitted ? { returnAddress } : {}),
     socialLinks,
   });
   if (!res.ok) return fromRepoError(res);

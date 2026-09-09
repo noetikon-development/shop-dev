@@ -321,6 +321,71 @@ export function renderSellerReturnRequested(
 }
 
 /**
+ * 9F-41B — Axiaro approved a return covering one or more of this seller's
+ * lines. Sent right after approval (destination already frozen). Tells the
+ * seller to expect the goods; when the return ships to THIS seller's own
+ * address, `destinationLines` echoes exactly what the customer was told.
+ * NO customer name / email / phone / address / note.
+ */
+export function renderSellerReturnApproved(
+  d: SellerOrderBase & {
+    returnNumber: string;
+    returnsUrl: string;
+    reasonLabel: string;
+    items: { name: string; variantLabel: string | null; quantity: number }[];
+    shipsToThisSeller: boolean;
+    destinationLines: string[];
+  },
+) {
+  const subject = `Return approved: ${d.returnNumber} (order ${d.orderNumber})`;
+  const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const routingLine = d.shipsToThisSeller
+    ? "The customer has been told to ship the item(s) to your return address."
+    : "Axiaro is coordinating where the item(s) go — no action needed from you yet.";
+  const destBox = d.shipsToThisSeller && d.destinationLines.length > 0
+    ? infoBox(
+        d.destinationLines
+          .map((l, i) => kvRow(i === 0 ? "Ship to" : "", l, { last: i === d.destinationLines.length - 1 }))
+          .join(""),
+      )
+    : "";
+  const body = `
+    ${heading("A return was approved")}
+    ${paragraph(`Axiaro approved a return that includes item(s) from ${d.sellerName}. ${routingLine} Confirm receipt in your Seller Portal once the item(s) arrive.`)}
+    ${infoBox(
+      kvRow("Return", d.returnNumber) +
+        kvRow("Order", d.orderNumber) +
+        kvRow("Reason", d.reasonLabel) +
+        kvRow("Your item(s)", itemLines.join("; ") || "—", { last: true }),
+    )}
+    ${destBox}
+    ${paragraph("Axiaro handles the customer refund. You'll get another email once you or Axiaro records the item(s) as received.")}
+    ${button("View your returns", d.returnsUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "A return was approved",
+      ``,
+      `Axiaro approved a return that includes item(s) from ${d.sellerName}. ${routingLine}`,
+      ``,
+      `Return: ${d.returnNumber}`,
+      `Order: ${d.orderNumber}`,
+      `Reason: ${d.reasonLabel}`,
+      `Your item(s): ${itemLines.join("; ") || "—"}`,
+      ...(d.shipsToThisSeller && d.destinationLines.length > 0 ? [``, `Ship to:`, ...d.destinationLines] : []),
+      ``,
+      "Axiaro handles the customer refund. Confirm receipt in your Seller Portal once the item(s) arrive.",
+      ``,
+      `Your returns: ${d.returnsUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
  * 9F-20 — a bookkeeping settlement was recorded for this THIRD_PARTY seller.
  *
  * IMPORTANT: this describes a RECORD Axiaro entered, not an electronic transfer.

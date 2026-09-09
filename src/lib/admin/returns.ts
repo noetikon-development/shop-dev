@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isReturnStatus } from "@/lib/returns/status";
 import { remainingReturnableByOrderItem } from "@/lib/returns";
-import { FIRST_PARTY_OFFER_FILTER } from "@/lib/admin/first-party-inventory";
+import { parseReturnDestination, sellerReturnAddressLines } from "@/lib/marketplace/return-destination";
 
 /**
  * Admin read layer for Returns / RMA (Step 21 P3). Uncached — admins see live
@@ -134,6 +134,8 @@ export async function getAdminReturn(id: string) {
       refundInitiatedAt: true,
       refundCompletedAt: true,
       restockedAt: true,
+      returnDestination: true, // 9F-41B
+      returnDestinationSetAt: true,
       createdAt: true,
       updatedAt: true,
       user: { select: { id: true, name: true, email: true } },
@@ -167,29 +169,41 @@ export async function getAdminReturn(id: string) {
           refundAmount: true,
           restockQuantity: true,
           condition: true,
+          // 9F-41B — the BOUND offer per line: its seller + its OWN
+          // OfferInventory. Fixes the old preview that always read the
+          // FIRST_PARTY offer's stock even for a 3P line.
+          orderItem: {
+            select: {
+              offerId: true,
+              sellerId: true,
+              offer: {
+                select: {
+                  seller: { select: { type: true, displayName: true } },
+                  inventory: { select: { quantity: true, reserved: true } },
+                },
+              },
+            },
+          },
         },
       },
     },
   });
   if (!ret) return null;
 
-  // Whether each returned line's variant still has a restock target (so the UI
-  // can warn that a restock would be skipped). Phase 9E-3D-3: this probes the
-  // operational authority — the Axiaro FIRST_PARTY `OfferInventory` — not the
-  // legacy `Inventory` mirror. `receiveReturnAction` restocks the bound
-  // `OfferInventory` for an offer-native line; a line whose variant was
-  // hard-deleted has neither store and is the only case this flags.
-  const variantIds = [...new Set(ret.items.map((i) => i.variantId).filter((v): v is string => !!v))];
-  const withInventory = variantIds.length
-    ? new Set(
-        (
-          await prisma.offerInventory.findMany({
-            where: { offer: { variantId: { in: variantIds }, ...FIRST_PARTY_OFFER_FILTER } },
-            select: { offer: { select: { variantId: true } } },
-          })
-        ).map((r) => r.offer.variantId),
-      )
-    : new Set<string>();
+  const destination = parseReturnDestination(ret.returnDestination);
+  // Affected sellers, resolved from the frozen OrderItem.sellerId snapshots
+  // (same source `getReturnAffectedSellerIds` uses).
+  const sellerTypes = new Set(ret.items.map((i) => i.orderItem?.offer?.seller.type ?? "FIRST_PARTY"));
+  const isThirdParty = sellerTypes.has("THIRD_PARTY");
+  const isMixed = sellerTypes.size > 1;
+  const sellerNames = [
+    ...new Set(
+      ret.items
+        .filter((i) => i.orderItem?.offer?.seller.type === "THIRD_PARTY")
+        .map((i) => i.orderItem?.offer?.seller.displayName)
+        .filter((v): v is string => !!v),
+    ),
+  ];
 
   return {
     ...ret,
@@ -198,15 +212,48 @@ export async function getAdminReturn(id: string) {
     refundInitiatedAt: ret.refundInitiatedAt?.toISOString() ?? null,
     refundCompletedAt: ret.refundCompletedAt?.toISOString() ?? null,
     restockedAt: ret.restockedAt?.toISOString() ?? null,
+    returnDestinationSetAt: ret.returnDestinationSetAt?.toISOString() ?? null,
+    /** 9F-41B — parsed frozen destination + a small routing summary for the page. */
+    routing: {
+      isThirdParty,
+      isMixed,
+      sellerNames,
+      destinationKind: destination?.kind ?? null,
+      manualHandling: destination?.manualHandling ?? false,
+      destinationLines:
+        destination?.kind === "seller" && destination.address
+          ? sellerReturnAddressLines(destination.address)
+          : destination?.kind === "store"
+            ? (destination.instructions ?? "").split("\n").map((l) => l.trim()).filter(Boolean)
+            : [],
+    },
     order: {
       ...ret.order,
       placedAt: ret.order.placedAt.toISOString(),
       deliveredAt: ret.order.deliveredAt?.toISOString() ?? null,
     },
-    items: ret.items.map((i) => ({
-      ...i,
-      variantHasInventory: i.variantId ? withInventory.has(i.variantId) : false,
-    })),
+    items: ret.items.map((i) => {
+      const inv = i.orderItem?.offer?.inventory ?? null;
+      return {
+        id: i.id,
+        orderItemId: i.orderItemId,
+        productId: i.productId,
+        variantId: i.variantId,
+        name: i.name,
+        variantLabel: i.variantLabel,
+        sku: i.sku,
+        unitPrice: i.unitPrice,
+        quantity: i.quantity,
+        refundAmount: i.refundAmount,
+        restockQuantity: i.restockQuantity,
+        condition: i.condition,
+        // 9F-41B — the line's OWN offer's stock (3P → seller's, 1P → Axiaro's).
+        sellerType: i.orderItem?.offer?.seller.type ?? "FIRST_PARTY",
+        sellerName: i.orderItem?.offer?.seller.displayName ?? null,
+        variantHasInventory: inv != null,
+        currentOfferStock: inv ? Math.max(0, inv.quantity - inv.reserved) : null,
+      };
+    }),
   };
 }
 

@@ -5,6 +5,8 @@ import {
   getSellerReturnForSeller,
 } from "@/lib/marketplace/seller-return-repository";
 import { canTransitionReturn } from "@/lib/returns/status";
+import { getReturnsConfig } from "@/lib/returns";
+import { parseReturnDestination, returnDestinationDisplay } from "@/lib/marketplace/return-destination";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /** Read models for `/seller/returns`. All seller-scoped via the repository. */
@@ -93,6 +95,8 @@ export type SellerReturnDetailView = {
   placedAt: Date;
   deliveredAt: Date | null;
   ship: { recipient: string; phone: string | null; lines: string[] } | null;
+  /** 9F-41B — the frozen return destination the customer was given (NULL until approved / legacy). */
+  destination: { heading: string; lines: string[]; note: string | null; shipsToThisSeller: boolean } | null;
   lines: SellerReturnLineView[];
   /** the seller can run the receipt step only from APPROVED */
   canReceive: boolean;
@@ -104,6 +108,21 @@ export async function getSellerReturnDetail(
 ): Promise<SellerReturnDetailView | null> {
   const r = await getSellerReturnForSeller(ctx, returnId);
   if (!r) return null;
+
+  // 9F-41B — echo the frozen return destination the customer was given. A
+  // store-kind / legacy NULL falls back to the store-wide instructions.
+  const parsedDest = parseReturnDestination(r.returnDestination);
+  let destination: SellerReturnDetailView["destination"] = null;
+  if (["APPROVED", "RECEIVED", "REFUND_INITIATED", "REFUND_COMPLETED"].includes(r.status)) {
+    const cfg = await getReturnsConfig();
+    const d = returnDestinationDisplay(parsedDest, cfg.instructions || null);
+    destination = {
+      heading: d.heading,
+      lines: d.lines,
+      note: d.note,
+      shipsToThisSeller: parsedDest?.kind === "seller" && parsedDest.sellerId === ctx.sellerId,
+    };
+  }
 
   const addr = safeAddress(r.order.shippingAddress);
   const ship = addr
@@ -138,6 +157,7 @@ export async function getSellerReturnDetail(
     placedAt: r.order.placedAt,
     deliveredAt: r.order.deliveredAt,
     ship,
+    destination,
     lines: r.items.map((it) => ({
       id: it.id,
       name: it.name,

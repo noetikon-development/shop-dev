@@ -1,7 +1,8 @@
 import "server-only";
 import { prisma } from "@/lib/prisma";
-import type { SellerContentStatus, SellerSocialLinks } from "@/lib/marketplace/types";
+import type { SellerContentStatus, SellerSocialLinks, SellerReturnAddress } from "@/lib/marketplace/types";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
+import { parseSellerReturnAddress } from "@/lib/marketplace/return-destination";
 
 /**
  * Admin read layer for seller store-profile review (Phase 9F-4a).
@@ -90,6 +91,7 @@ export type AdminSellerContentDetail = {
     shippingPolicy: string | null;
     shipFromCity: string | null;
     shipFromCountry: string | null;
+    returnAddress: SellerReturnAddress | null;
     socialLinks: SellerSocialLinks;
     logoUrl: string | null;
     bannerUrl: string | null;
@@ -117,6 +119,7 @@ export async function getAdminSellerContent(sellerId: string): Promise<AdminSell
       shippingPolicy: true,
       shipFromCity: true,
       shipFromCountry: true,
+      returnAddress: true,
       socialLinks: true,
       logoMedia: { select: { url: true, mimeType: true } },
       bannerMedia: { select: { url: true, mimeType: true } },
@@ -155,6 +158,7 @@ export async function getAdminSellerContent(sellerId: string): Promise<AdminSell
       shippingPolicy: s.shippingPolicy,
       shipFromCity: s.shipFromCity,
       shipFromCountry: s.shipFromCountry,
+      returnAddress: parseSellerReturnAddress(s.returnAddress),
       socialLinks: socialFrom(s.socialLinks),
       logoUrl: isImg(s.logoMedia),
       bannerUrl: isImg(s.bannerMedia),

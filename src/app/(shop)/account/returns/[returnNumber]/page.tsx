@@ -3,7 +3,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireUser } from "@/lib/auth";
-import { getCustomerReturn } from "@/lib/returns";
+import { getCustomerReturn, getReturnsConfig } from "@/lib/returns";
+import { parseReturnDestination, returnDestinationDisplay } from "@/lib/marketplace/return-destination";
 import {
   returnStatusLabel,
   returnStatusTone,
@@ -31,6 +32,14 @@ export default async function CustomerReturnDetailPage({
 
   const terminalOffPath = ret.status === "REJECTED" || ret.status === "CANCELLED";
   const refundKnown = ret.refundAmount != null;
+
+  // 9F-41B — "where to send it", shown once approved (and until received). Uses
+  // the frozen snapshot; a legacy NULL falls back to the store-wide instructions.
+  const showDestination = ["APPROVED", "RECEIVED", "REFUND_INITIATED"].includes(ret.status);
+  const cfg = showDestination ? await getReturnsConfig() : null;
+  const destination = showDestination
+    ? returnDestinationDisplay(parseReturnDestination(ret.returnDestination), cfg?.instructions || null)
+    : null;
 
   return (
     <div className="space-y-6">
@@ -89,6 +98,24 @@ export default async function CustomerReturnDetailPage({
             <div className="card-surface p-5">
               <h3 className="text-sm font-medium">A note from our team</h3>
               <p className="mt-2 whitespace-pre-wrap text-sm text-ink-soft">{ret.resolutionNote}</p>
+            </div>
+          )}
+
+          {destination && (
+            <div className="card-surface p-5">
+              <h3 className="text-sm font-medium">{destination.heading}</h3>
+              {destination.lines.length > 0 ? (
+                <address className="mt-2 not-italic text-sm text-ink-soft">
+                  {destination.lines.map((l, i) => (
+                    <span key={i} className="block">
+                      {l}
+                    </span>
+                  ))}
+                </address>
+              ) : null}
+              {destination.note && (
+                <p className="mt-2 whitespace-pre-wrap text-meta text-ink-faint">{destination.note}</p>
+              )}
             </div>
           )}
 

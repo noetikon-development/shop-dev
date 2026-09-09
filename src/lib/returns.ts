@@ -249,6 +249,8 @@ const RETURN_DETAIL_SELECT = {
   refundInitiatedAt: true,
   refundCompletedAt: true,
   restockedAt: true,
+  returnDestination: true, // 9F-41B — frozen at approval; NULL on legacy rows
+  returnDestinationSetAt: true,
   createdAt: true,
   updatedAt: true,
   order: { select: { id: true, orderNumber: true, grandTotal: true, shippingFee: true } },

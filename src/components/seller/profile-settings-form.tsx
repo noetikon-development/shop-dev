@@ -3,7 +3,12 @@
 import { useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { COUNTRIES } from "@/lib/countries";
-import { SELLER_SOCIAL_KEYS, type SellerContentStatus, type SellerSocialLinks } from "@/lib/marketplace/types";
+import {
+  SELLER_SOCIAL_KEYS,
+  type SellerContentStatus,
+  type SellerSocialLinks,
+  type SellerReturnAddress,
+} from "@/lib/marketplace/types";
 import {
   saveSellerProfileAction,
   submitSellerProfileAction,
@@ -26,6 +31,7 @@ export function ProfileSettingsForm({
   shippingPolicy,
   shipFromCity,
   shipFromCountry,
+  returnAddress,
   socialLinks,
   contentStatus,
 }: {
@@ -34,9 +40,11 @@ export function ProfileSettingsForm({
   shippingPolicy: string | null;
   shipFromCity: string | null;
   shipFromCountry: string | null;
+  returnAddress: SellerReturnAddress | null;
   socialLinks: SellerSocialLinks;
   contentStatus: SellerContentStatus;
 }) {
+  const ra = returnAddress;
   const save = usePersistentAction<SellerSettingsActionState>(saveSellerProfileAction, {});
   const submit = usePersistentAction<SellerSettingsActionState>(submitSellerProfileAction, {});
 
@@ -96,6 +104,51 @@ export function ProfileSettingsForm({
             </Select>
           </FormField>
         </div>
+
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium text-ink">Return address</legend>
+          <p className="text-xs text-ink-faint">
+            Where customers ship approved returns of your items. Shown to a customer only after
+            Axiaro approves a return that is entirely yours; frozen onto that return so a later
+            edit never changes an in-flight one. Leave blank to route your returns through Axiaro.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Recipient / business name" htmlFor="returnAddress.recipient">
+              <input id="returnAddress.recipient" name="returnAddress.recipient" maxLength={120} defaultValue={ra?.recipient ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Phone" htmlFor="returnAddress.phone">
+              <input id="returnAddress.phone" name="returnAddress.phone" maxLength={30} defaultValue={ra?.phone ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Street address" htmlFor="returnAddress.line1">
+              <input id="returnAddress.line1" name="returnAddress.line1" maxLength={160} defaultValue={ra?.line1 ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Unit / floor / building (optional)" htmlFor="returnAddress.line2">
+              <input id="returnAddress.line2" name="returnAddress.line2" maxLength={160} defaultValue={ra?.line2 ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Barangay (optional)" htmlFor="returnAddress.barangay">
+              <input id="returnAddress.barangay" name="returnAddress.barangay" maxLength={80} defaultValue={ra?.barangay ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="City / municipality" htmlFor="returnAddress.city">
+              <input id="returnAddress.city" name="returnAddress.city" maxLength={80} defaultValue={ra?.city ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Province / region" htmlFor="returnAddress.province">
+              <input id="returnAddress.province" name="returnAddress.province" maxLength={80} defaultValue={ra?.province ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Postal code" htmlFor="returnAddress.postalCode">
+              <input id="returnAddress.postalCode" name="returnAddress.postalCode" maxLength={12} defaultValue={ra?.postalCode ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Country" htmlFor="returnAddress.country">
+              <Select id="returnAddress.country" name="returnAddress.country" defaultValue={ra?.country ?? ""}>
+                <option value="">Not set</option>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+        </fieldset>
 
         <fieldset className="space-y-3">
           <legend className="text-sm font-medium text-ink">Social links</legend>

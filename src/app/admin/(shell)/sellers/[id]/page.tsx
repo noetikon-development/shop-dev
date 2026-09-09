@@ -202,6 +202,21 @@ export default async function AdminSellerDetailPage({
                 .filter(Boolean)
                 .join(", ") || null}
             </Field>
+            <Field label="Return address (3P returns)">
+              {s.profile.returnAddress
+                ? [
+                    s.profile.returnAddress.recipient,
+                    s.profile.returnAddress.line1,
+                    s.profile.returnAddress.line2,
+                    [s.profile.returnAddress.barangay, s.profile.returnAddress.city].filter(Boolean).join(", "),
+                    [s.profile.returnAddress.province, s.profile.returnAddress.postalCode].filter(Boolean).join(" "),
+                    countryName(s.profile.returnAddress.country),
+                    s.profile.returnAddress.phone,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null}
+            </Field>
             <div className="mt-3">
               <p className="text-xs font-medium text-ink-faint">Social links</p>
               {social.length === 0 ? (

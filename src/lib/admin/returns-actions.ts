@@ -23,8 +23,10 @@ import {
   sendReturnRefundCompletedOps,
   sendSellerReturnReceived,
   sendSellerReturnRequested,
+  sendSellerReturnApproved,
   getReturnAffectedSellerIds,
 } from "@/lib/email/notifications";
+import { resolveReturnDestination } from "@/lib/marketplace/return-destination";
 import {
   canTransitionReturn,
   returnStatusLabel,
@@ -157,17 +159,52 @@ export async function approveReturnAction(input: unknown): Promise<ReturnAdminSt
   });
   if (res.count === 0) return { ok: false, error: "The return was updated elsewhere — refresh and try again." };
 
+  // 9F-41B — resolve the return destination ONCE and FREEZE it. A later
+  // Seller.returnAddress / returns.instructions edit never changes it. This is
+  // display/routing metadata only — no state-machine, refund, commission,
+  // settlement or inventory effect.
+  const destination = await resolveReturnDestination(ret.id);
+  await prisma.returnRequest.update({
+    where: { id: ret.id },
+    data: {
+      returnDestination: destination as unknown as Prisma.InputJsonValue,
+      returnDestinationSetAt: new Date(),
+    },
+  });
+
   await writeAudit({
     actorUserId: admin.user.id,
     action: "return.approved",
     targetType: "return",
     targetId: ret.id,
-    summary: `${admin.user.email} approved return ${ret.returnNumber} (order ${ret.order.orderNumber})`,
-    meta: { returnNumber: ret.returnNumber, orderNumber: ret.order.orderNumber, from: "REQUESTED", to: "APPROVED" },
+    summary:
+      `${admin.user.email} approved return ${ret.returnNumber} (order ${ret.order.orderNumber})` +
+      (destination.kind === "seller"
+        ? ` — routed to seller ${destination.sellerName}`
+        : destination.manualHandling
+          ? " — store-wide address, manual routing needed"
+          : " — store-wide address"),
+    meta: {
+      returnNumber: ret.returnNumber,
+      orderNumber: ret.order.orderNumber,
+      from: "REQUESTED",
+      to: "APPROVED",
+      routing: destination.kind,
+      manualHandling: destination.manualHandling,
+      sellerIds: destination.sellerIds,
+    },
   });
 
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnApproved(ret.id));
+
+  // 9F-41B — one "return approved, expect the goods" email per affected 3P
+  // seller. `sendSellerReturnApproved` filters 1P (→ SKIPPED). Key
+  // SELLER_RETURN_APPROVED:<returnId>:<sellerId>.
+  for (const sellerId of destination.sellerIds) {
+    scheduleEmail(() => sendSellerReturnApproved(ret.id, sellerId));
+  }
+
   return { ok: true, message: "Return approved.", returnId: ret.id };
 }
 

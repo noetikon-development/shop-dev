@@ -128,6 +128,10 @@ export default async function AdminReturnDetailPage({ params }: PageProps<"/admi
                       </td>
                       <td className="px-4 py-3">
                         <code className="text-xs text-ink-soft">{it.sku ?? "—"}</code>
+                        <p className="mt-0.5 text-[11px] text-ink-faint">
+                          {it.sellerType === "THIRD_PARTY" ? `Sold by ${it.sellerName ?? "3P seller"}` : "1P (Axiaro)"}
+                          {it.currentOfferStock != null ? ` · stock ${it.currentOfferStock}` : ""}
+                        </p>
                       </td>
                       <td className="px-4 py-3 text-right tabular-nums">{it.quantity}</td>
                       <td className="px-4 py-3 text-right tabular-nums">{formatPrice(it.refundAmount)}</td>
@@ -162,6 +166,53 @@ export default async function AdminReturnDetailPage({ params }: PageProps<"/admi
         </div>
 
         <aside className="space-y-6">
+          {/* 9F-41B — routing / destination */}
+          <Card>
+            <h2 className="text-sm font-semibold text-ink">Routing</h2>
+            <dl className="mt-2 space-y-1.5 text-sm">
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-soft">Seller</dt>
+                <dd className="text-right">
+                  {ret.routing.isMixed
+                    ? "Mixed 1P + 3P"
+                    : ret.routing.isThirdParty
+                      ? ret.routing.sellerNames.join(", ") || "3P"
+                      : "1P (Axiaro)"}
+                </dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-soft">Destination</dt>
+                <dd className="text-right">
+                  {ret.routing.destinationKind === "seller"
+                    ? "Seller return address"
+                    : ret.routing.destinationKind === "store"
+                      ? "Store-wide address"
+                      : ret.returnDestinationSetAt
+                        ? "—"
+                        : "Not resolved yet (approve to set)"}
+                </dd>
+              </div>
+            </dl>
+            {ret.routing.manualHandling && (
+              <p className="mt-2 rounded-sm bg-warning-50 px-3 py-2 text-xs text-warning">
+                Manual routing needed — the return uses the store-wide address but a 3P seller (or a
+                mix) is involved. Coordinate the onward hand-off with the seller.
+              </p>
+            )}
+            {ret.routing.destinationLines.length > 0 && (
+              <address className="mt-2 not-italic text-xs text-ink-soft">
+                {ret.routing.destinationLines.map((l, i) => (
+                  <span key={i} className="block">
+                    {l}
+                  </span>
+                ))}
+              </address>
+            )}
+            <p className="mt-2 text-[11px] text-ink-faint">
+              The destination is frozen at approval — a later seller-address edit does not change it.
+            </p>
+          </Card>
+
           <ReturnAdminPanel
             returnId={ret.id}
             status={ret.status}

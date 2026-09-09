@@ -50,6 +50,7 @@ import {
   renderSellerOrderAcceptanceReminder,
   renderSellerReturnRequested,
   renderSellerReturnReceived,
+  renderSellerReturnApproved,
   renderSellerOrderReceived,
   renderSellerSettlementRecorded,
   type ClawbackNote,
@@ -62,6 +63,11 @@ import {
 } from "@/lib/marketplace/seller-order-sla";
 import { returnReasonLabel, returnStatusLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
+import {
+  parseReturnDestination,
+  returnDestinationDisplay,
+  sellerReturnAddressLines,
+} from "@/lib/marketplace/return-destination";
 import { createHash } from "node:crypto";
 import { maskEmail, setEmailFooterContext } from "@/lib/email/html";
 
@@ -1636,6 +1642,18 @@ export async function sendReturnApproved(returnId: string): Promise<DispatchResu
     if (!ctx) return { ok: false, status: "FAILED", error: "return_not_found" };
     const cfg = await getReturnsConfig();
 
+    // 9F-41B — the frozen destination snapshot (written at approval). A store-
+    // kind snapshot / a legacy NULL both fall back to the live
+    // `returns.instructions`, so pre-9F-41B emails are byte-identical.
+    const destRow = await prisma.returnRequest.findUnique({
+      where: { id: returnId },
+      select: { returnDestination: true },
+    });
+    const display = returnDestinationDisplay(
+      parseReturnDestination(destRow?.returnDestination),
+      cfg.instructions || null,
+    );
+
     return renderAndDispatch(
       {
         type: "return_approved",
@@ -1654,8 +1672,10 @@ export async function sendReturnApproved(returnId: string): Promise<DispatchResu
           orderNumber: ctx.order.orderNumber,
           customerName: ctx.customerName,
           items: ctx.items,
-          instructions: cfg.instructions || null,
-          policyUrl: cfg.policyUrl || null,
+          destinationHeading: display.heading,
+          destinationLines: display.lines,
+          destinationNote: display.note,
+          policyUrl: display.policyUrl || cfg.policyUrl || null,
           resolutionNote: ctx.ret.resolutionNote,
         }),
     );
@@ -2268,6 +2288,16 @@ export async function retryEmailByLog(
       const sellerId = parts[2];
       if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
       return sendSellerReturnRequested(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    // 9F-41B — key: SELLER_RETURN_APPROVED:<returnId>:<sellerId>. Both ids from
+    // the key; ReturnRequest (incl. the frozen returnDestination) + seller row
+    // re-read (deterministic). Retry reuses the same EmailLog row.
+    case "seller_return_approved": {
+      const parts = log.idempotencyKey.split(":");
+      const returnId = parts[1];
+      const sellerId = parts[2];
+      if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
+      return sendSellerReturnApproved(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
     }
     // 9F-24D P1-7 — key: SELLER_OFFER_PUBLISHED:<offerId>:<auditLogId>. Both ids
     // are parsed straight back out of the key; the offer row is re-read
@@ -3150,6 +3180,86 @@ export async function sendSellerReturnReceived(
     );
   } catch (err) {
     console.error("[email] sendSellerReturnReceived", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * 9F-41B — Axiaro approved a return that covers one or more of this THIRD_PARTY
+ * seller's lines. Fired from `approveReturnAction` after the destination
+ * snapshot is written. Tells the seller to expect the goods and shows the
+ * return destination the customer was given (from the frozen
+ * `ReturnRequest.returnDestination`). 1P → SKIPPED (Axiaro handles its own).
+ * Key: SELLER_RETURN_APPROVED:<returnId>:<sellerId>.
+ */
+export async function sendSellerReturnApproved(
+  returnId: string,
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { type: true } });
+    if (seller?.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: {
+        id: true,
+        returnNumber: true,
+        reason: true,
+        status: true,
+        returnDestination: true,
+        order: { select: { orderNumber: true } },
+      },
+    });
+    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_return_approved",
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_APPROVED:${returnId}:${sellerId}`,
+        subject: `Return ${ret.returnNumber} approved — seller notification`,
+        client: opts.client,
+      });
+
+    const items = await db.returnItem.findMany({
+      where: { returnRequestId: returnId, orderItem: { sellerId } },
+      select: { name: true, variantLabel: true, quantity: true },
+    });
+    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+
+    const dest = parseReturnDestination(ret.returnDestination);
+    const shipsToThisSeller = dest?.kind === "seller" && dest.sellerId === sellerId && !!dest.address;
+    const destinationLines = shipsToThisSeller ? sellerReturnAddressLines(dest.address!) : [];
+
+    return renderAndDispatch(
+      {
+        type: "seller_return_approved",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_APPROVED:${returnId}:${sellerId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerReturnApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          returnNumber: ret.returnNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          reasonLabel: returnReasonLabel(ret.reason),
+          items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+          shipsToThisSeller,
+          destinationLines,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerReturnApproved", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

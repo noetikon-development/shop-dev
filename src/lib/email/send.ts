@@ -67,6 +67,9 @@ export type EmailType =
   // 9F-31B (P2) — a customer opened a return covering a THIRD_PARTY seller's line.
   | "seller_return_requested"
   | "seller_return_received"
+  // 9F-41B — Axiaro approved a return covering a THIRD_PARTY seller's line;
+  // the seller is told to expect the goods + the frozen return destination.
+  | "seller_return_approved"
   // 9F-24D (P1-7) — a THIRD_PARTY seller's offer went ACTIVE (published). Ops-only.
   | "seller_offer_published"
   // 9F-30B — a THIRD_PARTY seller declined / cancelled a customer's order. Ops-only.

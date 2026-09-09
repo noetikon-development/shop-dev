@@ -18,6 +18,23 @@ export type SellerUserStatus = "ACTIVE" | "INVITED" | "DISABLED";
  */
 export type SellerContentStatus = "DRAFT" | "PENDING" | "APPROVED";
 
+/**
+ * 9F-41B — structured destination customers ship a 3P return back to. Part of
+ * the moderated profile bundle; used (once APPROVED) by the return-routing
+ * snapshot. `line2` / `barangay` optional; everything else required.
+ */
+export type SellerReturnAddress = {
+  recipient: string;
+  line1: string;
+  line2: string | null;
+  barangay: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+};
+
 /** The seller-editable, MODERATED store-profile bundle. */
 export type SellerProfileDraft = {
   bio: string | null;
@@ -27,6 +44,7 @@ export type SellerProfileDraft = {
   shippingPolicy: string | null;
   shipFromCity: string | null;
   shipFromCountry: string | null;
+  returnAddress: SellerReturnAddress | null;
   socialLinks: SellerSocialLinks;
 };
 

@@ -50,6 +50,8 @@
     "test:9f38b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f38b.ts",
     "test:9f39b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f39b.ts",
     "test:9f40b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f40b.ts",
+    "db:migrate:9f41b": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260910120000_return_routing.sql",
+    "test:9f41b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f41b.ts",
     "test:9f20": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f20.ts",
     "test:9f21": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f21.ts",
     "test:9f22": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f22.ts",

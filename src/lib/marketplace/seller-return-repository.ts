@@ -120,6 +120,7 @@ export async function getSellerReturnForSeller(
       customerNote: true, // product-related, sanitised at intake
       resolutionNote: true, // customer-facing note from the admin decision
       restockedAt: true,
+      returnDestination: true, // 9F-41B — the frozen destination given to the customer
       createdAt: true,
       updatedAt: true,
       order: {

@@ -92,6 +92,7 @@ export default async function SellerSettingsPage() {
           shippingPolicy={view.profile.shippingPolicy}
           shipFromCity={view.profile.shipFromCity}
           shipFromCountry={view.profile.shipFromCountry}
+          returnAddress={view.profile.returnAddress}
           socialLinks={view.profile.socialLinks}
           contentStatus={view.contentStatus}
         />
