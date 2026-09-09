@@ -31,6 +31,8 @@ export type SellerRequestRow = {
   variantCount: number;
   imageCount: number;
   submittedAt: string | null;
+  /** 9F-40B — present on a DRAFT that was sent back ("Changes requested"). */
+  reviewedAt: string | null;
   updatedAt: string;
 };
 
@@ -43,6 +45,7 @@ function toRow(r: Row): SellerRequestRow {
     variantCount: parseProposal(r.proposedVariants).variants.length,
     imageCount: r.images.length,
     submittedAt: r.submittedAt?.toISOString() ?? null,
+    reviewedAt: r.reviewedAt?.toISOString() ?? null,
     updatedAt: r.updatedAt.toISOString(),
   };
 }
@@ -75,8 +78,13 @@ export type SellerRequestDetailView = {
   editable: boolean;
   /** 9F-26A (G7): a REJECTED request the seller can reopen to DRAFT and revise */
   canReopen: boolean;
-  /** 9F-26A (G7): this DRAFT was reopened from a rejection — keep the feedback in view */
-  reopenedFromRejection: boolean;
+  /**
+   * 9F-40B: an editable DRAFT that carries review feedback — the seller must see
+   * the note and act on it. Covers BOTH an admin "Request changes" (PENDING →
+   * DRAFT) and a seller reopen of a rejection (REJECTED → DRAFT). Derived purely
+   * from `editable && reviewNote != null && reviewedAt != null` — no audit lookup.
+   */
+  changesRequested: boolean;
   name: string;
   brand: string | null;
   shortDesc: string | null;
@@ -112,21 +120,12 @@ export async function getSellerRequestDetail(
   const editable = r.status === "DRAFT";
   const canReopen = r.status === "REJECTED";
 
-  // 9F-26A (G7): a DRAFT that carries a review note AND a reopen audit entry was
-  // reopened from a rejection — surface the feedback while the seller revises it.
-  // Scoped to this exact case so the PENDING → DRAFT ("request changes") flow's
-  // rendering is untouched.
-  const reopenedFromRejection =
-    editable && r.reviewStatusNote != null
-      ? (await prisma.adminAuditLog.findFirst({
-          where: {
-            targetType: "seller_product_request",
-            targetId: r.id,
-            action: "seller.product_request.reopened",
-          },
-          select: { id: true },
-        })) != null
-      : false;
+  // 9F-40B: any editable DRAFT that carries review feedback (an admin "Request
+  // changes" OR a seller reopen of a rejection) surfaces the note so the seller
+  // knows what to fix. No `adminAuditLog` lookup — a sent-back DRAFT always has
+  // `reviewedAt` + `reviewStatusNote` set by the review that sent it back.
+  const changesRequested =
+    editable && r.reviewStatusNote != null && r.reviewedAt != null;
 
   const duplicates = editable
     ? await checkRequestDuplicates(
@@ -164,7 +163,7 @@ export async function getSellerRequestDetail(
     status: r.status,
     editable,
     canReopen,
-    reopenedFromRejection,
+    changesRequested,
     name: r.proposedName,
     brand: r.proposedBrand,
     shortDesc: r.proposedShortDesc,

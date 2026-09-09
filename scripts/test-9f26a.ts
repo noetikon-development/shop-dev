@@ -85,19 +85,20 @@ function staticTests() {
   ok("actions · action count === requireSellerSessionPermission count (all gated)",
     (actions.match(/export async function \w+Action/g) ?? []).length === (actions.match(/requireSellerSessionPermission\(/g) ?? []).length);
 
-  ok("reads · SellerRequestDetailView gains canReopen + reopenedFromRejection",
-    /canReopen: boolean;/.test(reads) && /reopenedFromRejection: boolean;/.test(reads));
+  ok("reads · SellerRequestDetailView gains canReopen + changesRequested (9F-40B superseded reopenedFromRejection)",
+    /canReopen: boolean;/.test(reads) && /changesRequested: boolean;/.test(reads) && !/reopenedFromRejection/.test(reads));
   ok("reads · canReopen === (status REJECTED)", /const canReopen = r\.status === "REJECTED";/.test(reads));
-  ok("reads · reopenedFromRejection = DRAFT + review note + a reopen audit row",
-    /action: "seller\.product_request\.reopened",/.test(reads) && /editable && r\.reviewStatusNote != null/.test(reads));
+  ok("reads · changesRequested = editable DRAFT + review note + reviewedAt (no adminAuditLog lookup — 9F-40B)",
+    /const changesRequested =\s*\n?\s*editable && r\.reviewStatusNote != null && r\.reviewedAt != null;/.test(reads) &&
+    !/action: "seller\.product_request\.reopened"/.test(reads));
   ok("reads · never writes any catalog / offer / inventory row",
     !/\b(product|variant|category|offer|offerInventory|inventory)\.(create|update|delete|upsert|updateMany|deleteMany)/i.test(reads));
 
   ok("ui · REJECTED shows the RequestReopenButton (canReopen)",
     /\{r\.canReopen && <RequestReopenButton requestId=\{r\.id\} \/>\}/.test(page));
   ok("ui · button label is 'Revise and resubmit'", /Revise and resubmit/.test(btn) && /reopenRequestAction/.test(btn));
-  ok("ui · reopened DRAFT keeps the rejection feedback visible",
-    /\{r\.reopenedFromRejection && r\.reviewNote &&/.test(page));
+  ok("ui · a sent-back / reopened DRAFT keeps the review feedback visible (9F-40B unified banner)",
+    /\{r\.changesRequested && r\.reviewNote &&/.test(page) && /Axiaro asked for changes/.test(page));
   ok("ui · stale 'Start a new request' copy removed", !/Start a new request/.test(page));
 
   ok("scope · no schema change", !/9F-26A/.test(read("prisma/schema.prisma")));

@@ -41,7 +41,7 @@ export function RequestReviewActions({ requestId }: { requestId: string }) {
       <p className="text-xs text-ink-faint">
         {mode === "changes"
           ? "Sends the request back to the seller as an editable draft. They can revise and resubmit."
-          : "Rejects the request. This is terminal — the seller would need to start a new request."}
+          : "Rejects the request. The seller can still reopen it to revise and resubmit."}
       </p>
       <textarea
         name="note"

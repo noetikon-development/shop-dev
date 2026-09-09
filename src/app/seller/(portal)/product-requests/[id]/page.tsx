@@ -36,7 +36,11 @@ export default async function SellerProductRequestDetailPage({
       <PageHeader
         title={r.name}
         description={r.categoryName ?? "No category chosen"}
-        actions={<StatusBadge tone={requestStatusTone(r.status)}>{requestStatusLabel(r.status)}</StatusBadge>}
+        actions={
+          <StatusBadge tone={requestStatusTone(r.status, r.reviewedAt)}>
+            {requestStatusLabel(r.status, r.reviewedAt)}
+          </StatusBadge>
+        }
       />
 
       {r.status === "REJECTED" && (
@@ -50,11 +54,14 @@ export default async function SellerProductRequestDetailPage({
           {r.canReopen && <RequestReopenButton requestId={r.id} />}
         </div>
       )}
-      {r.reopenedFromRejection && r.reviewNote && (
-        <div className="mb-6 rounded-sm border border-line bg-surface-sunken px-4 py-3 text-sm text-ink-soft">
-          <p className="font-medium text-ink">Why Axiaro didn&rsquo;t approve this last time</p>
+      {/* 9F-40B — an editable DRAFT that was sent back (admin "Request changes"
+          OR a seller reopen). Always shows the review note so the seller knows
+          what to fix; no reliance on an audit lookup. */}
+      {r.changesRequested && r.reviewNote && (
+        <div className="mb-6 rounded-sm border border-warning/30 bg-warning-50 px-4 py-3 text-sm text-ink-soft">
+          <p className="font-medium text-ink">Axiaro asked for changes</p>
           <p className="mt-1 whitespace-pre-wrap">{r.reviewNote}</p>
-          <p className="mt-2 text-xs">Make these changes, then submit for review again.</p>
+          <p className="mt-2 text-xs">Make these changes and submit for review again.</p>
         </div>
       )}
       {r.status === "PENDING" && (

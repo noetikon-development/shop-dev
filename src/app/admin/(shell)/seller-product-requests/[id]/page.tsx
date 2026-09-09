@@ -237,7 +237,15 @@ export default async function AdminSellerProductRequestDetailPage({
                 {r.audit.map((a, i) => (
                   <li key={i} className="flex gap-3">
                     <span className="shrink-0 text-xs text-ink-faint">{new Date(a.at).toLocaleString()}</span>
-                    <span className="text-ink-soft">{a.summary ?? a.action}</span>
+                    <span className="text-ink-soft">
+                      {a.summary ?? a.action}
+                      {/* 9F-40B — each review round's actual feedback note */}
+                      {a.note && (
+                        <span className="mt-0.5 block whitespace-pre-wrap rounded-sm bg-surface-sunken px-2 py-1 text-xs text-ink-soft">
+                          {a.note}
+                        </span>
+                      )}
+                    </span>
                   </li>
                 ))}
               </ul>
@@ -249,11 +257,22 @@ export default async function AdminSellerProductRequestDetailPage({
         <div className="space-y-4">
           {r.status === "PENDING" ? (
             <>
+              {/* 9F-40B — on a resubmitted request, show the previous round's
+                  feedback so the reviewer has context before writing a new note. */}
+              {r.reviewNote && (
+                <div className="rounded-sm border border-line bg-surface-sunken px-3 py-2 text-xs text-ink-soft">
+                  <p className="font-medium text-ink">
+                    Previous Axiaro feedback{r.reviewedByEmail ? ` · ${r.reviewedByEmail}` : ""}
+                  </p>
+                  <p className="mt-1 whitespace-pre-wrap">{r.reviewNote}</p>
+                </div>
+              )}
+
+              <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Approve</p>
               <Card>
-                <h2 className="mb-1 text-sm font-semibold">Approve</h2>
+                <h2 className="mb-1 text-sm font-semibold">Link to an existing product</h2>
                 <p className="mb-3 text-xs text-ink-faint">
-                  Choose an outcome — link to an existing catalog product, or create a new one. The
-                  seller&rsquo;s proposal never becomes the catalog entry automatically.
+                  The seller&rsquo;s proposal never becomes the catalog entry automatically.
                 </p>
                 {canReview ? (
                   <LinkExistingPanel requestId={r.id} matches={linkMatches} query={linkq ?? ""} />
@@ -283,10 +302,20 @@ export default async function AdminSellerProductRequestDetailPage({
               </Card>
 
               {canReview && (
-                <Card>
-                  <h2 className="mb-1 text-sm font-semibold">Send back or reject</h2>
-                  <RequestReviewActions requestId={r.id} />
-                </Card>
+                <>
+                  <p className="pt-2 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+                    Request changes or reject
+                  </p>
+                  <Card>
+                    <h2 className="mb-1 text-sm font-semibold">Send back or reject</h2>
+                    <p className="mb-2 text-xs text-ink-faint">
+                      Both need a note for the seller. &ldquo;Request changes&rdquo; returns it as an
+                      editable draft; &ldquo;Reject&rdquo; closes it (the seller can still reopen it to
+                      revise and resubmit).
+                    </p>
+                    <RequestReviewActions requestId={r.id} />
+                  </Card>
+                </>
               )}
             </>
           ) : (
@@ -309,7 +338,9 @@ export default async function AdminSellerProductRequestDetailPage({
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-ink-soft">This request was rejected. It is terminal.</p>
+                <p className="text-sm text-ink-soft">
+                  This request was rejected. The seller can reopen it to revise and resubmit.
+                </p>
               )}
               {r.reviewNote && (
                 <div className="mt-3 rounded-sm bg-surface-sunken px-3 py-2 text-xs text-ink-soft">

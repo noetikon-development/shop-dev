@@ -118,7 +118,10 @@ export async function requestChangesAction(
     targetType: "seller_product_request",
     targetId: parsed.data.requestId,
     summary: `${admin.user.email} sent product request "${res.productName}" back for changes`,
-    meta: { sellerId: res.sellerId, from: "PENDING", to: "DRAFT" },
+    // 9F-40B — the review note per round, so the Admin Activity view can show
+    // each round's actual feedback (the single `reviewStatusNote` field only
+    // ever holds the latest).
+    meta: { sellerId: res.sellerId, from: "PENDING", to: "DRAFT", note: res.reviewNote },
   });
   scheduleEmail(() => sendSellerProductRequestRejected(parsed.data.requestId));
 
@@ -147,7 +150,7 @@ export async function rejectRequestAction(
     targetType: "seller_product_request",
     targetId: parsed.data.requestId,
     summary: `${admin.user.email} rejected product request "${res.productName}"`,
-    meta: { sellerId: res.sellerId, from: "PENDING", to: "REJECTED" },
+    meta: { sellerId: res.sellerId, from: "PENDING", to: "REJECTED", note: res.reviewNote },
   });
   scheduleEmail(() => sendSellerProductRequestRejected(parsed.data.requestId));
 
@@ -199,7 +202,9 @@ export async function linkExistingProductAction(
     targetType: "seller_product_request",
     targetId: parsed.data.requestId,
     summary: `${admin.user.email} approved product request "${res.productName}" (linked)`,
-    meta: { sellerId: res.sellerId, productId: res.productId, mode: "link" },
+    // 9F-40B — `note` is null when the reviewer approved without typing one (the
+    // earlier `reviewStatusNote` is preserved, not shown here).
+    meta: { sellerId: res.sellerId, productId: res.productId, mode: "link", note: res.reviewNote },
   });
   scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 
@@ -318,7 +323,7 @@ export async function createProductFromRequestAction(
     targetType: "seller_product_request",
     targetId: parsed.data.requestId,
     summary: `${admin.user.email} approved product request "${res.productName}" (new product)`,
-    meta: { sellerId: res.sellerId, productId: res.productId, mode: "create" },
+    meta: { sellerId: res.sellerId, productId: res.productId, mode: "create", note: res.reviewNote },
   });
   scheduleEmail(() => sendSellerProductRequestApproved(parsed.data.requestId));
 

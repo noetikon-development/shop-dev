@@ -98,7 +98,9 @@ export default async function SellerProductRequestsPage({
                   <td className="px-4 py-3 text-right tabular-nums text-ink-soft">{r.imageCount}</td>
                   <td className="px-4 py-3 text-ink-soft">{new Date(r.updatedAt).toLocaleDateString()}</td>
                   <td className="px-4 py-3">
-                    <StatusBadge tone={requestStatusTone(r.status)}>{requestStatusLabel(r.status)}</StatusBadge>
+                    <StatusBadge tone={requestStatusTone(r.status, r.reviewedAt)}>
+                      {requestStatusLabel(r.status, r.reviewedAt)}
+                    </StatusBadge>
                   </td>
                 </tr>
               ))}

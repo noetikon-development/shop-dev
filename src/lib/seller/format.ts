@@ -55,7 +55,18 @@ const REQUEST_STATUS_TONE: Record<string, "neutral" | "success" | "warning" | "d
   REJECTED: "danger",
 };
 
-export function requestStatusTone(status: string) {
+/**
+ * 9F-40B — a DRAFT that carries a `reviewedAt` was sent back to the seller
+ * (either an admin "Request changes" or a seller reopen of a rejection). It is
+ * surfaced as "Changes requested" so the seller can tell it apart from a
+ * never-submitted draft. The DB status is still DRAFT — this is display only.
+ */
+function isChangesRequested(status: string, reviewedAt?: string | Date | null): boolean {
+  return status === "DRAFT" && reviewedAt != null;
+}
+
+export function requestStatusTone(status: string, reviewedAt?: string | Date | null) {
+  if (isChangesRequested(status, reviewedAt)) return "warning";
   return REQUEST_STATUS_TONE[status] ?? "neutral";
 }
 
@@ -66,6 +77,7 @@ const REQUEST_STATUS_LABEL: Record<string, string> = {
   REJECTED: "Rejected",
 };
 
-export function requestStatusLabel(status: string) {
+export function requestStatusLabel(status: string, reviewedAt?: string | Date | null) {
+  if (isChangesRequested(status, reviewedAt)) return "Changes requested";
   return REQUEST_STATUS_LABEL[status] ?? status;
 }

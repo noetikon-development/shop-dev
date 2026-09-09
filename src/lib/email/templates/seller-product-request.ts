@@ -104,7 +104,7 @@ export function renderSellerProductRequestRejected(
     ${paragraph(
       changes
         ? "Open the request, make the changes and submit it again."
-        : "You're welcome to start a new request if you'd still like Axiaro to carry it.",
+        : "You can reopen the request to revise and resubmit it — your proposal, images and this feedback are kept.",
     )}
     ${button("Open the request", d.requestUrl)}
   `;
@@ -121,7 +121,7 @@ export function renderSellerProductRequestRejected(
       ``,
       changes
         ? "Open the request, make the changes and submit it again."
-        : "You're welcome to start a new request if you'd still like Axiaro to carry it.",
+        : "You can reopen the request to revise and resubmit it — your proposal, images and this feedback are kept.",
       ``,
       `Open the request: ${d.requestUrl}`,
       ...textFooter(d.brand, d.siteUrl, reason(d.brand)),

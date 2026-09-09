@@ -143,7 +143,8 @@ export type AdminRequestDetail = {
     alreadyPromoted: boolean;
   }[];
   duplicates: DuplicateReport;
-  audit: { at: string; action: string; summary: string | null; actorEmail: string | null }[];
+  /** 9F-40B — `note` is the review feedback text captured in `meta.note` for that round (null when the row carried none). */
+  audit: { at: string; action: string; summary: string | null; actorEmail: string | null; note: string | null }[];
 };
 
 export async function getAdminProductRequest(
@@ -218,7 +219,7 @@ export async function getAdminProductRequest(
     where: { targetType: "seller_product_request", targetId: id },
     orderBy: { createdAt: "desc" },
     take: 20,
-    select: { createdAt: true, action: true, summary: true, actor: { select: { email: true } } },
+    select: { createdAt: true, action: true, summary: true, meta: true, actor: { select: { email: true } } },
   });
 
   return {
@@ -265,8 +266,20 @@ export async function getAdminProductRequest(
       action: a.action,
       summary: a.summary,
       actorEmail: a.actor?.email ?? null,
+      note: parseAuditNote(a.meta),
     })),
   };
+}
+
+/** 9F-40B — pull `meta.note` (a review-feedback string) out of a stored audit `meta` blob. */
+function parseAuditNote(meta: unknown): string | null {
+  if (typeof meta !== "string" || meta === "") return null;
+  try {
+    const parsed = JSON.parse(meta) as Record<string, unknown>;
+    return typeof parsed.note === "string" && parsed.note.trim() ? parsed.note : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Lightweight catalog search for the "link to existing product" step. */
@@ -319,7 +332,7 @@ export async function searchCatalogForLink(
 // ---------------------------------------------------------------------------
 
 export type ReviewResult =
-  | { ok: true; sellerId: string; productName: string; reviewedAt: Date }
+  | { ok: true; sellerId: string; productName: string; reviewedAt: Date; reviewNote: string }
   | AdminRequestError;
 
 /** PENDING → DRAFT with a required note. The seller can then revise + resubmit. */
@@ -369,7 +382,9 @@ async function advanceFromPending(
   if (advanced.count === 0) {
     return { ok: false, code: "CONFLICT", error: "The request changed while you were reviewing it. Reload and try again." };
   }
-  return { ok: true, sellerId: current.sellerId, productName: current.proposedName, reviewedAt };
+  // `note` is already `cleanUserText`-ed by the caller (`requestChanges` /
+  // `rejectRequest`). Returned so the action can put it in the audit `meta`.
+  return { ok: true, sellerId: current.sellerId, productName: current.proposedName, reviewedAt, reviewNote: note };
 }
 
 export type LinkResult =
@@ -382,6 +397,8 @@ export type LinkResult =
       reviewedAt: Date;
       /** 9F-36B — carried through so the caller seeds the seller's offers with it. */
       proposedCondition: string | null;
+      /** 9F-40B — the cleaned approval note the reviewer typed, or null. For the audit `meta`. */
+      reviewNote: string | null;
     }
   | AdminRequestError;
 
@@ -415,12 +432,16 @@ export async function linkExistingProduct(
   }
 
   const reviewedAt = new Date();
+  // 9F-40B — an approval with NO fresh note must NOT wipe an existing review
+  // reason (e.g. a "Request changes" note from an earlier round). Only write
+  // `reviewStatusNote` when the reviewer actually typed one.
+  const cleanNote = note ? cleanUserText(note) : "";
   const advanced = await client.sellerProductRequest.updateMany({
     where: { id: requestId, status: "PENDING" },
     data: {
       status: "APPROVED",
       resultProductId: productId,
-      reviewStatusNote: note ? cleanUserText(note) : null,
+      ...(cleanNote ? { reviewStatusNote: cleanNote } : {}),
       reviewedById: adminUserId,
       reviewedAt,
     },
@@ -436,5 +457,6 @@ export async function linkExistingProduct(
     productSlug: product.slug,
     reviewedAt,
     proposedCondition: current.proposedCondition,
+    reviewNote: cleanNote || null,
   };
 }

@@ -77,6 +77,8 @@ export type CreateFromRequestResult =
       reviewedAt: Date;
       /** 9F-36B — the seller's proposed condition, carried through for offer seeding. */
       proposedCondition: string | null;
+      /** 9F-40B — the cleaned approval note the reviewer typed, or null. For the audit `meta`. */
+      reviewNote: string | null;
     }
   | { ok: false; code: "NOT_FOUND" | "CONFLICT" | "VALIDATION"; error: string; fieldErrors?: Record<string, string> };
 
@@ -163,6 +165,7 @@ export async function approveByCreatingProduct(
         productName: string;
         reviewedAt: Date;
         proposedCondition: string | null;
+        reviewNote: string | null;
       }
     | { conflict: true }
     | { notFound: true };
@@ -175,11 +178,14 @@ export async function approveByCreatingProduct(
       if (req.status !== "PENDING") return { conflict: true as const };
 
       const reviewedAt = new Date();
+      // 9F-40B — an approval with NO fresh note must NOT wipe an existing review
+      // reason from an earlier "Request changes" round. Only write it when set.
+      const cleanNote = curated.reviewNote ? cleanUserText(curated.reviewNote) : "";
       const claimed = await tx.sellerProductRequest.updateMany({
         where: { id: requestId, status: "PENDING" },
         data: {
           status: "APPROVED",
-          reviewStatusNote: curated.reviewNote ? cleanUserText(curated.reviewNote) : null,
+          ...(cleanNote ? { reviewStatusNote: cleanNote } : {}),
           reviewedById: adminUserId,
           reviewedAt,
         },
@@ -255,6 +261,7 @@ export async function approveByCreatingProduct(
         productName: req.proposedName,
         reviewedAt,
         proposedCondition: req.proposedCondition,
+        reviewNote: cleanNote || null,
       };
   };
 
