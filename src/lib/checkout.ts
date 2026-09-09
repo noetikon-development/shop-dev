@@ -591,6 +591,34 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     paymentMethod: "NONE",
   });
 
+  // 9F-33A — invariant. `createOrderFromCart` only ever creates a COD
+  // (`paymentMethod: "NONE"`) order, so a THIRD_PARTY order MUST auto-confirm:
+  // `shouldAutoConfirmAtCheckout({ sellerType: "THIRD_PARTY", paymentMethod: "NONE" })`
+  // is `true` by construction. Before 9F-15B, a 3P COD order was created at
+  // `PENDING_PAYMENT` (like a 1P COD order) and relied on an admin clicking
+  // "Confirm order"; if nobody did, the order had NO forward path — the seller
+  // can't Accept while the parent isn't fulfillable (`canTransitionSellerOrder`
+  // requires `isParentOrderFulfillable`). That state is now structurally
+  // unreachable; this belt-and-braces check (a sibling of the "4c-iv" one-seller
+  // safety assert below) keeps it unreachable even if `shouldAutoConfirmAtCheckout`
+  // is later changed. It fires BEFORE any write, so a violation is a clean no-op.
+  //
+  // NOTE: when online payment for 3P sellers lands (PayMongo 6D), a paid-online
+  // 3P order legitimately stays `PENDING_PAYMENT` until its verified webhook —
+  // this guard must be re-scoped to the COD case then (it already is, implicitly,
+  // because this function only creates COD orders).
+  if (soSeller.type === "THIRD_PARTY" && !autoConfirmParent) {
+    console.error(
+      "[checkout] 9F-33A invariant violation: a THIRD_PARTY COD order would be created at PENDING_PAYMENT with no forward path — refusing.",
+      { sellerId: soSeller.id },
+    );
+    return {
+      ok: false,
+      code: "VALIDATION",
+      error: "We couldn’t complete your order. Please try again.",
+    };
+  }
+
   // 4. Server-authoritative totals. `subtotal` is Σ (bound Offer.price × qty).
   //    The shipping fee is the ACTIVE method's current DB rate (after the
   //    store-wide free-shipping rule) — never a browser value.
