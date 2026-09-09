@@ -5,6 +5,8 @@ import {
   canTransitionSellerOrder,
   isSellerOrderStatus,
   sellerCanCancelSellerOrder,
+  sellerOrderStatusesBehind,
+  sellerOrderTargetForParentStatus,
   shipmentStatusForSellerOrder,
   type SellerOrderStatus,
 } from "@/lib/marketplace/seller-order-status";
@@ -773,4 +775,208 @@ export async function saveSellerShipment(
     console.error("[seller-order-repository] saveSellerShipment failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not save the shipment." };
   }
+}
+
+// ---------------------------------------------------------------------------
+// 9F-35B — admin fulfilment → SellerOrder cascade
+//
+// When an Axiaro admin advances the customer-facing parent Order
+// (admin/fulfillment-actions.ts + admin/order-actions.ts), bring every
+// SellerOrder on it to the matching seller-plane state, so a THIRD_PARTY order
+// can never reach SHIPPED / DELIVERED while its SellerOrder is still
+// PENDING_PAYMENT / PROCESSING (9F-35A P1-5 — that strands the seller order and
+// blocks settlement forever, since eligibility needs BOTH planes at DELIVERED).
+//
+// This is the FORWARD sibling of the CANCELLED cascade (9F-3 / 9F-30B): it
+// deliberately does NOT route through `advanceSellerOrderStatus` /
+// `SELLER_ORDER_STATUS_TRANSITIONS` (the seller's own machine). Every write is
+// status-guarded and forward-only — a SellerOrder the seller already advanced
+// past the target, or a CANCELLED one, is left exactly as it is. The parent
+// Order / OrderEvent / customer notification stay entirely with the admin
+// action; this touches only SellerOrder + its Shipment, never Order, and never
+// inventory, the customer plane, or settlement fields.
+// ---------------------------------------------------------------------------
+
+/** Courier / tracking bundle the admin captured on a SHIPPED transition. */
+export type AdminCascadeCourier = {
+  courier: string | null;
+  courierName: string | null;
+  trackingNumber: string | null;
+  trackingUrl: string | null;
+};
+
+export type SellerOrderCascadeRow = {
+  sellerOrderId: string;
+  sellerId: string;
+  sellerType: string;
+  from: SellerOrderStatus;
+  to: SellerOrderStatus;
+  shipment: "created" | "stamped" | "none";
+};
+
+export type SellerOrderCascadeResult = {
+  ok: true;
+  /** null when the parent status has no seller-plane counterpart (e.g. OUT_FOR_DELIVERY). */
+  target: SellerOrderStatus | null;
+  cascaded: SellerOrderCascadeRow[];
+};
+
+/**
+ * The audit entry for ONE admin-induced SellerOrder cascade hop (9F-35B). Pure —
+ * the actor is the admin user; written by `cascadeSellerOrderFromParent` AFTER
+ * its transaction commits (best-effort, matching the 9F-12b rollup-audit
+ * discipline — a logging failure never undoes a committed cascade, and a
+ * rolled-back test never persists audit rows because the externalTx path skips
+ * this entirely).
+ */
+export function adminCascadeAuditInput(
+  args: { actorUserId: string; orderId: string; orderNumber: string; parentStatus: string },
+  row: SellerOrderCascadeRow,
+): AuditInput {
+  return {
+    actorUserId: args.actorUserId,
+    action: "seller_order.status_changed",
+    targetType: "seller_order",
+    targetId: row.sellerOrderId,
+    summary:
+      `Admin fulfilment of order ${args.orderNumber} advanced seller order ` +
+      `${row.sellerOrderId} (${row.sellerType === "FIRST_PARTY" ? "1P" : "3P"}): ${row.from} → ${row.to}`,
+    meta: {
+      trigger: "admin_fulfillment_cascade",
+      orderId: args.orderId,
+      orderNumber: args.orderNumber,
+      sellerOrderId: row.sellerOrderId,
+      sellerId: row.sellerId,
+      from: row.from,
+      to: row.to,
+      parentStatus: args.parentStatus,
+      shipment: row.shipment,
+    },
+  };
+}
+
+/**
+ * Cascade the seller plane forward after an admin advanced the parent Order.
+ *
+ * `parentStatus` is the status the admin JUST moved the Order to. The mapping
+ * (`sellerOrderTargetForParentStatus`):
+ *   PROCESSING       → SellerOrder PENDING_PAYMENT             → PROCESSING
+ *   SHIPPED          → SellerOrder PENDING_PAYMENT/PROCESSING/READY_TO_SHIP → SHIPPED (+ Shipment)
+ *   OUT_FOR_DELIVERY → no seller-plane move (clean no-op)
+ *   DELIVERED        → SellerOrder * (except DELIVERED/CANCELLED) → DELIVERED (+ Shipment.deliveredAt)
+ *
+ * Shipment side-effects run for THIRD_PARTY rows only — a 1P shadow SellerOrder
+ * tracks the parent for bookkeeping, but Axiaro's own fulfilment carries
+ * courier/tracking on the Order, not a Shipment row. On a SHIPPED cascade a
+ * SellerOrder with no Shipment gets one seeded from `courier`; one that already
+ * has a Shipment (the seller made it) is only stamped, never duplicated.
+ *
+ * Best-effort: the parent Order transition has already committed and a missed
+ * hop self-heals on the next admin fulfilment step (each target's "behind" set
+ * contains every lower status). Always resolves `{ ok: true }`.
+ */
+export async function cascadeSellerOrderFromParent(
+  args: {
+    orderId: string;
+    orderNumber: string;
+    parentStatus: string;
+    /** Admin user id — the cascade audit actor. */
+    actorUserId: string;
+    /** Courier/tracking to seed a Shipment on a SHIPPED cascade; ignored otherwise. */
+    courier?: AdminCascadeCourier;
+  },
+  externalTx?: Prisma.TransactionClient,
+): Promise<SellerOrderCascadeResult> {
+  const target = sellerOrderTargetForParentStatus(args.parentStatus);
+  if (!target) return { ok: true, target: null, cascaded: [] };
+  const behind = sellerOrderStatusesBehind(target);
+  if (behind.length === 0) return { ok: true, target, cascaded: [] };
+
+  const run = async (tx: Prisma.TransactionClient): Promise<SellerOrderCascadeRow[]> => {
+    const rows = await tx.sellerOrder.findMany({
+      where: { orderId: args.orderId, status: { in: behind } },
+      select: {
+        id: true,
+        status: true,
+        sellerId: true,
+        sellerType: true,
+        shipments: { select: { id: true, status: true } },
+      },
+    });
+
+    const out: SellerOrderCascadeRow[] = [];
+    for (const so of rows) {
+      // Status-guarded: if the seller advanced this row between our read and
+      // this write, 0 rows match and we skip it — never a backwards move.
+      const upd = await tx.sellerOrder.updateMany({
+        where: { id: so.id, status: so.status },
+        data: { status: target, updatedAt: new Date() },
+      });
+      if (upd.count === 0) continue;
+
+      let shipment: SellerOrderCascadeRow["shipment"] = "none";
+      if (so.sellerType === "THIRD_PARTY") {
+        if (target === "SHIPPED") {
+          if (so.shipments.length === 0) {
+            const c = args.courier;
+            if (c?.courier && isCourierCode(c.courier)) {
+              await tx.shipment.create({
+                data: {
+                  sellerOrderId: so.id,
+                  carrier: c.courier,
+                  carrierName: c.courierName,
+                  trackingNumber: c.trackingNumber,
+                  trackingUrl: c.trackingUrl,
+                  status: "SHIPPED",
+                  shippedAt: new Date(),
+                },
+              });
+              shipment = "created";
+            }
+          } else {
+            await tx.shipment.updateMany({
+              where: { sellerOrderId: so.id, status: { not: "DELIVERED" } },
+              data: { status: "SHIPPED", shippedAt: new Date() },
+            });
+            shipment = "stamped";
+          }
+        } else if (target === "DELIVERED") {
+          const r = await tx.shipment.updateMany({
+            where: { sellerOrderId: so.id, status: { not: "DELIVERED" } },
+            data: { status: "DELIVERED", deliveredAt: new Date() },
+          });
+          shipment = r.count > 0 ? "stamped" : "none";
+        }
+      }
+
+      out.push({
+        sellerOrderId: so.id,
+        sellerId: so.sellerId,
+        sellerType: so.sellerType,
+        from: so.status as SellerOrderStatus,
+        to: target,
+        shipment,
+      });
+    }
+    return out;
+  };
+
+  let cascaded: SellerOrderCascadeRow[];
+  try {
+    cascaded = externalTx ? await run(externalTx) : await prisma.$transaction(run);
+  } catch (err) {
+    console.error("[seller-order-repository] cascadeSellerOrderFromParent failed", err);
+    return { ok: true, target, cascaded: [] };
+  }
+
+  // Audit — one row per hop actually taken. Post-commit, best-effort, and only
+  // on the production (non-externalTx) path so a rolled-back test never persists
+  // audit rows (same discipline as the 9F-12b rollup audit).
+  if (!externalTx) {
+    for (const row of cascaded) {
+      await writeAudit(adminCascadeAuditInput(args, row));
+    }
+  }
+
+  return { ok: true, target, cascaded };
 }

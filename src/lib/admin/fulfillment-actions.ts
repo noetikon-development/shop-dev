@@ -16,6 +16,7 @@ import {
 } from "@/lib/orders/couriers";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendOrderShipped, sendOutForDelivery, sendOrderDelivered } from "@/lib/email/notifications";
+import { cascadeSellerOrderFromParent } from "@/lib/marketplace/seller-order-repository";
 
 /**
  * Fulfilment / courier / tracking actions (Step 13).
@@ -345,6 +346,23 @@ export async function markShippedAction(input: unknown): Promise<FulfillmentActi
 
   revalidateOrderPaths(order.orderNumber, order.id);
 
+  // 9F-35B: bring every SellerOrder on this order up to SHIPPED (assisted
+  // fulfilment) and seed its Shipment from the courier/tracking just captured —
+  // a 3P order must never sit at SHIPPED with its SellerOrder behind. Forward-
+  // only + status-guarded: a seller who already shipped is untouched.
+  await cascadeSellerOrderFromParent({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    parentStatus: "SHIPPED",
+    actorUserId: admin.user.id,
+    courier: {
+      courier: resolved.data.courier,
+      courierName: resolved.data.courierName,
+      trackingNumber: resolved.data.trackingNumber,
+      trackingUrl: resolved.data.trackingUrl,
+    },
+  });
+
   // Shipment notification — after the response; ORDER_SHIPPED:<orderId> dedupes.
   scheduleEmail(() => sendOrderShipped(order.id));
 
@@ -401,6 +419,15 @@ export async function markOutForDeliveryAction(input: unknown): Promise<Fulfillm
   });
 
   revalidateOrderPaths(order.orderNumber, order.id);
+
+  // 9F-35B: the seller machine has no OUT_FOR_DELIVERY — the SellerOrder stays
+  // SHIPPED. Called for uniformity; the helper is a clean no-op for this target.
+  await cascadeSellerOrderFromParent({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    parentStatus: "OUT_FOR_DELIVERY",
+    actorUserId: admin.user.id,
+  });
 
   // Step 21 P1 — "out for delivery" notification. After the response;
   // ORDER_OUT_FOR_DELIVERY:<orderId> dedupes.
@@ -474,6 +501,17 @@ export async function markDeliveredAction(input: unknown): Promise<FulfillmentAc
   });
 
   revalidateOrderPaths(order.orderNumber, order.id);
+
+  // 9F-35B: bring every SellerOrder on this order up to DELIVERED and stamp its
+  // Shipment's deliveredAt — this is what makes the order settlement-eligible
+  // (eligibility needs BOTH Order.status and SellerOrder.status at DELIVERED).
+  // Forward-only + status-guarded.
+  await cascadeSellerOrderFromParent({
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    parentStatus: "DELIVERED",
+    actorUserId: admin.user.id,
+  });
 
   // Delivery confirmation — after the response; ORDER_DELIVERED:<orderId> dedupes.
   scheduleEmail(() => sendOrderDelivered(order.id));

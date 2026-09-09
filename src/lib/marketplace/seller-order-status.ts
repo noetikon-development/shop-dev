@@ -115,6 +115,68 @@ export function canTransitionSellerOrder(
   return true;
 }
 
+/**
+ * 9F-35B — admin fulfilment → SellerOrder cascade support.
+ *
+ * When an Axiaro admin drives the customer-facing parent `Order` forward
+ * (`admin/fulfillment-actions.ts` / `admin/order-actions.ts`), the seller plane
+ * must follow so a THIRD_PARTY order can never sit at SHIPPED / DELIVERED with
+ * its SellerOrder still PENDING_PAYMENT / PROCESSING (9F-35A P1-5 — a stranded
+ * SellerOrder also blocks settlement forever). This is a cascade, NOT a
+ * seller-driven move: it deliberately does not go through
+ * `SELLER_ORDER_STATUS_TRANSITIONS` / `canTransitionSellerOrder` (the seller's
+ * OWN forward machine), exactly like the CANCELLED cascade sits outside it.
+ *
+ * The rank below is a total order over the FORWARD statuses only — CANCELLED is
+ * off-line and is never ranked, so a cascade never touches a cancelled row.
+ */
+const SELLER_ORDER_FORWARD_RANK: Record<string, number> = {
+  PENDING_PAYMENT: 0,
+  PROCESSING: 1,
+  READY_TO_SHIP: 2,
+  SHIPPED: 3,
+  DELIVERED: 4,
+};
+
+/**
+ * The `SellerOrder.status` an admin parent-`Order` transition cascades to, or
+ * `null` when that parent status has no seller-plane counterpart:
+ *   Order PROCESSING       → SellerOrder PROCESSING  (Axiaro-assisted acceptance)
+ *   Order SHIPPED          → SellerOrder SHIPPED
+ *   Order OUT_FOR_DELIVERY → null — the seller machine has no OUT_FOR_DELIVERY,
+ *                            the SellerOrder simply stays SHIPPED
+ *   Order DELIVERED        → SellerOrder DELIVERED
+ * Anything else (PENDING_PAYMENT / PENDING / PAID / CANCELLED) → null. Parent
+ * cancellation has its OWN cascade (9F-3 / 9F-30B) and is never routed here.
+ */
+export function sellerOrderTargetForParentStatus(parentStatus: string): SellerOrderStatus | null {
+  switch (parentStatus) {
+    case "PROCESSING":
+      return "PROCESSING";
+    case "SHIPPED":
+      return "SHIPPED";
+    case "DELIVERED":
+      return "DELIVERED";
+    default:
+      return null;
+  }
+}
+
+/**
+ * The forward `SellerOrder` statuses strictly BEHIND `target` — the set an admin
+ * cascade to `target` may advance. A row already at or past `target`, or
+ * CANCELLED, is not in this set, so a status-guarded `updateMany` on it matches
+ * nothing and the cascade is a clean no-op (never a backwards move).
+ */
+export function sellerOrderStatusesBehind(target: SellerOrderStatus): SellerOrderStatus[] {
+  const t = SELLER_ORDER_FORWARD_RANK[target];
+  if (t === undefined) return [];
+  return (SELLER_ORDER_STATUSES as readonly SellerOrderStatus[]).filter((s) => {
+    const r = SELLER_ORDER_FORWARD_RANK[s];
+    return r !== undefined && r < t;
+  });
+}
+
 /** The moves to offer in the portal for a given state. */
 export function allowedSellerOrderMoves(
   from: string,

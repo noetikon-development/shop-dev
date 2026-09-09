@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock } from "@/lib/inventory";
 import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
+import { cascadeSellerOrderFromParent } from "@/lib/marketplace/seller-order-repository";
 import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import {
@@ -127,6 +128,14 @@ export async function updateOrderStatusAction(input: unknown): Promise<OrderActi
   // PROCESSING is the only forward status this action performs, but the guard
   // keeps the trigger explicit and future-proof.
   if (to === "PROCESSING") {
+    // 9F-35B: assisted acceptance — advance the seller plane in step (guarded,
+    // forward-only; a seller who already accepted is untouched).
+    await cascadeSellerOrderFromParent({
+      orderId,
+      orderNumber: order.orderNumber,
+      parentStatus: "PROCESSING",
+      actorUserId: admin.user.id,
+    });
     scheduleEmail(() => sendOrderProcessing(orderId));
   }
 
@@ -221,6 +230,15 @@ export async function confirmOrderAction(input: unknown): Promise<OrderActionSta
   });
 
   revalidateOrderPaths(order.orderNumber, orderId);
+
+  // 9F-35B: assisted acceptance — advance the SellerOrder(s) to PROCESSING too.
+  // Guarded + forward-only: a seller who already accepted is untouched.
+  await cascadeSellerOrderFromParent({
+    orderId,
+    orderNumber: order.orderNumber,
+    parentStatus: "PROCESSING",
+    actorUserId: admin.user.id,
+  });
 
   // Existing "preparing your order" notification — after the response;
   // ORDER_PROCESSING:<orderId> dedupes if this is somehow re-run.
