@@ -850,12 +850,9 @@ export async function setCategoryImage(
 // Variants & options
 // ===========================================================================
 
-const SWATCH_HINTS: Record<string, string> = {
-  oak: "#c8a97e", walnut: "#6b4a32", oat: "#e8dfce", clay: "#b5533a", sage: "#7c8a71",
-  ink: "#23211e", slate: "#4a4f57", black: "#262626", white: "#f2f0ea", natural: "#d8c8ab",
-  charcoal: "#3d3d3f", cream: "#efece4", grey: "#9a9a93", gray: "#9a9a93", navy: "#22314a",
-  green: "#3f5245", blue: "#5a6b74", terracotta: "#b06b4c", rust: "#a8583f", bone: "#e6e1d6",
-};
+// 9F-37B — the colour → hex dictionary moved to the single canonical module
+// `@/lib/marketplace/colours` and now resolves at DISPLAY time. This action no
+// longer auto-derives / stores a swatchHex; it only preserves an explicit one.
 
 export async function saveProductOptions(
   _prev: CatalogState,
@@ -918,14 +915,16 @@ export async function saveProductOptions(
       for (let j = 0; j < def.values.length; j++) {
         const value = def.values[j];
         const ev = existingValues.find((v) => v.value.toLowerCase() === value.toLowerCase());
-        const swatch =
-          def.name.toLowerCase().includes("colour") || def.name.toLowerCase().includes("color")
-            ? SWATCH_HINTS[value.toLowerCase().split(/[\s/]/)[0]] ?? null
-            : null;
         if (ev) {
-          await tx.productOptionValue.update({ where: { id: ev.id }, data: { value, sortOrder: j, swatchHex: swatch ?? ev.swatchHex } });
+          // 9F-37B: never re-derive / overwrite a stored swatchHex — an explicit
+          // value (seed or a future admin override) always wins. The storefront
+          // resolves a NULL swatchHex through the shared palette at display time
+          // (`@/lib/marketplace/colours`).
+          await tx.productOptionValue.update({ where: { id: ev.id }, data: { value, sortOrder: j, swatchHex: ev.swatchHex } });
         } else {
-          await tx.productOptionValue.create({ data: { optionId, value, sortOrder: j, swatchHex: swatch } });
+          // 9F-37B: new option values are stored with NULL swatchHex — the
+          // controlled palette provides the default at display time.
+          await tx.productOptionValue.create({ data: { optionId, value, sortOrder: j, swatchHex: null } });
         }
       }
     }

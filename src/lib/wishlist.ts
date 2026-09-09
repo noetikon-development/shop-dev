@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { artKindFromRef } from "@/lib/art-ref";
 import { stockStatusFromAvailable, rollupStatus } from "@/lib/inventory-status";
 import { computeCatalogCardPricing, resolveVariantAvailability } from "@/lib/marketplace/buy-box-rule";
+import { COLOUR_OPTION_NAMES, isColourOptionName, resolveSwatchHex } from "@/lib/marketplace/colours";
 import type { CardOffer, StockOfferCandidate } from "@/lib/marketplace/types";
 import type { ProductCardView } from "@/lib/types";
 
@@ -57,8 +58,8 @@ const wishlistSelect = {
         select: { url: true, alt: true },
       },
       options: {
-        where: { name: "Colour" },
-        select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
+        where: { name: { in: [...COLOUR_OPTION_NAMES], mode: "insensitive" } }, // 9F-37B
+        select: { name: true, values: { orderBy: { sortOrder: "asc" }, select: { value: true, swatchHex: true } } },
       },
       variants: {
         where: { status: "ACTIVE" },
@@ -145,9 +146,11 @@ export async function loadWishlist(userId: string): Promise<WishlistCard[]> {
 
   return rows.map(({ createdAt, product: p }) => {
     const img = p.images[0] ?? { url: `art:accessory:${p.slug}`, alt: p.name };
-    const swatches = (p.options[0]?.values ?? [])
-      .map((v) => v.swatchHex)
-      .filter((h): h is string => Boolean(h));
+    // 9F-37B: same shared palette resolution + de-dupe as the product card.
+    const colourOption = p.options.find((o) => isColourOptionName(o.name));
+    const swatches = [
+      ...new Set((colourOption?.values ?? []).map((v) => resolveSwatchHex(v.value, v.swatchHex))),
+    ];
     const available = p.status === "ACTIVE";
     // Phase 9D-D: availability from the winning stock-bearing 1P Offer's
     // OfferInventory, per ACTIVE variant — same source as the storefront cards.

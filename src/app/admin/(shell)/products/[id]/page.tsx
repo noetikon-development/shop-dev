@@ -5,6 +5,7 @@ import { getAdminProduct, categorySelectOptions } from "@/lib/admin/catalog";
 import { PageHeader } from "@/components/admin/ui";
 import { ProductEditor } from "@/components/admin/catalog/product-editor";
 import { ProductActions } from "@/components/admin/catalog/product-actions";
+import { isColourOptionName, resolveSwatchHex } from "@/lib/marketplace/colours";
 
 export async function generateMetadata({
   params,
@@ -81,8 +82,13 @@ export default async function EditProductPage({
         }))}
         colours={
           product.options
-            .find((o) => o.name === "Colour")
-            ?.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })) ?? []
+            .find((o) => isColourOptionName(o.name))
+            ?.values.map((v) => ({
+              id: v.id,
+              value: v.value,
+              // 9F-37B: resolved display hex (explicit → palette → neutral)
+              swatchHex: resolveSwatchHex(v.value, v.swatchHex),
+            })) ?? []
         }
         options={product.options.map((o) => ({
           id: o.id,

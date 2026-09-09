@@ -11,6 +11,7 @@ import { useWishlist } from "@/lib/wishlist-store";
 import { useWishlistToggle } from "@/components/wishlist/use-wishlist-toggle";
 import { useUI } from "@/lib/ui-store";
 import { cn, compactNumber, estimatedDelivery, formatPrice } from "@/lib/utils";
+import { isColourOptionName } from "@/lib/marketplace/colours";
 import { useStorefrontConfig } from "@/components/storefront-config-provider";
 import { Button } from "@/components/ui/button";
 import { QuantityStepper } from "@/components/ui/quantity-stepper";
@@ -28,7 +29,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const wished = useWishlist((s) => s.ids.includes(product.id));
   const toggleWish = useWishlistToggle();
 
-  const colourOption = product.options.find((o) => o.name === "Colour");
+  const colourOption = product.options.find((o) => isColourOptionName(o.name)); // 9F-37B
   const sizeOption = product.options.find((o) => o.name === "Size");
 
   const [selected, setSelected] = useState<Record<string, string>>(() => {
@@ -353,7 +354,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                   >
                     <span
                       className="absolute inset-1 rounded-full border border-black/10"
-                      style={{ backgroundColor: v.swatchHex ?? "#ccc" }}
+                      style={{ backgroundColor: v.swatchHex ?? undefined }}
                     />
                     {active && (
                       <Check

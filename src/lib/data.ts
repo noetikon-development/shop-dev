@@ -10,6 +10,7 @@ import {
   resolveVariantAvailability,
   resolveWinningOfferView,
 } from "@/lib/marketplace/buy-box-rule";
+import { COLOUR_OPTION_NAMES, isColourOptionName, resolveSwatchHex } from "@/lib/marketplace/colours";
 import type {
   CardOffer,
   FullOfferCandidate,
@@ -113,9 +114,12 @@ const cardSelect = {
     take: 1,
     select: { url: true, alt: true },
   },
+  // 9F-37B: recognise every colour-axis option name (Colour / Color / Colours /
+  // Colors, any case), and carry the value label so the shared palette can
+  // resolve a swatch when `swatchHex` is null.
   options: {
-    where: { name: "Colour" },
-    select: { values: { orderBy: { sortOrder: "asc" }, select: { swatchHex: true } } },
+    where: { name: { in: [...COLOUR_OPTION_NAMES], mode: "insensitive" } },
+    select: { name: true, values: { orderBy: { sortOrder: "asc" }, select: { value: true, swatchHex: true } } },
   },
   variants: {
     where: { status: "ACTIVE" },
@@ -169,7 +173,7 @@ type CardRow = {
   createdAt: Date;
   category: { slug: string; name: string };
   images: { url: string; alt: string }[];
-  options: { values: { swatchHex: string | null }[] }[];
+  options: { name: string; values: { value: string; swatchHex: string | null }[] }[];
   variants: {
     id: string;
     offers: CardOfferRow[];
@@ -270,9 +274,13 @@ function cardCondition(variants: { offers: CardOfferRow[] }[]): string | null {
 
 function toCard(p: CardRow): ProductCardView {
   const img = p.images[0] ?? { url: "art:accessory:" + p.slug, alt: p.name };
-  const swatches = (p.options[0]?.values ?? [])
-    .map((v) => v.swatchHex)
-    .filter((h): h is string => Boolean(h));
+  // 9F-37B: every colour value resolves to a swatch (explicit → palette →
+  // neutral) — no value is dropped. De-dupe so N unknown colours don't render
+  // N identical neutral dots.
+  const colourOption = p.options.find((o) => isColourOptionName(o.name));
+  const swatches = [
+    ...new Set((colourOption?.values ?? []).map((v) => resolveSwatchHex(v.value, v.swatchHex))),
+  ];
   const { inStock, stockStatus } = cardStock(p.variants);
   const { price, compareAtPrice, priceFrom } = cardPricing(p);
   const condition = cardCondition(p.variants);
@@ -597,7 +605,7 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
     prisma.productOptionValue.findMany({
       where: {
         option: {
-          name: "Colour",
+          name: { in: [...COLOUR_OPTION_NAMES], mode: "insensitive" }, // 9F-37B
           product: scopeWhere,
         },
       },
@@ -609,7 +617,8 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
   for (const c of colorGroups) {
     const existing = colorMap.get(c.value);
     if (existing) existing.count += 1;
-    else colorMap.set(c.value, { name: c.value, hex: c.swatchHex, count: 1 });
+    // 9F-37B: resolve through the shared palette (explicit → palette → neutral).
+    else colorMap.set(c.value, { name: c.value, hex: resolveSwatchHex(c.value, c.swatchHex), count: 1 });
   }
 
   const derivedMinPrice = (r: CardRow): number | null =>
@@ -831,9 +840,15 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
   const primaryImg =
     p.images.find((i) => i.optionValueId == null) ??
     p.images[0] ?? { url: `art:accessory:${p.slug}`, alt: p.name };
-  const swatches = (p.options.find((o) => o.name === "Colour")?.values ?? [])
-    .map((v) => v.swatchHex)
-    .filter((h): h is string => Boolean(h));
+  // 9F-37B: colour-axis option recognised case-insensitively; every value
+  // resolves to a swatch via the shared palette; de-duped.
+  const swatches = [
+    ...new Set(
+      (p.options.find((o) => isColourOptionName(o.name))?.values ?? []).map((v) =>
+        resolveSwatchHex(v.value, v.swatchHex),
+      ),
+    ),
+  ];
   const activeVariants = p.variants.filter((v) => v.status === "ACTIVE");
 
   type PdpOfferRow = (typeof activeVariants)[number]["offers"][number];
@@ -967,7 +982,13 @@ async function loadProductBySlug(slug: string): Promise<ProductDetailView | null
     options: p.options.map((o) => ({
       id: o.id,
       name: o.name,
-      values: o.values.map((v) => ({ id: v.id, value: v.value, swatchHex: v.swatchHex })),
+      // 9F-37B: for a colour option, `swatchHex` is the RESOLVED display hex
+      // (explicit → palette → neutral) so the PDP never needs a `?? "#ccc"`.
+      values: o.values.map((v) => ({
+        id: v.id,
+        value: v.value,
+        swatchHex: isColourOptionName(o.name) ? resolveSwatchHex(v.value, v.swatchHex) : v.swatchHex,
+      })),
     })),
     variants: activeVariants.map((v) => {
       const off = resolvedByVariant.get(v.id)!;

@@ -47,13 +47,6 @@ import type { SellerContext } from "@/lib/marketplace/types";
  * price and stock — not an empty "create listing" form.
  */
 
-const SWATCH_HINTS: Record<string, string> = {
-  oak: "#c8a97e", walnut: "#6b4a32", oat: "#e8dfce", clay: "#b5533a", sage: "#7c8a71",
-  ink: "#23211e", slate: "#4a4f57", black: "#262626", white: "#f2f0ea", natural: "#d8c8ab",
-  charcoal: "#3d3d3f", cream: "#efece4", grey: "#9a9a93", gray: "#9a9a93", navy: "#22314a",
-  green: "#3f5245", blue: "#5a6b74", terracotta: "#b06b4c", rust: "#a8583f", bone: "#e6e1d6",
-};
-
 export type CuratedProduct = {
   name: string;
   slug?: string;
@@ -236,7 +229,6 @@ export async function approveByCreatingProduct(
           data: { productId: product.id, name: def.name, sortOrder: i },
           select: { id: true },
         });
-        const isColour = def.name.toLowerCase().includes("colour") || def.name.toLowerCase().includes("color");
         for (let j = 0; j < def.values.length; j++) {
           const value = def.values[j];
           await tx.productOptionValue.create({
@@ -244,7 +236,10 @@ export async function approveByCreatingProduct(
               optionId: opt.id,
               value,
               sortOrder: j,
-              swatchHex: isColour ? SWATCH_HINTS[value.toLowerCase().split(/[\s/]/)[0]] ?? null : null,
+              // 9F-37B: swatchHex is stored NULL; the storefront resolves the
+              // colour through the shared palette (`@/lib/marketplace/colours`)
+              // at display time. An explicit override would still win.
+              swatchHex: null,
             },
           });
         }
