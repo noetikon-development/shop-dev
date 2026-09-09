@@ -23,6 +23,7 @@ export type AdminSettlementRow = {
   commissionAmount: number;
   clawbackAmount: number;
   netAmount: number;
+  carryForwardAmount: number;
   orderCount: number;
   clawbackCount: number;
   paidAt: string;
@@ -60,6 +61,7 @@ export async function listAdminSettlements(filters: { sellerId?: string; page?: 
       commissionAmount: s.commissionAmount,
       clawbackAmount: s.clawbackAmount,
       netAmount: s.netAmount,
+      carryForwardAmount: s.carryForwardAmount ?? 0,
       orderCount: s.orderCount,
       clawbackCount: s.clawbackCount,
       paidAt: s.paidAt.toISOString(),
@@ -119,7 +121,14 @@ export type RecordSettlementInput = {
 };
 
 export type RecordSettlementResult =
-  | { ok: true; settlementId: string; netAmount: number; orderCount: number; clawbackCount: number }
+  | {
+      ok: true;
+      settlementId: string;
+      netAmount: number;
+      carryForwardAmount: number;
+      orderCount: number;
+      clawbackCount: number;
+    }
   | { ok: false; code: "NOTHING_TO_SETTLE" | "CONFLICT" | "NOT_THIRD_PARTY"; error: string };
 
 /**
@@ -148,6 +157,11 @@ export async function recordSettlement(
 
     const positiveIds = preview.eligibleOrders.map((o) => o.id);
     const clawbackIds = preview.outstandingClawbacks.map((o) => o.id);
+    // 9F-42B — orders whose returned-before-settlement merchandise value is being
+    // deducted from this batch. Folded into the row's clawback aggregate (same
+    // kind of money: goods that came back), never double-counted with the
+    // post-settlement clawback set above (disjoint by settlementStatus).
+    const preSettlementReturnCount = preview.eligibleOrders.filter((o) => o.returnedValueDeducted > 0).length;
 
     const settlement = await tx.sellerSettlement.create({
       data: {
@@ -156,10 +170,11 @@ export async function recordSettlement(
         status: "PAID",
         grossReceivable: preview.grossReceivable,
         commissionAmount: preview.commissionAmount,
-        clawbackAmount: preview.clawbackAmount,
-        netAmount: preview.netAmount, // MAY be <= 0 — that is a valid bookkeeping record
+        clawbackAmount: preview.clawbackAmount + preview.preSettlementReturnDeduction,
+        netAmount: preview.netAmount, // 9F-42B — floored at 0; a residual goes to carryForwardAmount
+        carryForwardAmount: preview.carryForwardAmount,
         orderCount: positiveIds.length,
-        clawbackCount: clawbackIds.length,
+        clawbackCount: clawbackIds.length + preSettlementReturnCount,
         paidAt: input.paidAt,
         paymentReference: input.paymentReference?.trim() || null,
         paymentMethod: input.paymentMethod?.trim() || null,
@@ -195,8 +210,9 @@ export async function recordSettlement(
       ok: true,
       settlementId: settlement.id,
       netAmount: preview.netAmount,
+      carryForwardAmount: preview.carryForwardAmount,
       orderCount: positiveIds.length,
-      clawbackCount: clawbackIds.length,
+      clawbackCount: clawbackIds.length + preSettlementReturnCount,
     };
   };
 

@@ -54,6 +54,7 @@ async function mkOrder(
     deliveredDaysAgo?: number;
     total?: number;
     commissionAmount?: number;
+    paymentStatus?: string;
     suffix: string;
   },
 ) {
@@ -78,6 +79,8 @@ async function mkOrder(
       email: "buyer@example.test",
       phone: "+639000000000",
       status: opts.parentStatus ?? "PROCESSING",
+      // 9F-42B — settlement eligibility now needs paymentStatus PAID.
+      paymentStatus: opts.paymentStatus ?? "UNPAID",
       subtotal: 1000,
       grandTotal: 1150,
       shippingFee: 150,
@@ -235,7 +238,7 @@ async function dbTests() {
       ok("F · parent Order.status still exactly what the admin set (cascade never writes Order)", (await tx.order.findUnique({ where: { id: F.orderId }, select: { status: true } }))?.status === "DELIVERED");
 
       // ── I · settlement eligibility recognised once both planes DELIVERED ──
-      const I = await mkOrder(tx, { soStatus: "SHIPPED", parentStatus: "DELIVERED", withShipment: true, shipmentStatus: "SHIPPED", deliveredDaysAgo: 60, total: 2000, commissionAmount: 300, suffix: sfx + "I" });
+      const I = await mkOrder(tx, { soStatus: "SHIPPED", parentStatus: "DELIVERED", withShipment: true, shipmentStatus: "SHIPPED", deliveredDaysAgo: 60, total: 2000, commissionAmount: 300, paymentStatus: "PAID", suffix: sfx + "I" });
       const preI = await getSellerSettlementPreview(I.sellerId, tx);
       ok("I · BEFORE cascade — SellerOrder SHIPPED ⇒ NOT settlement-eligible", preI.eligibleOrders.length === 0);
       await cascadeSellerOrderFromParent({ orderId: I.orderId, orderNumber: I.orderNumber, parentStatus: "DELIVERED", actorUserId: "admin" }, tx);

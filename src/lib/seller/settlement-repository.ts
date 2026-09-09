@@ -21,6 +21,7 @@ export type SellerSettlementListRow = {
   commissionAmount: number;
   clawbackAmount: number;
   netAmount: number;
+  carryForwardAmount: number;
   orderCount: number;
   clawbackCount: number;
   paymentReference: string | null;
@@ -41,13 +42,14 @@ export async function listSellerSettlements(
       commissionAmount: true,
       clawbackAmount: true,
       netAmount: true,
+      carryForwardAmount: true,
       orderCount: true,
       clawbackCount: true,
       paymentReference: true,
       paymentMethod: true,
     },
   });
-  return rows.map((s) => ({ ...s, paidAt: s.paidAt.toISOString() }));
+  return rows.map((s) => ({ ...s, carryForwardAmount: s.carryForwardAmount ?? 0, paidAt: s.paidAt.toISOString() }));
 }
 
 export async function getSellerSettlement(
@@ -65,6 +67,7 @@ export async function getSellerSettlement(
       commissionAmount: true,
       clawbackAmount: true,
       netAmount: true,
+      carryForwardAmount: true,
       orderCount: true,
       clawbackCount: true,
       paymentReference: true,
@@ -84,7 +87,7 @@ export async function getSellerSettlement(
     },
   });
   if (!s) return null;
-  return { ...s, paidAt: s.paidAt.toISOString() };
+  return { ...s, carryForwardAmount: s.carryForwardAmount ?? 0, paidAt: s.paidAt.toISOString() };
 }
 
 /** The live "pending this cycle" figure for the seller's own statement page. */

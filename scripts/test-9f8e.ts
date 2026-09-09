@@ -63,6 +63,7 @@ async function seedDeliveredSellerOrder(
   opts: {
     deliveredDaysAgo?: number;
     orderStatus?: string;
+    paymentStatus?: string;
     sellerOrderStatus?: string;
     total?: number;
     commissionAmount?: number;
@@ -78,6 +79,8 @@ async function seedDeliveredSellerOrder(
       orderNumber: `AX-T9F8E-${suffix}-${Math.random().toString(36).slice(2, 6)}`,
       email: "buyer@example.test",
       status: opts.orderStatus ?? "DELIVERED",
+      // 9F-42B — settlement eligibility now requires paymentStatus = "PAID".
+      paymentStatus: opts.paymentStatus ?? "PAID",
       subtotal: total,
       grandTotal: total,
       deliveredAt,
@@ -170,7 +173,10 @@ function staticTests() {
   ok("record · amounts always recomputed server-side (never from the form)", /getSellerSettlementPreview\(input\.sellerId, tx\)/.test(adminRepo));
   ok("record · positive orders stamped under a settlementId: null guard, abort on count mismatch", /where: \{ id: \{ in: positiveIds \}, settlementId: null, settlementStatus: "PENDING_CAPTURE" \}[\s\S]{0,200}if \(res\.count !== positiveIds\.length\) \{\s*throw new SettlementConflict/.test(adminRepo));
   ok("record · clawback orders reconciled: settlementClawbackAmount -> 0, re-pointed to the batch", /settlementClawbackAmount: \{ gt: 0 \} \}[\s\S]{0,200}data: \{ settlementId: settlement\.id, settlementClawbackAmount: 0 \}/.test(adminRepo));
-  ok("record · netAmount MAY be <= 0 (no floor)", /netAmount: preview\.netAmount, \/\/ MAY be <= 0/.test(adminRepo));
+  ok("record · netAmount floored at 0, residual → carryForwardAmount (9F-42B)", /netAmount: preview\.netAmount, \/\/ 9F-42B/.test(adminRepo) && /carryForwardAmount: preview\.carryForwardAmount,/.test(adminRepo));
+  ok("record · pre-settlement returned value folded into the row's clawback aggregate (9F-42B)", /clawbackAmount: preview\.clawbackAmount \+ preview\.preSettlementReturnDeduction,/.test(adminRepo));
+  ok("eligibility · settlement now requires parent Order.paymentStatus = PAID (9F-42B — P1-A)", /paymentStatus: "PAID",/.test(settlement));
+  ok("eligibility · returned-before-settlement value deducted from receivable (9F-42B — P1-B/C)", /returnedValueDeducted/.test(settlement) && /RETURN_VALUE_STATUSES/.test(settlement) && /sellerReceivable\(so\) - returnedValueDeducted/.test(settlement));
 
   // Clawback in the 3 paths
   // 9F-20 extracted the increment into `const delta = …` so the same value can be recorded on the clawback audit — the formula is unchanged.
@@ -291,15 +297,20 @@ async function dbTests() {
         preview = await getSellerSettlementPreview(A.seller.id, tx);
         ok("7 · the clawback shows as outstanding in the next preview", preview.outstandingClawbacks.some((c) => c.id === settledId.id && c.clawbackAmount === delta));
 
-        // ── 9 — negative-net batch ─────────────────────────────────────
-        ok("9 · with only a clawback outstanding the preview net is negative", preview.netAmount === -delta && preview.eligibleOrders.length === 0);
+        // ── 9 — clawback > receivable → net floored at 0, residual carried (9F-42B — P2-B) ──
+        ok("9 · with only a clawback outstanding the preview net is 0 and the residual is carried", preview.netAmount === 0 && preview.carryForwardAmount === delta && preview.eligibleOrders.length === 0, JSON.stringify(preview));
         const negBatch = await recordSettlement({ sellerId: A.seller.id, paidAt: new Date(), note: "clawback sweep" }, tx);
-        ok("9 · recordSettlement accepts a negative-net bookkeeping batch", negBatch.ok === true && negBatch.netAmount === -delta, JSON.stringify(negBatch));
+        ok("9 · recordSettlement records the sweep batch (net 0, residual carried)", negBatch.ok === true && negBatch.netAmount === 0 && negBatch.carryForwardAmount === delta, JSON.stringify(negBatch));
         if (negBatch.ok) {
           const negRow = await tx.sellerSettlement.findUniqueOrThrow({ where: { id: negBatch.settlementId } });
-          ok("9 · the batch row stores netAmount < 0 and clawbackAmount > 0", negRow.netAmount === -delta && negRow.clawbackAmount === delta && negRow.clawbackCount === 1);
+          ok("9 · the batch row stores netAmount 0, carryForwardAmount = residual, clawbackAmount > 0", negRow.netAmount === 0 && negRow.carryForwardAmount === delta && negRow.clawbackAmount === delta && negRow.clawbackCount === 1);
           const swept = await tx.sellerOrder.findUniqueOrThrow({ where: { id: settledId.id }, select: { settlementClawbackAmount: true, settlementId: true } });
           ok("9 · the reconciled clawback is zeroed and re-pointed at the sweep batch", swept.settlementClawbackAmount === 0 && swept.settlementId === negBatch.settlementId);
+          // the residual is now the seller's carry-forward-prior; with nothing new it just sits there
+          const afterSweep = await getSellerSettlementPreview(A.seller.id, tx);
+          ok("9 · residual persists as carryForwardPrior; nothing new → NOTHING_TO_SETTLE", afterSweep.carryForwardPrior === delta && afterSweep.netAmount === 0);
+          const noop = await recordSettlement({ sellerId: A.seller.id, paidAt: new Date() }, tx);
+          ok("9 · a carry-forward-only settlement is refused (NOTHING_TO_SETTLE)", noop.ok === false && noop.code === "NOTHING_TO_SETTLE");
         }
       }
 

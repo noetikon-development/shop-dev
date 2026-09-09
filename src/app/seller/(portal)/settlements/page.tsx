@@ -31,8 +31,9 @@ export default async function SellerSettlementsPage() {
     },
     { key: "gross", header: "Gross", align: "right", cell: (r) => pesos(r.grossReceivable) },
     { key: "commission", header: "Commission", align: "right", cell: (r) => `−${pesos(r.commissionAmount)}` },
-    { key: "clawback", header: "Clawback", align: "right", cell: (r) => (r.clawbackAmount ? `−${pesos(r.clawbackAmount)}` : "—") },
+    { key: "clawback", header: "Returns & clawbacks", align: "right", cell: (r) => (r.clawbackAmount ? `−${pesos(r.clawbackAmount)}` : "—") },
     { key: "net", header: "Net paid", align: "right", cell: (r) => <span className="font-medium tabular-nums">{pesos(r.netAmount)}</span> },
+    { key: "carry", header: "Carried forward", align: "right", cell: (r) => (r.carryForwardAmount ? `${pesos(r.carryForwardAmount)}` : "—") },
     { key: "reference", header: "Reference", cell: (r) => r.paymentReference ?? "—" },
   ];
 
@@ -47,11 +48,15 @@ export default async function SellerSettlementsPage() {
         <StatCard
           label="Pending this cycle"
           value={pesos(pending.netAmount)}
-          hint={`${pending.eligibleOrders.length} eligible order${pending.eligibleOrders.length === 1 ? "" : "s"}${pending.clawbackAmount ? ` · less ${pesos(pending.clawbackAmount)} in clawbacks` : ""} · not yet paid`}
+          hint={`${pending.eligibleOrders.length} eligible order${pending.eligibleOrders.length === 1 ? "" : "s"}${
+            pending.preSettlementReturnDeduction ? ` · less ${pesos(pending.preSettlementReturnDeduction)} returned` : ""
+          }${pending.clawbackAmount ? ` · less ${pesos(pending.clawbackAmount)} in clawbacks` : ""}${
+            pending.carryForwardPrior ? ` · less ${pesos(pending.carryForwardPrior)} carried over` : ""
+          } · not yet paid`}
         />
       </div>
 
-      {pending.outstandingClawbacks.length > 0 && (
+      {(pending.outstandingClawbacks.length > 0 || pending.carryForwardPrior > 0) && (
         <Card className="mb-6 border-clay/40">
           <h2 className="mb-2 text-sm font-semibold text-clay">Outstanding clawbacks</h2>
           <p className="mb-2 text-xs text-ink-faint">
@@ -65,6 +70,12 @@ export default async function SellerSettlementsPage() {
                 <span className="tabular-nums text-clay">−{pesos(c.clawbackAmount)}</span>
               </li>
             ))}
+            {pending.carryForwardPrior > 0 && (
+              <li className="flex justify-between border-t border-line pt-1">
+                <span className="text-ink-soft">Balance carried over from your last settlement</span>
+                <span className="tabular-nums text-clay">−{pesos(pending.carryForwardPrior)}</span>
+              </li>
+            )}
           </ul>
         </Card>
       )}

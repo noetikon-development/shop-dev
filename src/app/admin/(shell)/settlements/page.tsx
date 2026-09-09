@@ -117,6 +117,11 @@ export default async function AdminSettlementsPage({
                           <Link href={`/admin/seller-orders/${o.id}`} className="text-ink hover:underline">
                             {o.orderNumber}
                           </Link>
+                          {o.returnedValueDeducted > 0 && (
+                            <span className="block text-[10px] text-clay">
+                              less {pesos(o.returnedValueDeducted)} returned before settlement
+                            </span>
+                          )}
                         </td>
                         <td className="px-4 py-2 text-ink-soft">Receivable</td>
                         <td className="px-4 py-2 text-right tabular-nums text-ink-soft">{pesos(o.total)}</td>
@@ -146,9 +151,24 @@ export default async function AdminSettlementsPage({
             <dl className="space-y-1.5 border-t border-line px-5 py-4 text-sm">
               <div className="flex justify-between"><dt className="text-ink-faint">Gross receivable</dt><dd className="tabular-nums">{pesos(preview.grossReceivable)}</dd></div>
               <div className="flex justify-between"><dt className="text-ink-faint">Commission</dt><dd className="tabular-nums">−{pesos(preview.commissionAmount)}</dd></div>
+              {preview.preSettlementReturnDeduction > 0 && (
+                <div className="flex justify-between"><dt className="text-ink-faint">Returned before settlement</dt><dd className="tabular-nums">−{pesos(preview.preSettlementReturnDeduction)}</dd></div>
+              )}
               <div className="flex justify-between"><dt className="text-ink-faint">Outstanding clawbacks</dt><dd className="tabular-nums">−{pesos(preview.clawbackAmount)}</dd></div>
+              {preview.carryForwardPrior > 0 && (
+                <div className="flex justify-between"><dt className="text-ink-faint">Balance carried over</dt><dd className="tabular-nums">−{pesos(preview.carryForwardPrior)}</dd></div>
+              )}
               <div className="flex justify-between border-t border-line pt-1.5 font-medium"><dt>Net to pay</dt><dd className="tabular-nums">{pesos(preview.netAmount)}</dd></div>
+              {preview.carryForwardAmount > 0 && (
+                <div className="flex justify-between text-clay"><dt>Carries forward to next settlement</dt><dd className="tabular-nums">{pesos(preview.carryForwardAmount)}</dd></div>
+              )}
             </dl>
+            {preview.carryForwardAmount > 0 && (
+              <p className="border-t border-line px-5 pb-4 text-xs text-ink-faint">
+                Clawbacks and the carried-over balance exceed the receivable. Net is floored at zero — the remaining{" "}
+                {pesos(preview.carryForwardAmount)} carries to this seller&apos;s next settlement. No negative payout is recorded.
+              </p>
+            )}
           </Card>
 
           <Card>

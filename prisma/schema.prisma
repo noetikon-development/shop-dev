@@ -1519,10 +1519,18 @@ model SellerSettlement {
   // SellerOrder.commissionAmount (merchandise + shipping, less commission).
   grossReceivable  Int @default(0) // Σ SellerOrder.total of the orders settled here
   commissionAmount Int @default(0) // Σ SellerOrder.commissionAmount of those orders
-  clawbackAmount   Int @default(0) // Σ outstanding clawback deltas reconciled here (>= 0)
-  netAmount        Int @default(0) // grossReceivable - commissionAmount - clawbackAmount
+  clawbackAmount   Int @default(0) // Σ outstanding post-settlement clawback deltas reconciled here + Σ pre-settlement returned-merchandise value deducted from the eligible orders in this batch (9F-42B) — both are "money for goods that came back", disjoint sets, never double-counted (>= 0)
+  netAmount        Int @default(0) // max(0, grossReceivable - commissionAmount - clawbackAmount - carryForwardPrior) — floored at 0 since 9F-42B; a residual goes to carryForwardAmount instead of a negative net
   orderCount       Int @default(0)
   clawbackCount    Int @default(0)
+  // 9F-42B — when clawbacks + a prior carried-forward balance exceed this
+  // batch's receivable, the unpaid residual is carried here (>= 0) instead of
+  // being written as a negative net or silently forgiven. The NEXT settlement
+  // for this seller subtracts the most-recent row's carryForwardAmount before
+  // computing its own net, and persists any remaining residual as its own
+  // carryForwardAmount. NULL on every pre-9F-42B row (read as 0). Historical
+  // rows are never rewritten.
+  carryForwardAmount Int?
 
   // Admin-entered bookkeeping — mirrors ReturnRequest.refund* fields.
   paidAt           DateTime

@@ -62,11 +62,13 @@ export async function recordSettlementAction(
     targetId: res.settlementId,
     summary:
       `${admin.user.email} recorded a bookkeeping settlement for seller ${parsed.data.sellerId} ` +
-      `(net ${res.netAmount} centavos across ${res.orderCount} order(s), ${res.clawbackCount} clawback(s))`,
+      `(net ${res.netAmount} centavos across ${res.orderCount} order(s), ${res.clawbackCount} return(s)/clawback(s)` +
+      `${res.carryForwardAmount > 0 ? `, ${res.carryForwardAmount} centavos carried forward` : ""})`,
     meta: {
       sellerId: parsed.data.sellerId,
       settlementId: res.settlementId,
       netAmount: res.netAmount,
+      carryForwardAmount: res.carryForwardAmount,
       orderCount: res.orderCount,
       clawbackCount: res.clawbackCount,
       paidAt: paidAt.toISOString(),

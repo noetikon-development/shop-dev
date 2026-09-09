@@ -110,8 +110,10 @@ function staticTests() {
   ok("template · no customer PII fields referenced in the seller templates", !/(customerName|customerEmail|customerPhone|billingAddress|grandTotal|order\.email)/i.test(tpl));
 
   ok("formula · settlement.ts sellerReceivable unchanged (total - commissionAmount)", /return so\.total - so\.commissionAmount;/.test(settlementCore));
-  ok("formula · netAmount = receivableSubtotal - clawbackAmount unchanged", /netAmount: receivableSubtotal - clawbackAmount,/.test(settlementCore));
-  ok("formula · no 9F-20 marker in the settlement core (formula untouched)", !/9F-20/.test(settlementCore) && !/9F-20/.test(read("src/lib/admin/settlements.ts")));
+  // 9F-42B floored the net and added carry-forward + pre-settlement return deduction.
+  ok("formula · netAmount = max(0, receivableSubtotal - clawbackAmount - carryForwardPrior) (9F-42B)", /const netRaw = receivableSubtotal - clawbackAmount - carryForwardPrior;/.test(settlementCore) && /netAmount: Math\.max\(0, netRaw\),/.test(settlementCore));
+  ok("formula · receivableSubtotal nets the pre-settlement returned value (9F-42B)", /grossReceivable - commissionAmount - preSettlementReturnDeduction/.test(settlementCore));
+  ok("formula · no 9F-20 marker in the settlement core (9F-20 formula untouched by that phase)", !/9F-20/.test(settlementCore) && !/9F-20/.test(read("src/lib/admin/settlements.ts")));
 
   ok("admin filter list + label include seller_settlement_recorded", /"seller_settlement_recorded",/.test(logsRead) && /seller_settlement_recorded: "Settlement recorded",/.test(table));
 }
@@ -136,13 +138,15 @@ function renderTests() {
   ok("A · deep-link uses the settlement id; id not in prose", s.html.includes("/seller/settlements/cmSETTLE123") && !s.text.replace("/seller/settlements/cmSETTLE123", "").includes("cmSETTLE123"));
   ok("A · no customer PII / order grand total anywhere", !/@t\.test|@example|\+639|grandTotal/i.test(s.html + s.text));
 
+  // 9F-42B — net is floored at 0; a residual becomes carryForwardAmount.
   const sNeg = renderSellerSettlementRecorded({
     brand: "Axiaro", siteUrl: "https://axiaro.shop", sellerName: "Style Avenue",
     settlementUrl: "https://axiaro.shop/seller/settlements/x", paidAt: null,
-    grossReceivable: 10000, commissionAmount: 1500, clawbackAmount: 20000, netAmount: 10000 - 1500 - 20000,
-    orderCount: 1, clawbackCount: 2, paymentMethod: null, paymentReference: null, note: null,
+    grossReceivable: 10000, commissionAmount: 1500, clawbackAmount: 18500, netAmount: 0,
+    carryForwardAmount: 10000, orderCount: 1, clawbackCount: 2, paymentMethod: null, paymentReference: null, note: null,
   });
-  ok("A · net <= 0 is a valid record with an explanation, no payment block", /zero or negative/.test(sNeg.html) && /No external payment details/.test(sNeg.html));
+  ok("A · net 0 + carry-forward is a valid record with an explanation, no payment block", /Nothing is owed to you this cycle/.test(sNeg.html) && /deducted from your next settlement/.test(sNeg.html) && /No external payment details/.test(sNeg.html));
+  ok("A · carry-forward wording never implies money was taken back", !/taken back|withdrawn from your/i.test(sNeg.html));
 
   // clawback lines
   const rr = renderSellerReturnReceived({

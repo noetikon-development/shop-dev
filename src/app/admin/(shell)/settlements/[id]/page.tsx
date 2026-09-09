@@ -82,12 +82,18 @@ export default async function AdminSettlementDetailPage({ params }: PageProps<"/
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between"><dt className="text-ink-faint">Gross receivable</dt><dd className="tabular-nums">{pesos(s.grossReceivable)}</dd></div>
               <div className="flex justify-between"><dt className="text-ink-faint">Commission</dt><dd className="tabular-nums">−{pesos(s.commissionAmount)}</dd></div>
-              <div className="flex justify-between"><dt className="text-ink-faint">Clawbacks reconciled</dt><dd className="tabular-nums">−{pesos(s.clawbackAmount)}</dd></div>
+              <div className="flex justify-between"><dt className="text-ink-faint">Returns &amp; clawbacks</dt><dd className="tabular-nums">−{pesos(s.clawbackAmount)}</dd></div>
               <div className="flex justify-between border-t border-line pt-2 font-medium"><dt>Net paid</dt><dd className="tabular-nums">{pesos(s.netAmount)}</dd></div>
+              {(s.carryForwardAmount ?? 0) > 0 && (
+                <div className="flex justify-between text-clay"><dt>Carried forward to next settlement</dt><dd className="tabular-nums">{pesos(s.carryForwardAmount ?? 0)}</dd></div>
+              )}
             </dl>
             <p className="mt-3 text-xs text-ink-faint">
-              {s.orderCount} order{s.orderCount === 1 ? "" : "s"} settled · {s.clawbackCount} clawback{s.clawbackCount === 1 ? "" : "s"} reconciled.
+              {s.orderCount} order{s.orderCount === 1 ? "" : "s"} settled · {s.clawbackCount} return{s.clawbackCount === 1 ? "" : "s"}/clawback{s.clawbackCount === 1 ? "" : "s"} applied.
               Bookkeeping record only — no automatic transfer.
+              {(s.carryForwardAmount ?? 0) > 0
+                ? ` Net floored at zero; ${pesos(s.carryForwardAmount ?? 0)} carries to the seller's next settlement.`
+                : ""}
             </p>
           </Card>
 

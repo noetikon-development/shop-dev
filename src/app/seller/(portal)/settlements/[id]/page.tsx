@@ -67,9 +67,23 @@ export default async function SellerSettlementDetailPage({ params }: PageProps<"
           <dl className="space-y-1.5 border-t border-line px-5 py-4 text-sm">
             <div className="flex justify-between"><dt className="text-ink-faint">Gross receivable</dt><dd className="tabular-nums">{pesos(s.grossReceivable)}</dd></div>
             <div className="flex justify-between"><dt className="text-ink-faint">Commission</dt><dd className="tabular-nums">−{pesos(s.commissionAmount)}</dd></div>
-            <div className="flex justify-between"><dt className="text-ink-faint">Clawbacks</dt><dd className="tabular-nums">−{pesos(s.clawbackAmount)}</dd></div>
+            {s.clawbackAmount > 0 && (
+              <div className="flex justify-between"><dt className="text-ink-faint">Returns &amp; clawbacks</dt><dd className="tabular-nums">−{pesos(s.clawbackAmount)}</dd></div>
+            )}
             <div className="flex justify-between border-t border-line pt-1.5 font-medium"><dt>Net paid to you</dt><dd className="tabular-nums">{pesos(s.netAmount)}</dd></div>
+            {s.carryForwardAmount > 0 && (
+              <div className="flex justify-between text-clay">
+                <dt>Carried forward to your next settlement</dt>
+                <dd className="tabular-nums">{pesos(s.carryForwardAmount)}</dd>
+              </div>
+            )}
           </dl>
+          {s.carryForwardAmount > 0 && (
+            <p className="border-t border-line px-5 py-3 text-xs text-ink-faint">
+              Returns and clawbacks this cycle came to more than the receivable. {pesos(s.carryForwardAmount)} will be
+              deducted from your next settlement — no money is being taken back.
+            </p>
+          )}
         </Card>
 
         <Card>

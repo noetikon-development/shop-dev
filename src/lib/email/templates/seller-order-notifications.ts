@@ -416,11 +416,21 @@ export function renderSellerSettlementRecorded(d: {
   netAmount: number;
   orderCount: number;
   clawbackCount: number;
+  /** 9F-42B — residual this settlement carries to the seller's next one (>= 0). Optional (pre-9F-42B rows: 0). */
+  carryForwardAmount?: number;
   paymentMethod: string | null;
   paymentReference: string | null;
   note: string | null;
 }) {
   const subject = `Settlement recorded — ${peso(d.netAmount)}`;
+  const carryOut = d.carryForwardAmount ?? 0;
+  // 9F-42B — the balance carried IN from the seller's previous settlement,
+  // derived from the row so no extra column is needed:
+  //   netRaw = gross - commission - clawbackAmount - carryIn
+  //   netAmount = max(0, netRaw)   carryOut = max(0, -netRaw)
+  const carryIn = Math.max(0, d.grossReceivable - d.commissionAmount - d.clawbackAmount - d.netAmount + carryOut);
+  // "Returns & clawbacks" — the row's clawbackAmount now also covers merchandise
+  // returned before this batch was settled (9F-42B).
   const receivableSubtotal = d.grossReceivable - d.commissionAmount;
   const money =
     kvRow("Orders settled", String(d.orderCount)) +
@@ -428,9 +438,13 @@ export function renderSellerSettlementRecorded(d: {
     kvRow("Commission", `− ${peso(d.commissionAmount)}`) +
     kvRow("Receivable subtotal", peso(receivableSubtotal)) +
     (d.clawbackCount > 0
-      ? kvRow(`Clawbacks (${d.clawbackCount})`, `− ${peso(d.clawbackAmount)}`)
+      ? kvRow(`Returns & clawbacks (${d.clawbackCount})`, `− ${peso(d.clawbackAmount)}`)
       : "") +
-    kvRow("Net settlement", peso(d.netAmount), { strong: true, last: true });
+    (carryIn > 0 ? kvRow("Balance carried over from last settlement", `− ${peso(carryIn)}`) : "") +
+    kvRow("Net settlement", peso(d.netAmount), { strong: true, last: carryOut === 0 }) +
+    (carryOut > 0
+      ? kvRow("Carried forward to your next settlement", peso(carryOut), { last: true })
+      : "");
   const paidRows =
     (d.paidAt ? kvRow("Payment date", d.paidAt) : "") +
     (d.paymentMethod ? kvRow("Paid via", d.paymentMethod) : "") +
@@ -441,7 +455,17 @@ export function renderSellerSettlementRecorded(d: {
     ${infoBox(money)}
     ${paidRows ? `${paragraph("Payment recorded by Axiaro (made outside the platform — bank transfer, GCash or cash):")}${infoBox(paidRows)}` : paragraph("No external payment details were entered with this record.")}
     ${d.note ? paragraph(`Note from Axiaro: ${d.note}`) : ""}
-    ${d.netAmount <= 0 ? paragraph("The net amount for this period is zero or negative because outstanding clawbacks met or exceeded the receivable. Nothing is owed to you this cycle.") : ""}
+    ${
+      d.netAmount <= 0
+        ? paragraph(
+            carryOut > 0
+              ? `Nothing is owed to you this cycle — returns and clawbacks exceeded the receivable. The remaining ${peso(carryOut)} will be deducted from your next settlement. No money has been withdrawn — this is a bookkeeping adjustment only.`
+              : "The net amount for this period is zero because returns and clawbacks met the receivable. Nothing is owed to you this cycle.",
+          )
+        : carryOut > 0
+          ? paragraph(`${peso(carryOut)} could not be covered by this settlement and will be deducted from your next one.`)
+          : ""
+    }
     ${button("View this settlement", d.settlementUrl)}
   `;
   const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
@@ -457,8 +481,10 @@ export function renderSellerSettlementRecorded(d: {
       `Gross receivable: ${peso(d.grossReceivable)}`,
       `Commission: -${peso(d.commissionAmount)}`,
       `Receivable subtotal: ${peso(receivableSubtotal)}`,
-      ...(d.clawbackCount > 0 ? [`Clawbacks (${d.clawbackCount}): -${peso(d.clawbackAmount)}`] : []),
+      ...(d.clawbackCount > 0 ? [`Returns & clawbacks (${d.clawbackCount}): -${peso(d.clawbackAmount)}`] : []),
+      ...(carryIn > 0 ? [`Balance carried over from last settlement: -${peso(carryIn)}`] : []),
       `Net settlement: ${peso(d.netAmount)}`,
+      ...(carryOut > 0 ? [`Carried forward to your next settlement: ${peso(carryOut)}`] : []),
       ``,
       ...(paidRows
         ? [

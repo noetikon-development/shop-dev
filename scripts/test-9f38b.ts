@@ -376,7 +376,7 @@ async function dbTests() {
         sellerReceivable(C1.so) === sellerReceivable(C2.so) && sellerReceivable(C1.so) === 306000);
       // drive both planes to DELIVERED, 60d old, and check the preview treats them identically
       for (const x of [C1, C2]) {
-        await tx.order.update({ where: { id: x.order.id }, data: { status: "DELIVERED", placedAt: new Date(Date.now() - 60 * 86400_000), deliveredAt: new Date(Date.now() - 60 * 86400_000) } });
+        await tx.order.update({ where: { id: x.order.id }, data: { status: "DELIVERED", paymentStatus: "PAID", placedAt: new Date(Date.now() - 60 * 86400_000), deliveredAt: new Date(Date.now() - 60 * 86400_000) } });
         await tx.sellerOrder.update({ where: { id: x.so.id }, data: { status: "DELIVERED" } });
       }
       const preview = await getSellerSettlementPreview(tp.id, tx);

@@ -291,7 +291,7 @@ async function dbTests() {
         select: { id: true, commissionRate: true, commissionAmount: true, total: true },
       });
       await tx.orderItem.create({ data: { orderId: order.id, sellerOrderId: so.id, sellerId: seller.id, commissionRate: bps, productId: product.id, name: "I", unitPrice: subtotal, quantity: 1, lineTotal: subtotal } });
-      await tx.order.update({ where: { id: order.id }, data: { status: "DELIVERED" } });
+      await tx.order.update({ where: { id: order.id }, data: { status: "DELIVERED", paymentStatus: "PAID" } });
 
       // move the CMS default
       await tx.storeSetting.update({ where: { key: MARKETPLACE_DEFAULT_COMMISSION_KEY }, data: { value: "1200" } });
