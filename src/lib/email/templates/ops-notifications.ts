@@ -115,6 +115,65 @@ export function renderSellerOfferPublishedOps(d: {
 }
 
 /**
+ * Ops escalation — a THIRD_PARTY SellerOrder has sat PENDING_PAYMENT (the seller
+ * has not accepted it) past the SLA escalation threshold (9F-32A). The customer's
+ * order is confirmed and stuck. Ops should chase the seller or step in. Order /
+ * seller metadata only — no customer name, address, phone or email.
+ */
+export function renderSellerOrderAcceptanceOverdueOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  sellerName: string;
+  orderNumber: string;
+  sellerOrderStatus: string;
+  waitedLabel: string;
+  thresholdLabel: string;
+  itemCount: number;
+  placedAt: Date;
+}) {
+  const placed = `${d.placedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Seller hasn't accepted order ${d.orderNumber} — ${d.sellerName} (${d.waitedLabel})`;
+  const rows =
+    kvRow("Seller", d.sellerName) +
+    kvRow("Order", d.orderNumber) +
+    kvRow("SellerOrder status", d.sellerOrderStatus) +
+    kvRow("Waiting", d.waitedLabel) +
+    kvRow("Escalation threshold", d.thresholdLabel) +
+    kvRow("Items", String(d.itemCount)) +
+    kvRow("Placed", placed, { last: true });
+  const body = `
+    ${heading("A seller hasn't accepted a confirmed order")}
+    ${paragraph(`Order ${d.orderNumber} has been waiting ${d.waitedLabel} for ${d.sellerName} to accept it — past the ${d.thresholdLabel} escalation threshold. The customer's order is confirmed and will not progress until the seller accepts (or Axiaro cancels) it.`)}
+    ${infoBox(rows)}
+    ${paragraph("Chase the seller, or use the Admin order view to cancel it if they can't be reached. The customer has NOT been emailed about the delay.")}
+    ${button("Open the order", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A seller hasn't accepted a confirmed order",
+      ``,
+      `Order ${d.orderNumber} has been waiting ${d.waitedLabel} for ${d.sellerName} to accept it — past the ${d.thresholdLabel} escalation threshold. The customer's order is confirmed and will not progress until the seller accepts (or Axiaro cancels) it.`,
+      ``,
+      `Seller: ${d.sellerName}`,
+      `Order: ${d.orderNumber}`,
+      `SellerOrder status: ${d.sellerOrderStatus}`,
+      `Waiting: ${d.waitedLabel}`,
+      `Escalation threshold: ${d.thresholdLabel}`,
+      `Items: ${d.itemCount}`,
+      `Placed: ${placed}`,
+      ``,
+      "Chase the seller, or use the Admin order view to cancel it if they can't be reached. The customer has NOT been emailed about the delay.",
+      ``,
+      `Open the order: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
+
+/**
  * Ops notice — a THIRD_PARTY seller declined / cancelled a customer's order they
  * can't fulfil (9F-30B). The customer's whole order was cancelled and their
  * stock restored; the customer has already been emailed. Ops needs to know so

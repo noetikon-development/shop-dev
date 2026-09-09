@@ -44,15 +44,22 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
+  renderSellerOrderAcceptanceReminder,
   renderSellerReturnRequested,
   renderSellerReturnReceived,
   renderSellerOrderReceived,
   renderSellerSettlementRecorded,
   type ClawbackNote,
 } from "@/lib/email/templates/seller-order-notifications";
+import {
+  SELLER_ORDER_ACCEPTANCE_SLA,
+  acceptanceAgeMs,
+  humanizeWait,
+  thresholdLabel,
+} from "@/lib/marketplace/seller-order-sla";
 import { returnReasonLabel, returnStatusLabel } from "@/lib/returns/status";
 import { getReturnsConfig } from "@/lib/returns";
 import { createHash } from "node:crypto";
@@ -835,6 +842,177 @@ export async function sendSellerOrderReceived(
     );
   } catch (err) {
     console.error("[email] sendSellerOrderReceived", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 9F-32A — 3P seller-order acceptance SLA notifications.
+//
+// A THIRD_PARTY SellerOrder auto-confirmed at checkout (parent Order PROCESSING)
+// stays PENDING_PAYMENT until the seller clicks "Accept". These chase that:
+//   - `sendSellerOrderAcceptanceReminder`      → the SELLER, once past 4h
+//   - `sendSellerOrderAcceptanceOverdueOps`    → Axiaro OPS, once past 24h
+//
+// Both RE-READ the SellerOrder and bail (SKIPPED) unless it is STILL a
+// THIRD_PARTY row, STILL PENDING_PAYMENT, on a parent Order STILL in PROCESSING,
+// and STILL past the relevant threshold — so a seller who accepts / declines
+// between the job's scan and the email being sent never gets chased. Their
+// idempotency keys (`SELLER_ORDER_ACCEPTANCE_REMINDER:<id>` /
+// `SELLER_ORDER_ACCEPTANCE_OVERDUE:<id>`) mean at most one of each per SellerOrder.
+// FIRST_PARTY SellerOrders are skipped.
+// ---------------------------------------------------------------------------
+
+type SlaLoadResult =
+  | { ok: true; so: { id: string; status: string; sellerId: string; createdAt: Date; sellerType: string; itemCount: number; orderNumber: string; orderId: string; placedAt: Date }; ageMs: number }
+  | { ok: false; result: DispatchResult };
+
+/** Shared re-read + guard for both SLA senders. `now` defaults to real time. */
+async function loadAcceptanceSlaSubject(
+  db: Prisma.TransactionClient | typeof prisma,
+  sellerOrderId: string,
+  now: Date,
+): Promise<SlaLoadResult> {
+  const so = await db.sellerOrder.findUnique({
+    where: { id: sellerOrderId },
+    select: {
+      id: true,
+      status: true,
+      sellerType: true,
+      sellerId: true,
+      createdAt: true,
+      _count: { select: { items: true } },
+      order: { select: { id: true, orderNumber: true, status: true, placedAt: true } },
+    },
+  });
+  if (!so) return { ok: false, result: { ok: false, status: "FAILED", error: "seller_order_not_found" } };
+  // State re-check — the seller may have accepted / declined since the scan.
+  if (
+    so.sellerType !== "THIRD_PARTY" ||
+    so.status !== "PENDING_PAYMENT" ||
+    so.order.status !== "PROCESSING"
+  ) {
+    return { ok: false, result: { ok: true, skipped: true, status: "SKIPPED" } };
+  }
+  return {
+    ok: true,
+    so: {
+      id: so.id,
+      status: so.status,
+      sellerId: so.sellerId,
+      sellerType: so.sellerType,
+      createdAt: so.createdAt,
+      itemCount: so._count.items,
+      orderNumber: so.order.orderNumber,
+      orderId: so.order.id,
+      placedAt: so.order.placedAt,
+    },
+    ageMs: acceptanceAgeMs(so.createdAt, now),
+  };
+}
+
+/**
+ * Seller — your customer's order has been waiting for you to accept it.
+ * Key: SELLER_ORDER_ACCEPTANCE_REMINDER:<sellerOrderId> (one per SellerOrder).
+ */
+export async function sendSellerOrderAcceptanceReminder(
+  sellerOrderId: string,
+  opts: SellerLifecycleEmailOpts & { now?: Date } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const now = opts.now ?? new Date();
+    const key = opts.idempotencyKey ?? `SELLER_ORDER_ACCEPTANCE_REMINDER:${sellerOrderId}`;
+    const subj = await loadAcceptanceSlaSubject(db, sellerOrderId, now);
+    if (!subj.ok) return subj.result;
+    if (subj.ageMs < SELLER_ORDER_ACCEPTANCE_SLA.reminderAfterMs) {
+      return { ok: true, skipped: true, status: "SKIPPED" };
+    }
+    const ctx = await loadSellerLifecycleEmailContext(subj.so.sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_order_acceptance_reminder",
+        idempotencyKey: key,
+        subject: `Order ${subj.so.orderNumber} awaiting acceptance — seller notification`,
+        orderId: subj.so.orderId,
+        client: opts.client,
+      });
+
+    return renderAndDispatch(
+      {
+        type: "seller_order_acceptance_reminder",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey: key,
+        orderId: subj.so.orderId,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOrderAcceptanceReminder({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: subj.so.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          orderUrl: `${ctx.siteUrl}/seller/orders/${subj.so.id}`,
+          waitedLabel: humanizeWait(subj.ageMs),
+          itemCount: subj.so.itemCount,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderAcceptanceReminder", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Axiaro Operations — a seller has not accepted a confirmed order past the SLA.
+ * Key: SELLER_ORDER_ACCEPTANCE_OVERDUE:<sellerOrderId> (one per SellerOrder).
+ * The durable audit row (`seller_order.acceptance_overdue`) is written by the
+ * job, not here.
+ */
+export async function sendSellerOrderAcceptanceOverdueOps(
+  sellerOrderId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient; now?: Date } = {},
+): Promise<DispatchResult> {
+  try {
+    const db = opts.client ?? prisma;
+    const now = opts.now ?? new Date();
+    const subj = await loadAcceptanceSlaSubject(db, sellerOrderId, now);
+    if (!subj.ok) return subj.result;
+    if (subj.ageMs < SELLER_ORDER_ACCEPTANCE_SLA.escalateAfterMs) {
+      return { ok: true, skipped: true, status: "SKIPPED" };
+    }
+    const seller = await db.seller.findUnique({ where: { id: subj.so.sellerId }, select: { displayName: true } });
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+
+    return renderAndDispatch(
+      {
+        type: "seller_order_acceptance_overdue_ops",
+        to,
+        from: ORDERS_FROM,
+        orderId: subj.so.orderId,
+        idempotencyKey: `SELLER_ORDER_ACCEPTANCE_OVERDUE:${sellerOrderId}`,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerOrderAcceptanceOverdueOps({
+          brand,
+          siteUrl,
+          adminUrl: `${siteUrl}/admin/orders/${subj.so.orderId}`,
+          sellerName: seller?.displayName ?? "the seller",
+          orderNumber: subj.so.orderNumber,
+          sellerOrderStatus: subj.so.status,
+          waitedLabel: humanizeWait(subj.ageMs),
+          thresholdLabel: thresholdLabel(SELLER_ORDER_ACCEPTANCE_SLA.escalateAfterMs),
+          itemCount: subj.so.itemCount,
+          placedAt: subj.so.placedAt,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderAcceptanceOverdueOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }
@@ -2062,6 +2240,20 @@ export async function retryEmailByLog(
       const sellerId = parts[2];
       if (!returnId || !sellerId) return { ok: false, status: "FAILED", error: "no_return" };
       return sendSellerReturnReceived(returnId, sellerId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    // 9F-32A — key: SELLER_ORDER_ACCEPTANCE_{REMINDER|OVERDUE}:<sellerOrderId>.
+    // The SellerOrder row is re-read; the state guards inside the sender still
+    // apply on retry (a since-accepted order → SKIPPED). `now` defaults to real
+    // time, so a retry re-evaluates the current age.
+    case "seller_order_acceptance_reminder": {
+      const sellerOrderId = log.idempotencyKey.split(":")[1];
+      if (!sellerOrderId) return { ok: false, status: "FAILED", error: "no_seller_order" };
+      return sendSellerOrderAcceptanceReminder(sellerOrderId, { retry: true, idempotencyKey: log.idempotencyKey, client: tx });
+    }
+    case "seller_order_acceptance_overdue_ops": {
+      const sellerOrderId = log.idempotencyKey.split(":")[1];
+      if (!sellerOrderId) return { ok: false, status: "FAILED", error: "no_seller_order" };
+      return sendSellerOrderAcceptanceOverdueOps(sellerOrderId, { retry: true, client: tx });
     }
     // 9F-31B — key: SELLER_RETURN_REQUESTED:<returnId>:<sellerId>. Both ids
     // parsed straight back out of the key; the ReturnRequest + seller rows are

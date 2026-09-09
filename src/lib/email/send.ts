@@ -60,6 +60,10 @@ export type EmailType =
   | "order_received_ops"
   | "seller_order_received"
   | "seller_order_cancelled"
+  // 9F-32A — a THIRD_PARTY SellerOrder has sat PENDING_PAYMENT (unaccepted) past
+  // the SLA. `_reminder` nudges the seller; `_overdue_ops` escalates to Ops.
+  | "seller_order_acceptance_reminder"
+  | "seller_order_acceptance_overdue_ops"
   // 9F-31B (P2) — a customer opened a return covering a THIRD_PARTY seller's line.
   | "seller_return_requested"
   | "seller_return_received"

@@ -205,6 +205,58 @@ export function renderSellerReturnReceived(
 }
 
 /**
+ * 9F-32A — a customer's order has been waiting for this THIRD_PARTY seller to
+ * accept it for longer than the SLA reminder threshold. The order is confirmed
+ * and paid-on-delivery — the customer is expecting it to move. Sent to the
+ * seller (OWNER/MANAGER + notifyEmail). Deliberately does NOT say the order is
+ * being packed; it says the seller must accept or decline it.
+ *
+ * Order/fulfilment metadata only — the customer's name/email/address are never
+ * in this email (they are on the order detail page in the portal).
+ */
+export function renderSellerOrderAcceptanceReminder(
+  d: SellerOrderBase & {
+    orderUrl: string;
+    waitedLabel: string;
+    itemCount: number;
+  },
+) {
+  const subject = `Action needed: accept or decline order ${d.orderNumber}`;
+  const body = `
+    ${heading("An order is waiting for you to accept it")}
+    ${paragraph(`Order ${d.orderNumber} for ${d.sellerName} has been waiting <strong>${d.waitedLabel}</strong> for you to accept it. The customer's order is confirmed and they're expecting it to move — it will not progress until you accept it in the Seller Portal.`)}
+    ${infoBox(
+      kvRow("Order", d.orderNumber) +
+        kvRow("Items", String(d.itemCount)) +
+        kvRow("Waiting", d.waitedLabel) +
+        kvRow("Status", "Awaiting your acceptance", { last: true }),
+    )}
+    ${paragraph("Open the order and either <strong>Accept</strong> it to start preparing, or <strong>Decline</strong> it if you can't fulfil it — declining cancels the customer's order and returns the stock.")}
+    ${button("Open the order", d.orderUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "An order is waiting for you to accept it",
+      ``,
+      `Order ${d.orderNumber} for ${d.sellerName} has been waiting ${d.waitedLabel} for you to accept it. The customer's order is confirmed and expecting it to move — it will not progress until you accept it in the Seller Portal.`,
+      ``,
+      `Order: ${d.orderNumber}`,
+      `Items: ${d.itemCount}`,
+      `Waiting: ${d.waitedLabel}`,
+      `Status: Awaiting your acceptance`,
+      ``,
+      "Open the order and either Accept it to start preparing, or Decline it if you can't fulfil it (declining cancels the customer's order and returns the stock).",
+      ``,
+      `Open the order: ${d.orderUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
  * 9F-31B (P2) — a customer opened a return that covers one or more of this
  * seller's lines. Sent the moment the return is CREATED (customer self-service
  * or admin-assisted), so the seller can expect the goods back and prepare a
