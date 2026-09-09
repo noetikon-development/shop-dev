@@ -8,10 +8,10 @@ import {
   canTransitionSeller,
   validateSellerSlug,
   validateCommissionBps,
-  DEFAULT_SELLER_COMMISSION_BPS,
   SELLER_TRANSITIONS,
   type SellerLifecycleStatus,
 } from "@/lib/admin/sellers/lifecycle";
+import { getDefaultCommissionBps } from "@/lib/marketplace/commission-config";
 
 /**
  * Admin (cross-seller) Seller management data layer — Phase 9F-4b.
@@ -554,7 +554,11 @@ export async function createSeller(input: CreateSellerInput, client: Client = pr
   if (!EMAIL_RE.test(supportEmail)) {
     return { ok: false, code: "VALIDATION", error: "Enter a valid support email." };
   }
-  const commission = validateCommissionBps(input.commissionRate ?? DEFAULT_SELLER_COMMISSION_BPS);
+  // 9F-39B: when the admin doesn't type a rate, seed it from the CMS global
+  // default (marketplace.defaultCommissionBps → 1500 fallback). This is the ONLY
+  // place the global default is applied — it never touches an existing seller.
+  const seededRate = input.commissionRate ?? (await getDefaultCommissionBps(client));
+  const commission = validateCommissionBps(seededRate);
   if (!commission.ok) return { ok: false, code: "VALIDATION", error: commission.error };
 
   const clash = await client.seller.findUnique({ where: { slug: slugCheck.slug }, select: { id: true } });

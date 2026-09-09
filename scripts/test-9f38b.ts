@@ -121,8 +121,9 @@ function staticTests() {
     const region = checkout.slice(i - 4000, i);
     return !/resolveWinningOfferView\(|pickWinningOffer\(/.test(region);
   })());
-  ok("checkout · commission basis unchanged — roundHalfUp((subtotal * ... ) / 10000), subtotal from unitPrice",
-    /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* soSeller\.commissionRate\) \/ 10000\);/.test(checkout) &&
+  ok("checkout · commission basis unchanged — roundHalfUp((subtotal * <rate bps>) / 10000), subtotal from unitPrice (9F-39B: rate via resolveSellerCommissionBps, base/rounding identical)",
+    /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(checkout) &&
+    /const commissionRateBps = resolveSellerCommissionBps\(soSeller\);/.test(checkout) &&
     !/compareAtPrice[\s\S]{0,80}commission/i.test(checkoutCode));
 
   // D — order detail (customer)

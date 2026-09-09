@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { commitOfferStockForSale } from "@/lib/marketplace/offer-inventory";
+import { resolveSellerCommissionBps } from "@/lib/marketplace/commission";
 import { loadCart, activeRedemptionCount } from "@/lib/cart";
 import { evaluateCoupon, type EvaluableCoupon } from "@/lib/coupons";
 import { getCustomerAddresses, type AddressDTO } from "@/lib/addresses";
@@ -693,7 +694,15 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   // SellerOrder money (9E-3B). One seller this phase, so it carries the whole
   // order: merchandise = subtotal, discountAllocated = the full discount,
   // shippingFee = the whole order's shipping. total must equal grandTotal.
-  const sellerCommissionAmount = roundHalfUp((subtotal * soSeller.commissionRate) / 10000);
+  //
+  // 9F-39B: resolve the commission rate for THIS new order. FIRST_PARTY → 0;
+  // THIRD_PARTY → the seller's own stored `Seller.commissionRate` (unchanged
+  // behaviour — the CMS global default only seeds a new seller's rate, it never
+  // re-prices an existing seller or a historical order). The resolved value is
+  // frozen onto SellerOrder / OrderItem below; nothing here reads the CMS
+  // setting, and no historical order is ever revisited.
+  const commissionRateBps = resolveSellerCommissionBps(soSeller);
+  const sellerCommissionAmount = roundHalfUp((subtotal * commissionRateBps) / 10000);
   const sellerOrderTotal = subtotal - discountTotal + shippingFee;
 
   const orderNumber = await nextOrderNumber();
@@ -824,7 +833,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           sellerName: soSeller.displayName,
           sellerType: soSeller.type,
           supportEmail: soSeller.supportEmail,
-          commissionRate: soSeller.commissionRate,
+          commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
           shippingMethodCode: method.code,
           shippingMethodName: method.name,
           shippingFee,
@@ -852,7 +861,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           variantId: l.variantId,
           offerId: l.offerId,
           sellerId: l.sellerId,
-          commissionRate: soSeller.commissionRate,
+          commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
           name: l.name,
           variantLabel: l.variantLabel,
           sku: l.sku,

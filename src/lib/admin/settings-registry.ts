@@ -32,7 +32,8 @@ export type SettingGroupKey =
   | "payments"
   | "shipping"
   | "returns"
-  | "email";
+  | "email"
+  | "marketplace";
 
 export type SettingField = {
   key: string;
@@ -70,6 +71,10 @@ export const SETTING_GROUPS: Record<
   email: {
     label: "Email",
     description: "Sender identity. Provider credentials stay in the server environment.",
+  },
+  marketplace: {
+    label: "Marketplace",
+    description: "Third-party seller commission and marketplace policy.",
   },
 };
 
@@ -184,6 +189,18 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "email.fromName", label: "From name", type: "string", group: "email", default: "" },
   { key: "email.fromAddress", label: "From address", type: "email", group: "email", default: "" },
   { key: "email.provider", label: "Provider", type: "string", group: "email", default: "", help: "Provider name only. Credentials stay in the server environment." },
+
+  // Marketplace (9F-39B). The GLOBAL default commission for a NEWLY created
+  // third-party seller. Range enforced separately in settings-actions.ts (0–5000
+  // bps); a plain number here would only get the generic 0–1e9 check.
+  {
+    key: "marketplace.defaultCommissionBps",
+    label: "Default seller commission (bps)",
+    type: "number",
+    group: "marketplace",
+    default: 1500,
+    help: "Default commission withheld from third-party sellers, in basis points (1500 = 15.00%). Applies to future orders only — it seeds a new seller's rate and never changes an existing seller or a historical order. Range 0–5000 (0%–50%).",
+  },
 ];
 
 export function encodeSettingValue(value: unknown, type: SettingType): string {

@@ -14,6 +14,11 @@ import {
 } from "@/lib/admin/settings-registry";
 import { isSafeHttpsUrl } from "@/lib/site-settings";
 import { cleanUserText } from "@/lib/ugc";
+import {
+  MARKETPLACE_DEFAULT_COMMISSION_KEY,
+  COMMISSION_BPS_CMS_MIN,
+  COMMISSION_BPS_CMS_MAX,
+} from "@/lib/marketplace/commission-config";
 
 /**
  * Store settings writes (Step 16). Requires `manage_settings` — an ADMIN who
@@ -36,6 +41,21 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function validate(field: SettingField, raw: string): { value: unknown } | { error: string } {
   const v = raw.trim();
+
+  // 9F-39B: the global default seller commission has a tighter, dedicated range
+  // than the generic number validator (which only bars < 0 / > 1e9). Basis
+  // points, whole numbers, 0–5000 (0%–50%). An empty / malformed value returns a
+  // field error and never overwrites the stored setting.
+  if (field.key === MARKETPLACE_DEFAULT_COMMISSION_KEY) {
+    if (v === "") return { error: "Enter a commission rate in basis points." };
+    const n = Number(v);
+    if (!Number.isFinite(n)) return { error: "Enter a whole number of basis points." };
+    if (!Number.isInteger(n)) return { error: "Commission must be whole basis points — no decimals." };
+    if (n < COMMISSION_BPS_CMS_MIN) return { error: "Commission can't be negative." };
+    if (n > COMMISSION_BPS_CMS_MAX) return { error: `Commission can't exceed ${COMMISSION_BPS_CMS_MAX} bps (50%).` };
+    return { value: n };
+  }
+
   switch (field.type) {
     case "boolean":
       return { value: v === "true" || v === "on" || v === "1" };
@@ -130,6 +150,20 @@ export async function updateSettingsAction(
     return { ok: false, error: "Please fix the highlighted fields.", fieldErrors };
   }
 
+  // 9F-39B: capture the PREVIOUS global-commission value before the write, so a
+  // real change (and only a real change) also emits a dedicated audit event.
+  const commissionUpdate = updates.find((u) => u.key === MARKETPLACE_DEFAULT_COMMISSION_KEY);
+  let commissionPrevBps: number | null = null;
+  if (commissionUpdate) {
+    const prevRow = await prisma.storeSetting.findUnique({
+      where: { key: MARKETPLACE_DEFAULT_COMMISSION_KEY },
+      select: { value: true },
+    });
+    commissionPrevBps = prevRow
+      ? Number(prevRow.value)
+      : Number(SETTING_FIELD_BY_KEY[MARKETPLACE_DEFAULT_COMMISSION_KEY]?.default ?? 1500);
+  }
+
   const changed: string[] = [];
   await prisma.$transaction(
     updates.map((u) => {
@@ -157,6 +191,28 @@ export async function updateSettingsAction(
     summary: `${admin.user.email} updated ${SETTING_GROUPS[group].label.toLowerCase()} settings`,
     meta: { group, keys: changed },
   });
+
+  // 9F-39B: dedicated commission-change audit — only when the value actually
+  // moved (a same-value save records nothing extra).
+  if (commissionUpdate) {
+    const nextBps = Number(commissionUpdate.value);
+    if (Number.isFinite(nextBps) && commissionPrevBps !== nextBps) {
+      const pct = (bps: number) => `${(bps / 100).toFixed(2)}%`;
+      await writeAudit({
+        actorUserId: admin.user.id,
+        action: "seller_commission.updated",
+        targetType: "settings",
+        targetId: MARKETPLACE_DEFAULT_COMMISSION_KEY,
+        summary: `${admin.user.email} changed the default seller commission ${pct(commissionPrevBps ?? 0)} → ${pct(nextBps)}`,
+        meta: {
+          scope: "global",
+          previous: commissionPrevBps,
+          new: nextBps,
+          actor: admin.user.id,
+        },
+      });
+    }
+  }
 
   revalidateTag("settings", "max");
   revalidatePath("/", "layout");

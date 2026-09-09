@@ -115,10 +115,14 @@ function staticTests() {
     })(),
   );
 
-  // 8 — checkout's original formula is untouched
+  // 8 — checkout's commission BASE + ROUNDING are untouched. (9F-39B swapped the
+  // rate SOURCE — `soSeller.commissionRate` → `resolveSellerCommissionBps(soSeller)`
+  // — but the base (`subtotal`), the divisor (10000) and `roundHalfUp` are
+  // identical, and the value is the same for every existing seller.)
   ok(
-    "8 · checkout.ts creation-time commission formula is byte-identical to before this phase",
-    /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* soSeller\.commissionRate\) \/ 10000\);/.test(checkout),
+    "8 · checkout.ts commission = roundHalfUp((subtotal * <resolved bps>) / 10000), base + rounding unchanged",
+    /const commissionRateBps = resolveSellerCommissionBps\(soSeller\);/.test(checkout) &&
+      /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(checkout),
   );
   ok("8 · checkout.ts's single-seller gate untouched", /if \(sellerIds\.size !== 1\)/.test(checkout));
   ok("8 · checkout.ts was not touched to export anything new for this phase", !/export function roundHalfUp/.test(checkout) && !/export const roundHalfUp/.test(checkout));
