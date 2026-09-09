@@ -6,7 +6,7 @@ import { getCurrentAdmin, requirePermission } from "@/lib/admin/rbac";
 import { getAdminOrder } from "@/lib/admin/orders";
 import { orderReturnableLines } from "@/lib/admin/returns";
 import { orderHasOpenReturn } from "@/lib/returns";
-import { getOrderPayments, getPaymentsAdminConfig } from "@/lib/admin/payments";
+import { getOrderPayments, getPaymentsAdminConfig, getCodPaymentConfirmation } from "@/lib/admin/payments";
 import { sellerOrderStatusLabel, sellerOrderStatusTone } from "@/lib/marketplace/seller-order-status";
 import { Card, PageHeader, StatusBadge } from "@/components/admin/ui";
 import { OrderDetailView } from "@/components/admin/orders/order-detail-view";
@@ -59,9 +59,29 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
 
   const canViewPayments = admin.isSuperAdmin || admin.permissions.has("view_payments");
   const canManagePayments = admin.isSuperAdmin || admin.permissions.has("manage_payments");
-  const [orderPayments, paymentsConfig] = canViewPayments
-    ? await Promise.all([getOrderPayments(order.id), getPaymentsAdminConfig()])
-    : [null, null];
+  const [orderPayments, paymentsConfig, codRecorded] = canViewPayments
+    ? await Promise.all([
+        getOrderPayments(order.id),
+        getPaymentsAdminConfig(),
+        getCodPaymentConfirmation(order.id),
+      ])
+    : [null, null, null];
+
+  // 9F-43B — COD cash confirmation is offered only for a delivered
+  // cash-on-delivery order with no online Payment that is still awaiting payment.
+  const codIsCash = order.paymentMethod === "NONE" || order.paymentMethod === "COD";
+  const codConfirmation = canViewPayments
+    ? {
+        orderId: order.id,
+        grandTotal: order.grandTotal,
+        canRecord:
+          codIsCash &&
+          !order.hasOnlinePayment &&
+          order.status === "DELIVERED" &&
+          (order.paymentStatus === "PENDING" || order.paymentStatus === "UNPAID"),
+        recorded: codRecorded,
+      }
+    : undefined;
 
   return (
     <div>
@@ -113,6 +133,7 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
             payments={orderPayments}
             canManage={canManagePayments}
             onlinePaymentEnabled={paymentsConfig?.onlinePaymentEnabled ?? false}
+            cod={codConfirmation}
           />
         </div>
       )}

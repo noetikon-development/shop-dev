@@ -7,25 +7,42 @@ import {
 } from "@/lib/payments/status";
 import type { getOrderPayments } from "@/lib/admin/payments";
 import { ReconcilePaymentButton } from "./reconcile-payment-button";
+import { RecordCodPayment } from "./record-cod-payment";
 
 type Payments = Awaited<ReturnType<typeof getOrderPayments>>;
 
 /**
+ * 9F-43B — COD cash confirmation state for this order. `canRecord` is true only
+ * for a DELIVERED cash-on-delivery order with zero Payment rows that is still
+ * awaiting payment (paymentStatus PENDING/UNPAID). `recorded` is the latest
+ * `order.cod_payment_confirmed` audit row once confirmed.
+ */
+export type CodConfirmationView = {
+  orderId: string;
+  grandTotal: number;
+  canRecord: boolean;
+  recorded: { at: string; byEmail: string | null; reference: string | null } | null;
+};
+
+/**
  * Payment panel on the admin order detail page (Step 21 P4). Read-only view of
  * the order's Payment record(s) + their refunds. There is NO "mark as paid"
- * control — order payment state is advanced only by the verified webhook.
+ * control for an ONLINE order — that state is advanced only by the verified
+ * webhook. 9F-43B adds a guarded "Record COD payment received" control for a
+ * delivered cash-on-delivery order (see `cod`).
  *
- * Phase 4-A: every order has zero Payment rows, so this renders the "settled
- * outside PayMongo" note.
+ * Phase 4-A: every order has zero Payment rows, so this renders the COD block.
  */
 export function PaymentPanel({
   payments,
   canManage,
   onlinePaymentEnabled,
+  cod,
 }: {
   payments: Payments;
   canManage: boolean;
   onlinePaymentEnabled: boolean;
+  cod?: CodConfirmationView;
 }) {
   if (payments.length === 0) {
     return (
@@ -40,6 +57,18 @@ export function PaymentPanel({
           <p className="mt-2 text-xs text-ink-faint">
             Online payment is currently disabled (<code>payments.onlinePaymentEnabled = false</code>).
           </p>
+        )}
+
+        {cod?.recorded && (
+          <p className="mt-3 rounded-sm border border-line bg-surface-sunken/40 px-3 py-2 text-sm text-ink-soft">
+            COD payment recorded on {formatDate(cod.recorded.at)}
+            {cod.recorded.byEmail ? ` by ${cod.recorded.byEmail}` : ""}
+            {cod.recorded.reference ? ` · ref ${cod.recorded.reference}` : ""}.
+          </p>
+        )}
+
+        {cod?.canRecord && !cod.recorded && canManage && (
+          <RecordCodPayment orderId={cod.orderId} grandTotal={cod.grandTotal} />
         )}
       </Card>
     );
