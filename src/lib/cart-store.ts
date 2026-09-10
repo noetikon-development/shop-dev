@@ -100,6 +100,13 @@ export const useCart = create<CartState>()((set, get) => ({
       get().apply(res.cart);
       if (res.notice) toast(res.notice);
       return { ok: res.ok, error: res.error };
+    } catch {
+      // The server action itself rejected — a dropped connection, a 5xx, or a
+      // deployment that can't reach the database. The cart is
+      // server-authoritative so nothing changed; return the declared
+      // { ok, error } shape (never throw) so the caller can clear its spinner
+      // and show a message instead of hanging on "Adding…".
+      return { ok: false, error: "Something went wrong. Please try again." };
     } finally {
       set({ pending: false });
     }
@@ -143,6 +150,12 @@ export const useCart = create<CartState>()((set, get) => ({
       if (res.ok && res.notice) toast.success(res.notice);
       if (!res.ok && res.error) toast.error(res.error);
       return { ok: res.ok, error: res.error };
+    } catch {
+      // Same guard as `add` — a server-action rejection must not escape the
+      // declared { ok, error } contract the caller reads synchronously.
+      const error = "Something went wrong. Please try again.";
+      toast.error(error);
+      return { ok: false, error };
     } finally {
       set({ pending: false });
     }
