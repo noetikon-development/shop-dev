@@ -6,6 +6,8 @@ import { requireUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { returnEligibility } from "@/lib/returns";
 import { isCancellable } from "@/lib/orders/status";
+import { getPaymentsConfig } from "@/lib/payments/config";
+import { canResumeOnlinePayment } from "@/lib/payments/checkout-session";
 import { OrderDetail } from "@/components/order/order-detail";
 import { CustomerCancelOrder } from "@/components/order/customer-cancel-order";
 import { buttonClasses } from "@/components/ui/button";
@@ -28,6 +30,12 @@ export default async function AccountOrderPage({
 
   const elig = await returnEligibility(user.id, orderNumber);
 
+  // Persistent "Pay now" for an eligible unpaid 1P online-payment order — the
+  // recovery path when `beginOnlinePayment` failed transiently (no Payment row)
+  // and the customer has since navigated away from the confirmation screen.
+  const paymentsConfig = await getPaymentsConfig();
+  const onlinePayable = canResumeOnlinePayment(order, paymentsConfig);
+
   return (
     <div className="space-y-6">
       <Link
@@ -37,7 +45,7 @@ export default async function AccountOrderPage({
         <ChevronLeft size={15} /> All orders
       </Link>
       <h2 className="text-subtitle">Order {order.orderNumber}</h2>
-      <OrderDetail order={order} />
+      <OrderDetail order={order} onlinePayable={onlinePayable} />
       {isCancellable(order.status) && <CustomerCancelOrder orderNumber={order.orderNumber} />}
       <ReturnCallout orderNumber={orderNumber} elig={elig} orderStatus={order.status} />
     </div>

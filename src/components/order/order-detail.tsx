@@ -2,6 +2,7 @@ import Link from "next/link";
 import { ExternalLink, Truck } from "lucide-react";
 import { ProductImage } from "@/components/product-image";
 import { OrderTimeline } from "@/components/order/order-timeline";
+import { CompletePaymentButton } from "@/components/order/complete-payment-button";
 import { Badge } from "@/components/ui/badge";
 import { buttonClasses } from "@/components/ui/button";
 import { ORDER_STATUS_META, PAYMENT_METHODS } from "@/lib/constants";
@@ -11,7 +12,16 @@ import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { formatPrice, formatDate, discountPercent } from "@/lib/utils";
 import type { OrderView } from "@/lib/data";
 
-export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
+export function OrderDetail({
+  order,
+  // When true (only the account order-detail page passes this, after
+  // `canResumeOnlinePayment`), the Payment section reads "Payment pending" and
+  // offers a persistent "Pay now" that runs the same beginOnlinePayment flow.
+  onlinePayable = false,
+}: {
+  order: NonNullable<OrderView>;
+  onlinePayable?: boolean;
+}) {
   const meta = ORDER_STATUS_META[order.status] ?? ORDER_STATUS_META.PENDING;
   const addr = order.shippingAddress;
   const billing = order.billingAddress;
@@ -28,7 +38,9 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
       : order.paymentStatus === "REFUNDED"
         ? "Refunded"
         : order.paymentStatus === "PENDING"
-          ? "Pay on delivery"
+          ? onlinePayable
+            ? "Payment pending"
+            : "Pay on delivery"
           : "Unpaid";
 
   return (
@@ -195,6 +207,15 @@ export function OrderDetail({ order }: { order: NonNullable<OrderView> }) {
               {paymentLabel}
             </span>
           </p>
+          {onlinePayable && (
+            <div className="mt-3">
+              <CompletePaymentButton orderNumber={order.orderNumber} label="Pay now" />
+              <p className="mt-2 text-meta text-ink-faint">
+                You’ll be taken to our secure payment page. Or pay cash on delivery — either way
+                your order is saved.
+              </p>
+            </div>
+          )}
         </div>
 
         <Link href="/c/all" className={buttonClasses({ variant: "outline", className: "w-full" })}>

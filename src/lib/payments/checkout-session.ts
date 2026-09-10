@@ -74,6 +74,46 @@ function fail(code: BeginPaymentCode): BeginPaymentResult {
   return { ok: false, code, error: MESSAGE[code] };
 }
 
+/**
+ * Is this order one the customer can (re)start an online payment for?
+ *
+ * Shared by the order-confirmation page and the account order-detail page so a
+ * `PENDING_PAYMENT` order that never got a `Payment` row (e.g. a transient
+ * `beginOnlinePayment` failure) keeps a persistent "Pay now" path — not only
+ * the moment right after a failed checkout via `?pay=cancelled`.
+ *
+ * Deliberately narrow — it must NOT fire "merely because paymentStatus=PENDING":
+ *  - `sessionsEnabled`         PayMongo can actually open a TEST session
+ *                              (false in a COD-only deployment → no "Pay now" anywhere)
+ *  - `status === PENDING_PAYMENT`  excludes every terminal / advanced state AND a
+ *                              3P order (which is auto-confirmed to PROCESSING at checkout)
+ *  - `paymentStatus === PENDING`   excludes PAID / PARTIALLY_REFUNDED / REFUNDED / UNPAID
+ *  - `paymentMethod === NONE`  no confirmed method yet (a paid order is CARD / GCASH)
+ *  - every seller FIRST_PARTY  1P only — belt-and-braces on top of the status check;
+ *                              this fix does NOT enable 3P online payment (a separate phase).
+ *
+ * Ownership (`order.userId === currentUser.id`) is enforced by the page, not here.
+ * `beginOnlinePayment` re-checks status/ownership server-side, so a stale button
+ * can only ever produce a safe `{ ok: false }`.
+ */
+export function canResumeOnlinePayment(
+  order: {
+    status: string;
+    paymentStatus: string;
+    paymentMethod: string;
+    sellerOrders: { sellerType: string }[];
+  },
+  config: { sessionsEnabled: boolean },
+): boolean {
+  return (
+    config.sessionsEnabled &&
+    order.status === "PENDING_PAYMENT" &&
+    order.paymentStatus === "PENDING" &&
+    order.paymentMethod === "NONE" &&
+    order.sellerOrders.every((so) => so.sellerType === "FIRST_PARTY")
+  );
+}
+
 type OrderForPayment = Prisma.OrderGetPayload<{
   include: { items: true; payments: true };
 }>;
@@ -152,9 +192,10 @@ export async function beginOnlinePayment(
     orderNumber: string;
     userId: string;
   },
-  deps: { config?: PaymentsConfig } = {},
+  deps: { config?: PaymentsConfig; db?: Prisma.TransactionClient | typeof prisma } = {},
 ): Promise<BeginPaymentResult> {
   const config = deps.config ?? (await getPaymentsConfig());
+  const db = deps.db ?? prisma;
 
   // The order is already committed by the time we get here. A `payments.*`
   // StoreSetting read that failed on every retry is NOT a genuine "online
@@ -164,7 +205,7 @@ export async function beginOnlinePayment(
   if (config.settingsReadFailed) return fail("CONFIG_UNAVAILABLE");
   if (!config.sessionsEnabled) return fail("DISABLED");
 
-  const order = await prisma.order.findUnique({
+  const order = await db.order.findUnique({
     where: { orderNumber: args.orderNumber },
     include: { items: true, payments: true },
   });
@@ -195,7 +236,7 @@ export async function beginOnlinePayment(
   let payment = active.find((p) => p.status === "PENDING") ?? null;
   if (!payment) {
     try {
-      payment = await prisma.payment.create({
+      payment = await db.payment.create({
         data: {
           orderId: order.id,
           provider: "paymongo",
@@ -212,7 +253,7 @@ export async function beginOnlinePayment(
     } catch (err) {
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
         // A concurrent attempt won the race — re-read and resume if possible.
-        const again = await prisma.payment.findFirst({
+        const again = await db.payment.findFirst({
           where: { orderId: order.id, status: { in: ["PENDING", "AWAITING_PAYMENT"] } },
         });
         if (again?.status === "AWAITING_PAYMENT" && again.checkoutUrl) {
@@ -255,7 +296,7 @@ export async function beginOnlinePayment(
     return fail("UNEXPECTED");
   }
 
-  await prisma.payment.update({
+  await db.payment.update({
     where: { id: payment.id },
     data: {
       providerId: session.id,
@@ -271,20 +312,23 @@ export async function beginOnlinePayment(
     },
   });
 
-  await writeAudit({
-    actorUserId: args.userId,
-    action: "payment.session_created",
-    targetType: "order",
-    targetId: order.id,
-    summary: `PayMongo checkout session created for order ${order.orderNumber} (${config.mode} mode)`,
-    meta: {
-      paymentId: payment.id,
-      providerId: session.id,
-      amount: order.grandTotal,
-      methodTypes,
-      mode: config.mode,
+  await writeAudit(
+    {
+      actorUserId: args.userId,
+      action: "payment.session_created",
+      targetType: "order",
+      targetId: order.id,
+      summary: `PayMongo checkout session created for order ${order.orderNumber} (${config.mode} mode)`,
+      meta: {
+        paymentId: payment.id,
+        providerId: session.id,
+        amount: order.grandTotal,
+        methodTypes,
+        mode: config.mode,
+      },
     },
-  });
+    db,
+  );
 
   return { ok: true, checkoutUrl: session.checkoutUrl, resumed: false };
 }

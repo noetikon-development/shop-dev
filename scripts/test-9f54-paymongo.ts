@@ -34,7 +34,7 @@ import {
   applyPaymentSettingRows,
   type PaymentsConfig,
 } from "../src/lib/payments/config";
-import { beginOnlinePayment } from "../src/lib/payments/checkout-session";
+import { beginOnlinePayment, canResumeOnlinePayment } from "../src/lib/payments/checkout-session";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -467,6 +467,169 @@ async function main() {
     const co = read("src/lib/checkout.ts");
     ok("14 · checkout.ts COD path unchanged: order still created paymentMethod 'NONE' + pay-on-delivery event",
       /paymentMethod: "NONE"/.test(co) && /Payment is arranged on delivery/.test(co));
+  }
+
+  // ── 15 — persistent "Pay now" recovery for an eligible unpaid 1P order ────
+  // The confirmation-page `?pay=cancelled` breadcrumb is transient; once the
+  // customer navigates away, /account/orders/[orderNumber] is the persistent
+  // path. canResumeOnlinePayment() is the single eligibility rule; the button
+  // runs the same beginOnlinePayment flow (no 2nd implementation).
+
+  const eligible = {
+    status: "PENDING_PAYMENT",
+    paymentStatus: "PENDING",
+    paymentMethod: "NONE",
+    sellerOrders: [{ sellerType: "FIRST_PARTY" }],
+  };
+  const ON = { sessionsEnabled: true };
+  const OFF = { sessionsEnabled: false };
+
+  ok("15 · 1P PENDING_PAYMENT / PENDING / NONE + sessions on → eligible (Pay now visible)",
+    canResumeOnlinePayment(eligible, ON) === true);
+  ok("15 · a legacy 1P order with zero SellerOrders is still eligible (every() vacuous)",
+    canResumeOnlinePayment({ ...eligible, sellerOrders: [] }, ON) === true);
+  ok("15 · PayMongo disabled (sessionsEnabled false) → NOT eligible",
+    canResumeOnlinePayment(eligible, OFF) === false);
+  ok("15 · 3P order (a THIRD_PARTY SellerOrder) → NOT eligible",
+    canResumeOnlinePayment({ ...eligible, sellerOrders: [{ sellerType: "THIRD_PARTY" }] }, ON) === false);
+  ok("15 · 3P auto-confirmed to PROCESSING → NOT eligible (status guard)",
+    canResumeOnlinePayment({ ...eligible, status: "PROCESSING", sellerOrders: [{ sellerType: "THIRD_PARTY" }] }, ON) === false);
+  ok("15 · advanced 1P order (PROCESSING) → NOT eligible",
+    canResumeOnlinePayment({ ...eligible, status: "PROCESSING" }, ON) === false);
+  for (const st of ["SHIPPED", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "PAID"]) {
+    ok(`15 · terminal / advanced status ${st} → NOT eligible`,
+      canResumeOnlinePayment({ ...eligible, status: st }, ON) === false);
+  }
+  for (const ps of ["PAID", "PARTIALLY_REFUNDED", "REFUNDED", "UNPAID"]) {
+    ok(`15 · paymentStatus ${ps} → NOT eligible`,
+      canResumeOnlinePayment({ ...eligible, paymentStatus: ps }, ON) === false);
+  }
+  ok("15 · a confirmed method (CARD) → NOT eligible (already an online order in flight/paid)",
+    canResumeOnlinePayment({ ...eligible, paymentMethod: "CARD" }, ON) === false);
+
+  // rolled-back DB — the button's flow REUSES an in-flight session, no 2nd Payment row
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = Date.now().toString(36);
+      const u = await tx.user.create({ data: { email: `pn-${t}@example.test`, name: "PN" }, select: { id: true } });
+      const order = await tx.order.create({
+        data: {
+          orderNumber: `AX-T15-${t}-${Math.random().toString(36).slice(2, 6)}`,
+          userId: u.id, email: `pn-${t}@example.test`, status: "PENDING_PAYMENT",
+          paymentMethod: "NONE", paymentStatus: "PENDING", subtotal: GRAND, grandTotal: GRAND,
+          shippingAddress: JSON.stringify({ firstName: "T", city: "M", country: "PH" }),
+        },
+        select: { id: true, orderNumber: true },
+      });
+      const csId = `cs_test_pn_${t}`;
+      const url = "https://checkout.paymongo.test/resume-me";
+      await tx.payment.create({
+        data: {
+          orderId: order.id, provider: "paymongo", providerObject: "checkout_session",
+          providerId: csId, status: "AWAITING_PAYMENT", amount: GRAND, currency: "PHP",
+          checkoutUrl: url, metadata: JSON.stringify({ order_number: order.orderNumber }),
+        },
+      });
+      const cnt = () => tx.payment.count({ where: { orderId: order.id } });
+
+      const r1 = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: u.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("15 · Pay now with an AWAITING_PAYMENT session → resumes it (ok, resumed:true, same checkoutUrl)",
+        r1.ok && r1.resumed === true && r1.checkoutUrl === url);
+      ok("15 · resume created NO second Payment row", (await cnt()) === 1);
+
+      const r2 = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: u.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("15 · repeated Pay now clicks are idempotent — still resumes the same session, still 1 Payment row",
+        r2.ok && r2.resumed === true && r2.checkoutUrl === url && (await cnt()) === 1);
+
+      // wrong customer
+      const other = await tx.user.create({ data: { email: `pn-other-${t}@example.test`, name: "X" }, select: { id: true } });
+      const rWrong = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: other.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("15 · a different customer cannot Pay now for this order → NOT_FOUND, no new Payment row",
+        !rWrong.ok && rWrong.code === "NOT_FOUND" && (await cnt()) === 1);
+
+      // disabled → DISABLED, no write
+      const rOff = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: u.id },
+        { config: fakeConfig({ sessionsEnabled: false }), db: tx },
+      );
+      ok("15 · Pay now with PayMongo disabled → DISABLED, no new Payment row",
+        !rOff.ok && rOff.code === "DISABLED" && (await cnt()) === 1);
+
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+
+  // rolled-back DB — a PROCESSING (3P-style) order cannot Pay now
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = Date.now().toString(36);
+      const u = await tx.user.create({ data: { email: `pn3-${t}@example.test`, name: "P3" }, select: { id: true } });
+      const order = await tx.order.create({
+        data: {
+          orderNumber: `AX-T15P-${t}-${Math.random().toString(36).slice(2, 6)}`,
+          userId: u.id, email: `pn3-${t}@example.test`, status: "PROCESSING",
+          paymentMethod: "NONE", paymentStatus: "PENDING", subtotal: GRAND, grandTotal: GRAND,
+          shippingAddress: JSON.stringify({ firstName: "T", city: "M", country: "PH" }),
+        },
+        select: { id: true, orderNumber: true },
+      });
+      const r = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: u.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("15 · a PROCESSING order → INVALID_STATE, no Payment row (3P online payment stays impossible)",
+        !r.ok && r.code === "INVALID_STATE" && (await tx.payment.count({ where: { orderId: order.id } })) === 0);
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+
+  // static — wiring
+  {
+    const csrc = read("src/lib/payments/checkout-session.ts");
+    ok("15 · checkout-session.ts exports canResumeOnlinePayment with the 5 gates",
+      /export function canResumeOnlinePayment/.test(csrc) &&
+      /config\.sessionsEnabled/.test(csrc) &&
+      /order\.status === "PENDING_PAYMENT"/.test(csrc) &&
+      /order\.paymentStatus === "PENDING"/.test(csrc) &&
+      /order\.paymentMethod === "NONE"/.test(csrc) &&
+      /sellerOrders\.every\(\(so\) => so\.sellerType === "FIRST_PARTY"\)/.test(csrc));
+  }
+  {
+    const pg = read("src/app/(shop)/account/orders/[orderNumber]/page.tsx");
+    ok("15 · account order page: ownership check still present",
+      /order\.userId !== user\.id\) notFound\(\)/.test(pg));
+    ok("15 · account order page: computes canResumeOnlinePayment(order, config) and passes it to OrderDetail",
+      /canResumeOnlinePayment\(order, paymentsConfig\)/.test(pg) && /<OrderDetail order=\{order\} onlinePayable=\{onlinePayable\}/.test(pg));
+  }
+  {
+    const od = read("src/components/order/order-detail.tsx");
+    ok("15 · OrderDetail: renders CompletePaymentButton only when onlinePayable, label 'Pay now'",
+      /onlinePayable && \(/.test(od) && /<CompletePaymentButton orderNumber=\{order\.orderNumber\} label="Pay now"/.test(od));
+    ok("15 · OrderDetail: onlinePayable defaults false (confirmation page + every other caller unchanged)",
+      /onlinePayable = false/.test(od));
+    ok("15 · OrderDetail: payment label reads 'Payment pending' when payable, 'Pay on delivery' otherwise",
+      /"Payment pending"/.test(od) && /"Pay on delivery"/.test(od));
+  }
+  {
+    const cpb = read("src/components/order/complete-payment-button.tsx");
+    ok("15 · CompletePaymentButton uses the single startCheckoutPayment → beginOnlinePayment flow (no 2nd impl)",
+      /startCheckoutPayment\(orderNumber\)/.test(cpb) && /window\.location\.assign\(res\.checkoutUrl\)/.test(cpb) && /toast\.error\(res\.error\)/.test(cpb));
+    const act = read("src/lib/checkout-actions.ts");
+    ok("15 · startCheckoutPayment delegates to beginOnlinePayment (no duplicate payment logic)",
+      /return beginOnlinePayment\(\{ orderNumber: parsed\.data, userId: user\.id \}\)/.test(act));
   }
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
