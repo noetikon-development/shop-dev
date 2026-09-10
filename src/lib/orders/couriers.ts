@@ -24,7 +24,7 @@ export type CourierDef = {
   // 9F-47B — courier-API integration config. Pure data; NOTHING reads these yet
   // (the shipping service layer is 9F-47C onward). Left unset while the
   // provider ↔ carrier mapping is unconfirmed.
-  /** Axiaro shipping provider that fulfils this courier ("SHIPMATES" | "BITESHIP" | "LALAMOVE" | …). Unset = manual entry only. */
+  /** Axiaro shipping provider code that fulfils this courier, once a verified provider is registered. Unset = manual entry only. */
   provider?: string;
   /** The provider / aggregator's OWN code for this carrier, when it differs from `code`. Unset until mapping is confirmed. */
   aggregatorCarrierCode?: string;

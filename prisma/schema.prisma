@@ -1575,7 +1575,7 @@ model Shipment {
   // backfill: a row with `provider` NULL or "MANUAL" is a manually-entered
   // shipment and behaves EXACTLY as before 9F-47B. Nothing in 9F-47B reads or
   // writes these columns — the service / webhook layer lands in 9F-47C onward.
-  provider             String? // "MANUAL" (implicit for pre-9F-47B rows) | "SHIPMATES" | "BITESHIP" | "LALAMOVE" | …
+  provider             String? // "MANUAL" (implicit for pre-9F-47B rows) | a verified carrier/aggregator code (none registered — 9F-48)
   externalShipmentId   String? // provider's shipment/order id — the create-idempotency anchor
   externalOrderId      String? // provider's order ref when distinct from externalShipmentId
   service              String? // provider service level ("standard" | "nextday" | "same_day" | …)

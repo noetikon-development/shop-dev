@@ -166,7 +166,7 @@ async function main() {
         data: {
           sellerOrderId: so.id, carrier: "JT_EXPRESS", carrierName: "J&T Express",
           trackingNumber: "T9F47B1", status: "SHIPPED", shippedAt: new Date(),
-          provider: "SHIPMATES", externalShipmentId: "ext-9f47b-1", externalOrderId: "extord-1",
+          provider: "TEST_PROVIDER", externalShipmentId: "ext-9f47b-1", externalOrderId: "extord-1",
           service: "standard", labelUrl: "https://labels.test/a.pdf",
           shippingCostAmount: 8500, shippingCostCurrency: "PHP",
           estimatedDeliveryAt: new Date(Date.now() + 86400000),
@@ -176,12 +176,12 @@ async function main() {
         select: { id: true, provider: true, shippingCostAmount: true, metadata: true },
       });
       ok("F · provider Shipment row accepts all new columns",
-        sh.provider === "SHIPMATES" && sh.shippingCostAmount === 8500 &&
+        sh.provider === "TEST_PROVIDER" && sh.shippingCostAmount === 8500 &&
         JSON.stringify(sh.metadata) === JSON.stringify({ hub: "MNL-3", pickupWindow: "09-12" }));
 
       await tx.shipmentEvent.create({
         data: {
-          shipmentId: sh.id, provider: "SHIPMATES", providerEventId: "evt-1",
+          shipmentId: sh.id, provider: "TEST_PROVIDER", providerEventId: "evt-1",
           rawStatus: "PARCEL_PICKED_UP", normStatus: "IN_TRANSIT",
           occurredAt: new Date(), payloadHash: "abc123", status: "PROCESSED",
         },
@@ -207,14 +207,14 @@ async function main() {
       const so = await tx.sellerOrder.findFirst({ select: { id: true } });
       if (!so) throw new Rollback();
       const sh = await tx.shipment.create({
-        data: { sellerOrderId: so.id, carrier: "OTHER", carrierName: "x", status: "PENDING", provider: "SHIPMATES", externalShipmentId: "ext-dup" },
+        data: { sellerOrderId: so.id, carrier: "OTHER", carrierName: "x", status: "PENDING", provider: "TEST_PROVIDER", externalShipmentId: "ext-dup" },
         select: { id: true },
       });
       await tx.shipmentEvent.create({
-        data: { shipmentId: sh.id, provider: "SHIPMATES", providerEventId: "evt-dup", rawStatus: "a", normStatus: "IN_TRANSIT", occurredAt: new Date(), payloadHash: "h1" },
+        data: { shipmentId: sh.id, provider: "TEST_PROVIDER", providerEventId: "evt-dup", rawStatus: "a", normStatus: "IN_TRANSIT", occurredAt: new Date(), payloadHash: "h1" },
       });
       await tx.shipmentEvent.create({
-        data: { shipmentId: sh.id, provider: "SHIPMATES", providerEventId: "evt-dup", rawStatus: "b", normStatus: "IN_TRANSIT", occurredAt: new Date(), payloadHash: "h2" },
+        data: { shipmentId: sh.id, provider: "TEST_PROVIDER", providerEventId: "evt-dup", rawStatus: "b", normStatus: "IN_TRANSIT", occurredAt: new Date(), payloadHash: "h2" },
       });
       throw new Rollback();
     });

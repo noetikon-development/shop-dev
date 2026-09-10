@@ -198,7 +198,7 @@ export const SETTINGS_REGISTRY: SettingField[] = [
     type: "string",
     group: "shipping",
     default: "",
-    help: "Provider name only, e.g. SHIPMATES | BITESHIP | LALAMOVE. Blank = manual entry only. API keys stay in the server environment.",
+    help: "Provider name only — a verified carrier/aggregator code once one is registered. Blank = manual entry only (the current state). API keys stay in the server environment.",
   },
   {
     key: "shipping.mode",
