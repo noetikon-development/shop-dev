@@ -6,24 +6,22 @@ import { paymongoApiBase, type PaymentsMode } from "@/lib/payments/config";
  * PayMongo API + webhook-signature primitives (Step 21 P4; API base centralised
  * in Phase 6A).
  *
- * Status (Phase 6A):
+ * Status:
  *  - `verifyWebhookSignature` is USED by the webhook route (it's a pure crypto
  *    check; if no secret is configured it fails closed).
- *  - `createCheckoutSession` / `createRefund` / `getCheckoutSession` are the
- *    Phase 6B/6D API calls. They are DORMANT — nothing in the customer checkout
- *    flow imports or calls them; the only references are admin-gated
- *    reconciliation paths that themselves check `getPaymentsConfig()` first.
- *    Each throws `PaymongoNotConfiguredError` unless PAYMONGO_SECRET_KEY is set.
+ *  - `createCheckoutSession` is reached only via
+ *    `src/lib/payments/checkout-session.ts`, which requires
+ *    `getPaymentsConfig().sessionsEnabled` first (9F-54: TEST mode only, in the
+ *    non-production environment).
+ *  - `getCheckoutSession` / `createRefund` stay dormant — admin-gated
+ *    reconciliation / provider refunds (Phase 4-D). Each throws
+ *    `PaymongoNotConfiguredError` unless PAYMONGO_SECRET_KEY is set.
  *
  * The API base + version live in ONE place — `paymongoApiBase()` in config.ts
- * (default `https://api.paymongo.com/v2`, HTTPS-enforced, overridable via
- * PAYMONGO_API_BASE). The secret key and webhook secret are read from
- * server-only env vars and are never logged, never returned, never placed in a
- * NEXT_PUBLIC_ variable.
- *
- * NOTE for Phase 6B: confirm the exact Checkout Sessions path + payload shape
- * against the current PayMongo docs on the first real call, and pin
- * PAYMONGO_API_BASE if the account is on a different version.
+ * (default `https://api.paymongo.com/v1`; v2 also exists and is a config
+ * override, not a code change — see DEFAULT_PAYMONGO_API_BASE). HTTPS-enforced.
+ * The secret key and webhook secret are read from server-only env vars and are
+ * never logged, never returned, never placed in a NEXT_PUBLIC_ variable.
  */
 
 const MAX_SIGNATURE_SKEW_SECONDS = 300;

@@ -26,16 +26,18 @@ export type PaymentsMode = "test" | "live";
 
 /** The PayMongo Checkout Sessions API base — set in exactly one place.
  *
- *  Phase 6B: confirmed against PayMongo's own OpenAPI spec + reference docs that
- *  Checkout Sessions live at **`POST https://api.paymongo.com/v1/checkout_sessions`**.
- *  There is no `/v2/checkout_sessions` endpoint (the Phase 6A default of `/v2`
- *  was based on the stage brief, not the live API, and is corrected here). If
- *  PayMongo ever ships a v2 Checkout Sessions API, set `PAYMONGO_API_BASE`
- *  rather than editing code.
+ *  Both `POST /v1/checkout_sessions` and `POST /v2/checkout_sessions` exist;
+ *  PayMongo now recommends v2 for NEW integrations (v2-only extras: pass-on
+ *  fees, a deferred Payment Intent, promotions, multi-currency). Axiaro
+ *  deliberately stays on **v1** for the test bring-up (9F-54) — it needs none of
+ *  the v2-only features and the v1 payload/response shape is what this client is
+ *  built and tested against. Moving to v2 later is a config change, not a code
+ *  change: set `PAYMONGO_API_BASE=https://api.paymongo.com/v2` and review the
+ *  payload (v2 defers the Payment Intent).
  *
- *  Overridable via `PAYMONGO_API_BASE` (a pinned version, or a localhost mock
- *  during bring-up). HTTPS is required except for an explicit `http://localhost`
- *  / `http://127.0.0.1` mock in local development. */
+ *  Overridable via `PAYMONGO_API_BASE` (pin a version, or point at a localhost
+ *  mock during bring-up). HTTPS is required except for an explicit
+ *  `http://localhost` / `http://127.0.0.1` mock in local development. */
 export const DEFAULT_PAYMONGO_API_BASE = "https://api.paymongo.com/v1";
 
 export function paymongoApiBase(): string {

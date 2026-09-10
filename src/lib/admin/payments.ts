@@ -395,3 +395,29 @@ export async function listStuckPayments() {
 export async function getPaymentsAdminConfig() {
   return getPaymentsConfig();
 }
+
+/** 9F-54 — the most recent PayMongo webhook events, for the admin payments page.
+ *  Read-only. Never returns the raw `payload` (it can carry the buyer's billing
+ *  email); the FAILED-event reprocess action loads it server-side by id. */
+export async function listRecentWebhookEvents(limit = 25) {
+  return prisma.webhookEvent.findMany({
+    orderBy: { receivedAt: "desc" },
+    take: limit,
+    select: {
+      id: true,
+      providerId: true,
+      type: true,
+      status: true,
+      error: true,
+      receivedAt: true,
+      processedAt: true,
+      reprocessedAt: true,
+      payload: false,
+    },
+  });
+}
+
+/** 9F-54 — count of FAILED webhook events (for the alert banner). */
+export async function countFailedWebhookEvents(): Promise<number> {
+  return prisma.webhookEvent.count({ where: { status: "FAILED" } });
+}

@@ -1,9 +1,15 @@
 import type { Metadata } from "next";
-import { requirePermission } from "@/lib/admin/rbac";
-import { listAdminPayments, getPaymentsAdminConfig, listStuckPayments } from "@/lib/admin/payments";
+import { requirePermission, hasPermission } from "@/lib/admin/rbac";
+import {
+  listAdminPayments,
+  getPaymentsAdminConfig,
+  listStuckPayments,
+  listRecentWebhookEvents,
+} from "@/lib/admin/payments";
 import { getPaymongoDiagnostics } from "@/lib/payments/diagnostics";
 import { PageHeader, FilterBar, SearchInput, FilterSelect, Pagination, Card } from "@/components/admin/ui";
 import { PaymentsTable } from "@/components/admin/payments/payments-table";
+import { ReprocessWebhookButton } from "@/components/admin/payments/reprocess-webhook-button";
 import { PAYMENT_STATUSES, paymentStatusLabel } from "@/lib/payments/status";
 
 export const metadata: Metadata = { title: "Payments" };
@@ -15,11 +21,12 @@ const RANGE_OPTIONS = [
 ];
 
 export default async function AdminPaymentsPage({ searchParams }: PageProps<"/admin/payments">) {
-  await requirePermission("view_payments");
+  const admin = await requirePermission("view_payments");
+  const canManage = hasPermission(admin, "manage_payments");
   const sp = await searchParams;
   const str = (v: string | string[] | undefined) => (typeof v === "string" ? v : undefined);
 
-  const [{ rows, total, pageCount, page: current }, config, stuck, diag] = await Promise.all([
+  const [{ rows, total, pageCount, page: current }, config, stuck, diag, webhooks] = await Promise.all([
     listAdminPayments({
       q: str(sp.q),
       status: str(sp.status),
@@ -29,8 +36,10 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
     getPaymentsAdminConfig(),
     listStuckPayments(),
     getPaymongoDiagnostics(),
+    listRecentWebhookEvents(25),
   ]);
 
+  const failedWebhooks = webhooks.filter((w) => w.status === "FAILED").length;
   const searching = Boolean(str(sp.q) || str(sp.status) || str(sp.range));
 
   return (
@@ -112,6 +121,69 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
       <div className="mt-4">
         <Pagination page={current} totalPages={pageCount} />
       </div>
+
+      {/* 9F-54 — recent PayMongo webhook events. FAILED events (a transient
+          error, a since-fixed bug) can be reprocessed through the same
+          idempotent handler from their stored raw payload. */}
+      <Card className="mt-8 text-sm">
+        <div className="flex items-center justify-between">
+          <p className="font-medium text-ink">Recent webhook events</p>
+          {failedWebhooks > 0 && (
+            <span className="rounded-sm bg-clay-50 px-2 py-0.5 text-xs font-medium text-clay">
+              {failedWebhooks} FAILED
+            </span>
+          )}
+        </div>
+        {webhooks.length === 0 ? (
+          <p className="mt-2 text-xs text-ink-faint">No webhook events yet.</p>
+        ) : (
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-ink-faint">
+                <tr className="border-b border-line/60 text-left">
+                  <th className="py-1 pr-3 font-medium">Received</th>
+                  <th className="py-1 pr-3 font-medium">Type</th>
+                  <th className="py-1 pr-3 font-medium">Provider id</th>
+                  <th className="py-1 pr-3 font-medium">Status</th>
+                  <th className="py-1 pr-3 font-medium">Note</th>
+                  <th className="py-1 font-medium" />
+                </tr>
+              </thead>
+              <tbody>
+                {webhooks.map((w) => (
+                  <tr key={w.id} className="border-b border-line/40 align-top">
+                    <td className="py-1.5 pr-3 tabular-nums text-ink-faint">
+                      {w.receivedAt.toISOString().slice(0, 16).replace("T", " ")}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink">{w.type}</td>
+                    <td className="py-1.5 pr-3 font-mono text-ink-soft">{w.providerId}</td>
+                    <td className="py-1.5 pr-3">
+                      <span
+                        className={
+                          w.status === "PROCESSED"
+                            ? "text-fern"
+                            : w.status === "FAILED"
+                              ? "font-medium text-clay"
+                              : "text-ink-faint"
+                        }
+                      >
+                        {w.status}
+                        {w.reprocessedAt ? " · reprocessed" : ""}
+                      </span>
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-faint">{w.error ?? "—"}</td>
+                    <td className="py-1.5 text-right">
+                      {w.status === "FAILED" && canManage && (
+                        <ReprocessWebhookButton webhookEventId={w.id} />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

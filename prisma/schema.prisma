@@ -1020,7 +1020,13 @@ model WebhookEvent {
   type        String // "checkout_session.payment.paid" | ...
   status      String   @default("RECEIVED") // RECEIVED | PROCESSED | IGNORED | FAILED
   payloadHash String // sha256(raw body)
+  // 9F-54 — the raw, ALREADY-SIGNATURE-VERIFIED webhook body. Stored so an
+  // authorized `manage_payments` admin can reprocess a FAILED event through the
+  // same idempotent handler without a PayMongo dashboard re-send. NULL on every
+  // pre-9F-54 row (there are none in production). Never contains a credential.
+  payload     String?
   error       String?
+  reprocessedAt DateTime? // 9F-54 — last admin reprocess attempt
   receivedAt  DateTime @default(now())
   processedAt DateTime?
 

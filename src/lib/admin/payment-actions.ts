@@ -7,6 +7,7 @@ import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { getCheckoutSession, PaymongoNotConfiguredError } from "@/lib/payments/paymongo";
+import { reprocessWebhookEvent } from "@/lib/payments/webhook";
 import {
   confirmCodPaymentReceived,
   type ConfirmCodPaymentInput,
@@ -90,6 +91,39 @@ export async function reconcilePaymentAction(input: unknown): Promise<PaymentAct
     const detail = err instanceof Error ? err.message : "unknown error";
     return { ok: false, error: `Could not reach PayMongo: ${detail}` };
   }
+}
+
+// ---------------------------------------------------------------------------
+// 9F-54 — reprocess a FAILED PayMongo WebhookEvent
+//
+// A FAILED webhook (transient DB error, a bug fixed since, an amount check that
+// has since been corrected upstream) is re-run through the SAME idempotent
+// handler from its stored raw payload. `manage_payments` only. Never creates a
+// duplicate Payment / OrderEvent / AdminAuditLog — the handlers are all
+// status-guarded. A genuine amount/currency mismatch simply fails again.
+// ---------------------------------------------------------------------------
+
+const reprocessSchema = z.object({ webhookEventId: z.string().min(1).max(64) });
+
+export async function reprocessWebhookEventAction(input: unknown): Promise<PaymentActionState> {
+  const admin = await requirePermission("manage_payments");
+  const parsed = reprocessSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+
+  const res = await reprocessWebhookEvent(parsed.data.webhookEventId, {
+    userId: admin.user.id,
+    email: admin.user.email ?? "admin",
+  });
+  if (!res.ok) return { ok: false, error: res.error };
+
+  revalidatePath("/admin/payments");
+  return {
+    ok: true,
+    message:
+      res.outcome === "PROCESSED"
+        ? "Webhook reprocessed — the event was applied."
+        : "Webhook reprocessed — its effect was already current (no change).",
+  };
 }
 
 // ---------------------------------------------------------------------------

@@ -2,6 +2,13 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+
+/** The webhook handlers accept the global client (production) or a transaction
+ *  client (rolled-back tests) — identical to `recordSettlement` /
+ *  `confirmCodPaymentReceived` / `saveSellerShipment`. With the default `prisma`
+ *  each handler opens its own `$transaction` exactly as before; with a passed tx
+ *  the handler runs inside it. No state-machine logic changes. */
+type Db = Prisma.TransactionClient | typeof prisma;
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendPaymentConfirmation, sendRefundCompleted } from "@/lib/email/notifications";
@@ -96,10 +103,13 @@ export async function processPaymongoWebhook(
   const payloadHash = createHash("sha256").update(rawBody).digest("hex");
 
   // 3. Claim the event id. Unique constraint = replay / duplicate protection.
+  //    The raw body is stored ALONGSIDE the claim (it is already
+  //    signature-verified at this point) so a FAILED event can be reprocessed
+  //    through the same idempotent handler — see `reprocessWebhookEvent`.
   let claimed = false;
   try {
     const res = await prisma.webhookEvent.createMany({
-      data: [{ providerId, type, payloadHash, status: "RECEIVED" }],
+      data: [{ providerId, type, payloadHash, payload: rawBody, status: "RECEIVED" }],
       skipDuplicates: true,
     });
     claimed = res.count === 1;
@@ -149,8 +159,13 @@ export async function processPaymongoWebhook(
   }
 }
 
-async function markEvent(providerId: string, status: string, error: string | null): Promise<void> {
-  await prisma.webhookEvent
+async function markEvent(
+  providerId: string,
+  status: string,
+  error: string | null,
+  db: Db = prisma,
+): Promise<void> {
+  await db.webhookEvent
     .update({
       where: { providerId },
       data: { status, error, processedAt: new Date() },
@@ -158,12 +173,123 @@ async function markEvent(providerId: string, status: string, error: string | nul
     .catch(() => {});
 }
 
+/** Merge fields into a Payment.metadata JSON string. Undefined values are
+ *  dropped; a malformed existing value is treated as {}. Never throws. */
+export function mergeMetadata(existing: string | null | undefined, patch: Record<string, unknown>): string {
+  let base: Record<string, unknown> = {};
+  try {
+    const parsed = existing ? JSON.parse(existing) : {};
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) base = parsed as Record<string, unknown>;
+  } catch {
+    /* keep {} */
+  }
+  for (const [k, v] of Object.entries(patch)) {
+    if (v !== undefined) base[k] = v;
+  }
+  return JSON.stringify(base);
+}
+
+/**
+ * 9F-54 — reprocess a FAILED `WebhookEvent` through the SAME idempotent handler.
+ *
+ * The permission check (`manage_payments`) lives in the thin server action
+ * (`reprocessWebhookEventAction`); this core takes an explicit `actor`.
+ *
+ * Safe by construction — it does NOT re-claim the event (the row already
+ * exists), and every handler is status-guarded (`canTransitionPayment` +
+ * status-scoped `updateMany` with a count check), so re-running a handler that
+ * partially succeeded, or one whose work is already done, is a no-op. It never
+ * creates a second Payment / OrderEvent / AdminAuditLog for the same effect.
+ *
+ * Only FAILED events with a stored raw `payload` are eligible. IGNORED (feature
+ * off / unknown type) and PROCESSED events are refused — reprocessing them would
+ * be meaningless or unsafe.
+ */
+export type ReprocessResult =
+  | { ok: true; outcome: "PROCESSED" | "already_current" }
+  | { ok: false; code: "NOT_FOUND" | "NOT_FAILED" | "NO_PAYLOAD" | "FEATURE_OFF" | "HANDLER_ERROR"; error: string };
+
+export async function reprocessWebhookEvent(
+  webhookEventId: string,
+  actor: { userId: string; email: string },
+  db: Db = prisma,
+): Promise<ReprocessResult> {
+  const row = await db.webhookEvent.findUnique({
+    where: { id: webhookEventId },
+    select: { id: true, providerId: true, type: true, status: true, payload: true, payloadHash: true },
+  });
+  if (!row) return { ok: false, code: "NOT_FOUND", error: "No such webhook event." };
+  if (row.status !== "FAILED") {
+    return { ok: false, code: "NOT_FAILED", error: `Only a FAILED event can be reprocessed (this one is ${row.status}).` };
+  }
+  if (!row.payload) {
+    return { ok: false, code: "NO_PAYLOAD", error: "No stored payload — resend this event from the PayMongo dashboard instead." };
+  }
+
+  const config = await getPaymentsConfig();
+  if (!config.onlinePaymentEnabled) {
+    return { ok: false, code: "FEATURE_OFF", error: "Online payment is not enabled — nothing to reprocess." };
+  }
+
+  let event: PaymongoEvent;
+  try {
+    event = JSON.parse(row.payload) as PaymongoEvent;
+  } catch {
+    return { ok: false, code: "NO_PAYLOAD", error: "Stored payload is not valid JSON." };
+  }
+
+  const txClient = db === prisma ? undefined : (db as Prisma.TransactionClient);
+  await db.webhookEvent.update({ where: { id: row.id }, data: { reprocessedAt: new Date() } }).catch(() => {});
+
+  try {
+    await handleEvent(row.providerId, row.type, event, db);
+    await markEvent(row.providerId, "PROCESSED", null, db);
+    await writeAudit(
+      {
+        actorUserId: actor.userId,
+        action: "payment.webhook_reprocessed",
+        targetType: "webhook_event",
+        targetId: row.id,
+        summary: `${actor.email} reprocessed FAILED webhook ${row.providerId} (${row.type}) → PROCESSED`,
+        meta: { providerId: row.providerId, type: row.type },
+      },
+      txClient,
+    );
+    return { ok: true, outcome: "PROCESSED" };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message.slice(0, 300) : "handler error";
+    await markEvent(row.providerId, "FAILED", reason, db);
+    await writeAudit(
+      {
+        actorUserId: actor.userId,
+        action: "payment.webhook_reprocess_failed",
+        targetType: "webhook_event",
+        targetId: row.id,
+        summary: `${actor.email} reprocessed FAILED webhook ${row.providerId} (${row.type}) — still failing`,
+        meta: { providerId: row.providerId, type: row.type, reason },
+      },
+      txClient,
+    );
+    return { ok: false, code: "HANDLER_ERROR", error: reason };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Handlers — Phase 4-B onward. Each re-reads our own rows and validates
 // amount/currency/order before any state change.
 // ---------------------------------------------------------------------------
 
-async function handleEvent(eventId: string, type: string, event: PaymongoEvent): Promise<void> {
+/**
+ * Apply a signature-verified webhook event to Axiaro's own rows. Exported so a
+ * rolled-back test can drive it with a transaction client; production reaches it
+ * only through `processPaymongoWebhook` (after signature + claim + gate).
+ */
+export async function handleEvent(
+  eventId: string,
+  type: string,
+  event: PaymongoEvent,
+  db: Db = prisma,
+): Promise<void> {
   const obj = event.data?.attributes?.data;
   const objId = obj?.id;
   const attrs = obj?.attributes ?? {};
@@ -172,13 +298,13 @@ async function handleEvent(eventId: string, type: string, event: PaymongoEvent):
   switch (type) {
     case "checkout_session.payment.paid":
     case "payment.paid":
-      return applyPaid(eventId, type, objId, attrs);
+      return applyPaid(eventId, type, objId, attrs, db);
     case "payment.failed":
-      return applyFailed(eventId, objId, attrs);
+      return applyFailed(eventId, objId, attrs, db);
     case "checkout_session.expired":
-      return applyExpired(eventId, objId);
+      return applyExpired(eventId, objId, db);
     case "refund.updated":
-      return applyRefundUpdate(eventId, objId, attrs);
+      return applyRefundUpdate(eventId, objId, attrs, db);
   }
 }
 
@@ -195,9 +321,9 @@ type ProviderFields = {
  *  (`{ id, type, attributes: { amount } }`). Read either shape. */
 type ProviderPayObj = ProviderFields & { attributes?: ProviderFields };
 
-const num = (v: unknown): number | null =>
+export const num = (v: unknown): number | null =>
   typeof v === "number" && Number.isFinite(v) ? v : null;
-const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
+export const str = (v: unknown): string | null => (typeof v === "string" && v ? v : null);
 
 /** Merge a possibly-wrapped resource down to a flat field bag (own > attributes). */
 function flat(o: ProviderPayObj | undefined): ProviderFields & { id?: unknown } {
@@ -223,7 +349,7 @@ function flat(o: ProviderPayObj | undefined): ProviderFields & { id?: unknown } 
  * We ALWAYS take the amount from what PayMongo says it captured and then check
  * it against our own snapshot + the live order total — never the reverse.
  */
-function extractPaidFacts(type: string, attrs: Record<string, unknown>): {
+export function extractPaidFacts(type: string, attrs: Record<string, unknown>): {
   amount: number | null;
   currency: string | null;
   method: string | null;
@@ -258,7 +384,7 @@ function extractPaidFacts(type: string, attrs: Record<string, unknown>): {
 /** Find the Payment for a provider event: by any provider id present in the
  *  payload (session id, payment intent id, nested payment ids), falling back to
  *  our own `payment_id` carried in the session metadata. */
-async function findPayment(objId: string, attrs: Record<string, unknown>) {
+async function findPayment(objId: string, attrs: Record<string, unknown>, db: Db) {
   const include = {
     order: { select: { id: true, orderNumber: true, status: true, grandTotal: true } },
   } as const;
@@ -277,7 +403,7 @@ async function findPayment(objId: string, attrs: Record<string, unknown>) {
     if (typeof id === "string") candidates.add(id);
   }
 
-  const byProvider = await prisma.payment.findFirst({
+  const byProvider = await db.payment.findFirst({
     where: { providerId: { in: [...candidates] } },
     include,
   });
@@ -285,7 +411,7 @@ async function findPayment(objId: string, attrs: Record<string, unknown>) {
 
   const ourId = (attrs.metadata as { payment_id?: unknown } | undefined)?.payment_id;
   if (typeof ourId === "string" && ourId) {
-    return prisma.payment.findFirst({ where: { id: ourId }, include });
+    return db.payment.findFirst({ where: { id: ourId }, include });
   }
   return null;
 }
@@ -295,8 +421,9 @@ async function applyPaid(
   type: string,
   objId: string,
   attrs: Record<string, unknown>,
+  db: Db,
 ): Promise<void> {
-  const payment = await findPayment(objId, attrs);
+  const payment = await findPayment(objId, attrs, db);
   if (!payment) throw new Error(`no Payment for provider object ${objId}`);
   if (payment.order.status === "CANCELLED") {
     throw new Error(`order ${payment.order.orderNumber} is cancelled — manual review`);
@@ -323,7 +450,7 @@ async function applyPaid(
   const method = facts.method ?? "";
   const config = await getPaymentsConfig();
 
-  await prisma.$transaction(async (tx) => {
+  const runTx = async (tx: Prisma.TransactionClient) => {
     const paidOrder = await tx.order.updateMany({
       where: { id: payment.order.id, status: "PENDING_PAYMENT" },
       data: {
@@ -337,7 +464,18 @@ async function applyPaid(
 
     await tx.payment.update({
       where: { id: payment.id },
-      data: { status: "PAID", method: method || null, paidAt: new Date(), lastEventId: eventId },
+      data: {
+        status: "PAID",
+        method: method || null,
+        paidAt: new Date(),
+        lastEventId: eventId,
+        // 9F-54 — persist the real PayMongo Payment id (pay_…). `providerId`
+        // keeps the Checkout Session id (cs_…); this is the id a future provider
+        // refund needs. Merged into the JSON metadata string so no schema change.
+        metadata: mergeMetadata(payment.metadata, {
+          providerPaymentId: facts.providerPaymentId ?? undefined,
+        }),
+      },
     });
     await tx.orderEvent.create({
       data: { orderId: payment.order.id, status: "PAID", title: "Payment received", detail: null },
@@ -359,28 +497,35 @@ async function applyPaid(
         });
       }
     }
-  });
+  };
+  if (db === prisma) await prisma.$transaction(runTx);
+  else await runTx(db as Prisma.TransactionClient);
 
-  await writeAudit({
-    actorUserId: null,
-    action: "payment.paid",
-    targetType: "order",
-    targetId: payment.order.id,
-    summary: `PayMongo webhook: order ${payment.order.orderNumber} paid (${paidAmount} centavos, ${method || "unknown method"})`,
-    meta: {
-      eventId,
-      providerId: payment.providerId,
-      providerPaymentId: facts.providerPaymentId,
-      amount: paidAmount,
-      method,
-      holdForReview: config.holdForReview,
+  await writeAudit(
+    {
+      actorUserId: null,
+      action: "payment.paid",
+      targetType: "order",
+      targetId: payment.order.id,
+      summary: `PayMongo webhook: order ${payment.order.orderNumber} paid (${paidAmount} centavos, ${method || "unknown method"})`,
+      meta: {
+        eventId,
+        providerId: payment.providerId,
+        providerPaymentId: facts.providerPaymentId,
+        amount: paidAmount,
+        method,
+        holdForReview: config.holdForReview,
+      },
     },
-  });
+    db === prisma ? undefined : (db as Prisma.TransactionClient),
+  );
 
-  scheduleEmail(() => sendPaymentConfirmation(payment.order.id));
-  if (!config.holdForReview) {
-    const { sendOrderProcessing } = await import("@/lib/email/notifications");
-    scheduleEmail(() => sendOrderProcessing(payment.order.id));
+  if (db === prisma) {
+    scheduleEmail(() => sendPaymentConfirmation(payment.order.id));
+    if (!config.holdForReview) {
+      const { sendOrderProcessing } = await import("@/lib/email/notifications");
+      scheduleEmail(() => sendOrderProcessing(payment.order.id));
+    }
   }
 }
 
@@ -388,8 +533,9 @@ async function applyFailed(
   eventId: string,
   objId: string,
   attrs: Record<string, unknown>,
+  db: Db,
 ): Promise<void> {
-  const payment = await findPayment(objId, attrs);
+  const payment = await findPayment(objId, attrs, db);
   if (!payment) throw new Error(`no Payment for provider object ${objId}`);
   if (!canTransitionPayment(payment.status, "FAILED")) return;
 
@@ -399,11 +545,11 @@ async function applyFailed(
       "declined",
   ).slice(0, 300);
 
-  await prisma.payment.update({
+  await db.payment.update({
     where: { id: payment.id },
     data: { status: "FAILED", failureReason: reason, lastEventId: eventId },
   });
-  await prisma.orderEvent.create({
+  await db.orderEvent.create({
     data: {
       orderId: payment.order.id,
       status: payment.order.status,
@@ -411,43 +557,50 @@ async function applyFailed(
       detail: null,
     },
   });
-  await writeAudit({
-    actorUserId: null,
-    action: "payment.failed",
-    targetType: "order",
-    targetId: payment.order.id,
-    summary: `PayMongo webhook: payment failed for order ${payment.order.orderNumber}`,
-    meta: { eventId, reason },
-  });
+  await writeAudit(
+    {
+      actorUserId: null,
+      action: "payment.failed",
+      targetType: "order",
+      targetId: payment.order.id,
+      summary: `PayMongo webhook: payment failed for order ${payment.order.orderNumber}`,
+      meta: { eventId, reason },
+    },
+    db === prisma ? undefined : (db as Prisma.TransactionClient),
+  );
   // Order stays PENDING_PAYMENT — the customer can start a new session.
 }
 
-async function applyExpired(eventId: string, objId: string): Promise<void> {
-  const payment = await prisma.payment.findFirst({
+async function applyExpired(eventId: string, objId: string, db: Db): Promise<void> {
+  const payment = await db.payment.findFirst({
     where: { providerId: objId },
     select: { id: true, status: true, orderId: true },
   });
   if (!payment || !canTransitionPayment(payment.status, "EXPIRED")) return;
-  await prisma.payment.update({
+  await db.payment.update({
     where: { id: payment.id },
     data: { status: "EXPIRED", lastEventId: eventId },
   });
-  await writeAudit({
-    actorUserId: null,
-    action: "payment.expired",
-    targetType: "order",
-    targetId: payment.orderId,
-    summary: `PayMongo webhook: checkout session expired`,
-    meta: { eventId },
-  });
+  await writeAudit(
+    {
+      actorUserId: null,
+      action: "payment.expired",
+      targetType: "order",
+      targetId: payment.orderId,
+      summary: `PayMongo webhook: checkout session expired`,
+      meta: { eventId },
+    },
+    db === prisma ? undefined : (db as Prisma.TransactionClient),
+  );
 }
 
 async function applyRefundUpdate(
   eventId: string,
   objId: string,
   attrs: Record<string, unknown>,
+  db: Db,
 ): Promise<void> {
-  const refund = await prisma.paymentRefund.findFirst({
+  const refund = await db.paymentRefund.findFirst({
     where: { providerId: objId },
     include: {
       payment: { include: { order: { select: { id: true, orderNumber: true, grandTotal: true } } } },
@@ -458,8 +611,10 @@ async function applyRefundUpdate(
 
   const providerStatus = String(attrs.status ?? "").toLowerCase();
 
+  const txClient = db === prisma ? undefined : (db as Prisma.TransactionClient);
+
   if (providerStatus === "succeeded") {
-    await prisma.$transaction(async (tx) => {
+    const runTx = async (tx: Prisma.TransactionClient) => {
       await tx.paymentRefund.updateMany({
         where: { id: refund.id, status: { in: ["PENDING", "PROCESSING"] } },
         data: { status: "SUCCEEDED", succeededAt: new Date() },
@@ -487,30 +642,38 @@ async function applyRefundUpdate(
           data: { status: "REFUND_COMPLETED", refundCompletedAt: new Date() },
         });
       }
-    });
+    };
+    if (db === prisma) await prisma.$transaction(runTx);
+    else await runTx(db as Prisma.TransactionClient);
 
-    await writeAudit({
-      actorUserId: null,
-      action: "payment.refund_succeeded",
-      targetType: "order",
-      targetId: refund.payment.order.id,
-      summary: `PayMongo webhook: refund ${objId} succeeded (${refund.amount} centavos) for order ${refund.payment.order.orderNumber}`,
-      meta: { eventId, refundId: refund.id },
-    });
-    scheduleEmail(() => sendRefundCompleted(refund.id));
+    await writeAudit(
+      {
+        actorUserId: null,
+        action: "payment.refund_succeeded",
+        targetType: "order",
+        targetId: refund.payment.order.id,
+        summary: `PayMongo webhook: refund ${objId} succeeded (${refund.amount} centavos) for order ${refund.payment.order.orderNumber}`,
+        meta: { eventId, refundId: refund.id },
+      },
+      txClient,
+    );
+    if (db === prisma) scheduleEmail(() => sendRefundCompleted(refund.id));
   } else if (providerStatus === "failed") {
-    await prisma.paymentRefund.updateMany({
+    await db.paymentRefund.updateMany({
       where: { id: refund.id, status: { in: ["PENDING", "PROCESSING"] } },
       data: { status: "FAILED", failureReason: String(attrs.failure_reason ?? "refund failed").slice(0, 300) },
     });
-    await writeAudit({
-      actorUserId: null,
-      action: "payment.refund_failed",
-      targetType: "order",
-      targetId: refund.payment.order.id,
-      summary: `PayMongo webhook: refund ${objId} FAILED for order ${refund.payment.order.orderNumber}`,
-      meta: { eventId },
-    });
+    await writeAudit(
+      {
+        actorUserId: null,
+        action: "payment.refund_failed",
+        targetType: "order",
+        targetId: refund.payment.order.id,
+        summary: `PayMongo webhook: refund ${objId} FAILED for order ${refund.payment.order.orderNumber}`,
+        meta: { eventId },
+      },
+      txClient,
+    );
     // The ReturnRequest stays REFUND_INITIATED so an admin can retry / fall back.
   }
 }
