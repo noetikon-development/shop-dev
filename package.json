@@ -60,6 +60,7 @@
     "db:migrate:9f47b": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260910160000_shipping_foundation.sql",
     "test:9f47b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f47b.ts",
     "test:9f47c": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f47c.ts",
+    "test:9f49-cod": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f49-cod.ts",
     "test:9f20": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f20.ts",
     "test:9f21": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f21.ts",
     "test:9f22": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f22.ts",
