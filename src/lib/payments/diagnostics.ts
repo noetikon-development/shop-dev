@@ -29,6 +29,10 @@ export type PaymongoDiagnostics = {
   apiBase: string;
   /** The master switch (`getPaymentsConfig().onlinePaymentEnabled`). */
   onlinePaymentEnabled: boolean;
+  /** The `payments.*` StoreSetting read is currently failing (transient DB
+   *  trouble) — the displayed switches are showing restrictive defaults, not
+   *  the real configured values. */
+  settingsReadFailed: boolean;
   /** Node environment the server is running in. */
   nodeEnv: string;
   /** Plain-English summary of why online payment is (not) live. */
@@ -39,7 +43,11 @@ export async function getPaymongoDiagnostics(): Promise<PaymongoDiagnostics> {
   const c = await getPaymentsConfig();
 
   let summary: string;
-  if (c.onlinePaymentEnabled) {
+  if (c.settingsReadFailed) {
+    summary =
+      "The payments settings could not be read from the database just now (transient). " +
+      "The switches below show restrictive defaults, not the real values — retry shortly.";
+  } else if (c.onlinePaymentEnabled) {
     summary = `Online payment is LIVE in ${c.mode} mode.`;
   } else {
     const missing: string[] = [];
@@ -65,6 +73,7 @@ export async function getPaymongoDiagnostics(): Promise<PaymongoDiagnostics> {
     modeMismatch: c.modeMismatch,
     apiBase: c.apiBase,
     onlinePaymentEnabled: c.onlinePaymentEnabled,
+    settingsReadFailed: c.settingsReadFailed,
     nodeEnv: process.env.NODE_ENV ?? "unknown",
     summary,
   };

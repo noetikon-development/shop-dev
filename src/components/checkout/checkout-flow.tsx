@@ -139,11 +139,14 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
           window.location.assign(pay.checkoutUrl);
           return;
         }
-        setSubmitting(false);
-        setConfirming(false);
-        setError(
-          `${pay.error} Your order ${res.orderNumber} is saved — you can complete payment from your orders.`,
-        );
+        // The order is committed (PENDING_PAYMENT) but starting the hosted
+        // checkout failed — a provider error, or a transient settings read.
+        // The cart is already converted, so staying here would show an empty
+        // /checkout. Send the customer to their order page, which offers
+        // "Pay now" (the existing Complete-payment recovery path). Keep the
+        // button loading through the navigation.
+        toast.error(pay.error);
+        router.push(`/order/${res.orderNumber}?pay=cancelled`);
         return;
       }
 

@@ -83,6 +83,12 @@ export type PaymentsConfig = {
   hasWebhookSecret: boolean;
   /** The resolved API base URL (safe to display — contains no secret). */
   apiBase: string;
+  /** The `payments.*` StoreSetting read failed on every retry. The display
+   *  booleans then hold their restrictive defaults (COD-only), so a page render
+   *  degrades gracefully — but a write path that has ALREADY committed an order
+   *  (`beginOnlinePayment`) MUST treat this as "couldn't confirm, try again",
+   *  never as a genuine "online payment is switched off". */
+  settingsReadFailed: boolean;
 };
 
 function boolDefault(key: string): boolean {
@@ -93,45 +99,92 @@ function envPresent(name: string): boolean {
   return Boolean((process.env[name] ?? "").trim());
 }
 
-export async function getPaymentsConfig(): Promise<PaymentsConfig> {
-  const hasSecretKey = envPresent("PAYMONGO_SECRET_KEY");
-  const hasWebhookSecret = envPresent("PAYMONGO_WEBHOOK_SECRET");
-  const detectedMode = detectKeyMode(process.env.PAYMONGO_SECRET_KEY);
+export type PaymentSettingRow = { key: string; value: string };
 
+export const PAYMENT_SETTING_KEYS = [
+  "payments.onlinePaymentEnabled",
+  "payments.holdForReview",
+  "payments.mode",
+  "payments.enabledMethods",
+] as const;
+
+/**
+ * Read the `payments.*` StoreSettings with a short bounded retry.
+ *
+ * A transient pooled-connection hiccup — e.g. a prepared-statement / contention
+ * error on the query that immediately follows a large checkout `$transaction`
+ * on the same warm serverless instance — must NOT be mistaken for "PayMongo is
+ * disabled". Returns `null` only when every attempt fails; the caller decides
+ * what a total failure means for its context.
+ *
+ * `reader` is injectable for tests; production uses the Prisma query.
+ */
+export async function readPaymentSettings(
+  reader: () => Promise<PaymentSettingRow[]> = () =>
+    prisma.storeSetting.findMany({
+      where: { key: { in: [...PAYMENT_SETTING_KEYS] } },
+      select: { key: true, value: true },
+    }),
+  attempts = 3,
+): Promise<PaymentSettingRow[] | null> {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await reader();
+    } catch (err) {
+      if (i === attempts) {
+        console.error(
+          `[payments-config] StoreSetting read failed after ${attempts} attempts:`,
+          err instanceof Error ? err.name : "unknown",
+        );
+        return null;
+      }
+      await new Promise((r) => setTimeout(r, 40 * i)); // 40ms, then 80ms
+    }
+  }
+  return null;
+}
+
+/**
+ * Map the raw setting rows onto the behaviour values. `null` rows means the
+ * read failed on every attempt — the values then stay at their restrictive
+ * defaults and `settingsReadFailed` is `true` (a distinct signal, never a
+ * confident "disabled").
+ */
+export function applyPaymentSettingRows(rows: PaymentSettingRow[] | null): {
+  onlineSetting: boolean;
+  holdForReview: boolean;
+  mode: PaymentsMode;
+  enabledMethods: string[];
+  settingsReadFailed: boolean;
+} {
   let onlineSetting = boolDefault("payments.onlinePaymentEnabled");
   let holdForReview = boolDefault("payments.holdForReview");
   let mode: PaymentsMode = "test";
   let enabledMethods: string[] = ["COD", "CARD", "GCASH"];
 
-  try {
-    const rows = await prisma.storeSetting.findMany({
-      where: {
-        key: {
-          in: [
-            "payments.onlinePaymentEnabled",
-            "payments.holdForReview",
-            "payments.mode",
-            "payments.enabledMethods",
-          ],
-        },
-      },
-      select: { key: true, value: true },
-    });
-    for (const r of rows) {
-      if (r.key === "payments.onlinePaymentEnabled") onlineSetting = decodeSettingValue(r.value, "boolean") === true;
-      if (r.key === "payments.holdForReview") holdForReview = decodeSettingValue(r.value, "boolean") === true;
-      if (r.key === "payments.mode") {
-        const m = String(decodeSettingValue(r.value, "string")).trim().toLowerCase();
-        mode = m === "live" ? "live" : "test";
-      }
-      if (r.key === "payments.enabledMethods") {
-        const v = decodeSettingValue(r.value, "json");
-        if (Array.isArray(v)) enabledMethods = v.map(String);
-      }
+  for (const r of rows ?? []) {
+    if (r.key === "payments.onlinePaymentEnabled") onlineSetting = decodeSettingValue(r.value, "boolean") === true;
+    if (r.key === "payments.holdForReview") holdForReview = decodeSettingValue(r.value, "boolean") === true;
+    if (r.key === "payments.mode") {
+      const m = String(decodeSettingValue(r.value, "string")).trim().toLowerCase();
+      mode = m === "live" ? "live" : "test";
     }
-  } catch {
-    // DB unreachable — safe, restrictive defaults (feature stays off).
+    if (r.key === "payments.enabledMethods") {
+      const v = decodeSettingValue(r.value, "json");
+      if (Array.isArray(v)) enabledMethods = v.map(String);
+    }
   }
+
+  return { onlineSetting, holdForReview, mode, enabledMethods, settingsReadFailed: rows === null };
+}
+
+export async function getPaymentsConfig(): Promise<PaymentsConfig> {
+  const hasSecretKey = envPresent("PAYMONGO_SECRET_KEY");
+  const hasWebhookSecret = envPresent("PAYMONGO_WEBHOOK_SECRET");
+  const detectedMode = detectKeyMode(process.env.PAYMONGO_SECRET_KEY);
+
+  const { onlineSetting, holdForReview, mode, enabledMethods, settingsReadFailed } =
+    applyPaymentSettingRows(await readPaymentSettings());
 
   // Cross-environment safety: a mode mismatch, or a live key outside production,
   // hard-disables online payments (belt and braces alongside the master switch).
@@ -152,6 +205,7 @@ export async function getPaymentsConfig(): Promise<PaymentsConfig> {
     hasSecretKey,
     hasWebhookSecret,
     apiBase: paymongoApiBase(),
+    settingsReadFailed,
   };
 }
 

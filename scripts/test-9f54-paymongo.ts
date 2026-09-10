@@ -28,7 +28,13 @@ import {
   orderPaymentMethodFromProvider,
   isHandledWebhookType,
 } from "../src/lib/payments/status";
-import { getPaymentsConfig } from "../src/lib/payments/config";
+import {
+  getPaymentsConfig,
+  readPaymentSettings,
+  applyPaymentSettingRows,
+  type PaymentsConfig,
+} from "../src/lib/payments/config";
+import { beginOnlinePayment } from "../src/lib/payments/checkout-session";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -94,6 +100,24 @@ function failedEvent(sessionId: string, ourPaymentId: string) {
         },
       },
     },
+  };
+}
+
+/** A full PaymentsConfig for injecting into beginOnlinePayment in tests. */
+function fakeConfig(over: Partial<PaymentsConfig> = {}): PaymentsConfig {
+  return {
+    sessionsEnabled: true,
+    onlinePaymentEnabled: true,
+    holdForReview: false,
+    mode: "test",
+    detectedMode: "test",
+    modeMismatch: false,
+    enabledMethods: ["COD", "CARD", "GCASH"],
+    hasSecretKey: true,
+    hasWebhookSecret: true,
+    apiBase: "https://api.paymongo.com/v1",
+    settingsReadFailed: false,
+    ...over,
   };
 }
 
@@ -328,6 +352,122 @@ async function main() {
   ok("6 · sessionsEnabled === false (no secret key)", cfg.sessionsEnabled === false);
   ok("6 · production ledger empty: 0 Payment / 0 PaymentRefund / 0 WebhookEvent",
     (await prisma.payment.count()) === 0 && (await prisma.paymentRefund.count()) === 0 && (await prisma.webhookEvent.count()) === 0);
+  ok("6 · getPaymentsConfig() reports settingsReadFailed === false when the DB is reachable", cfg.settingsReadFailed === false);
+
+  // ── 14 — StoreSetting-read resilience + checkout recovery ────────────────
+  // A transient payments.* read failure must NOT be mistaken for "PayMongo
+  // disabled" once an order is already committed. (Root cause of the
+  // 2026-09-10 preview incident: getPaymentsConfig() swallowed a DB error into
+  // onlinePaymentEnabled=false, so beginOnlinePayment returned DISABLED after
+  // createOrderFromCart had already run.)
+
+  // bounded retry — succeeds after a transient failure
+  {
+    let calls = 0;
+    const rows = await readPaymentSettings(async () => {
+      calls++;
+      if (calls < 3) throw new Error("connection reset");
+      return [{ key: "payments.onlinePaymentEnabled", value: "true" }];
+    }, 3);
+    ok("14 · readPaymentSettings retries and succeeds after a transient failure",
+      calls === 3 && Array.isArray(rows) && rows?.[0]?.key === "payments.onlinePaymentEnabled");
+  }
+
+  // persistent failure — returns null (a distinct signal), never throws
+  {
+    let calls = 0;
+    const rows = await readPaymentSettings(async () => { calls++; throw new Error("still down"); }, 3);
+    ok("14 · readPaymentSettings returns null after exhausting retries (does not throw)", rows === null && calls === 3);
+  }
+
+  // null rows → settingsReadFailed, restrictive display defaults, NOT a crash
+  {
+    const d = applyPaymentSettingRows(null);
+    ok("14 · applyPaymentSettingRows(null) → settingsReadFailed true, onlineSetting false (restrictive default)",
+      d.settingsReadFailed === true && d.onlineSetting === false);
+  }
+
+  // empty rows (settings genuinely absent) is DISTINCT from a read failure
+  {
+    const d = applyPaymentSettingRows([]);
+    ok("14 · applyPaymentSettingRows([]) → settingsReadFailed FALSE (genuinely-off ≠ read failure)",
+      d.settingsReadFailed === false && d.onlineSetting === false);
+  }
+
+  // rows present and enabled → decoded, not a read failure
+  {
+    const d = applyPaymentSettingRows([
+      { key: "payments.onlinePaymentEnabled", value: "true" },
+      { key: "payments.mode", value: "" },
+      { key: "payments.enabledMethods", value: JSON.stringify(["COD", "CARD", "GCASH"]) },
+    ]);
+    ok("14 · applyPaymentSettingRows(rows) decodes onlineSetting=true, mode=test, settingsReadFailed=false",
+      d.settingsReadFailed === false && d.onlineSetting === true && d.mode === "test" && d.enabledMethods.includes("card") === false && d.enabledMethods.includes("CARD"));
+  }
+
+  // beginOnlinePayment: a settings-read failure → CONFIG_UNAVAILABLE, not DISABLED
+  {
+    const before = await prisma.payment.count();
+    const r = await beginOnlinePayment(
+      { orderNumber: "AX-000000-00001", userId: "nobody" },
+      { config: fakeConfig({ settingsReadFailed: true, sessionsEnabled: false }) },
+    );
+    ok("14 · beginOnlinePayment with settingsReadFailed → CONFIG_UNAVAILABLE (retryable), not DISABLED",
+      !r.ok && r.code === "CONFIG_UNAVAILABLE");
+    ok("14 · beginOnlinePayment CONFIG_UNAVAILABLE path creates no Payment row",
+      (await prisma.payment.count()) === before);
+  }
+
+  // beginOnlinePayment: a genuine "off" still returns DISABLED
+  {
+    const r = await beginOnlinePayment(
+      { orderNumber: "AX-000000-00001", userId: "nobody" },
+      { config: fakeConfig({ settingsReadFailed: false, sessionsEnabled: false }) },
+    );
+    ok("14 · beginOnlinePayment with a genuine sessionsEnabled=false → DISABLED (unchanged)",
+      !r.ok && r.code === "DISABLED");
+  }
+
+  // beginOnlinePayment: valid config, unknown order → NOT_FOUND (unchanged), no write
+  {
+    const before = await prisma.payment.count();
+    const r = await beginOnlinePayment(
+      { orderNumber: "AX-000000-00002", userId: "nobody" },
+      { config: fakeConfig({ settingsReadFailed: false, sessionsEnabled: true }) },
+    );
+    ok("14 · beginOnlinePayment valid config + unknown order → NOT_FOUND, no Payment row",
+      !r.ok && r.code === "NOT_FOUND" && (await prisma.payment.count()) === before);
+  }
+
+  // static — the DB-error swallow is gone, the retry + distinct signal are in place
+  {
+    const conf = read("src/lib/payments/config.ts");
+    ok("14 · config.ts: bounded retry loop over the StoreSetting read",
+      /for \(let i = 1; i <= attempts/.test(conf) && /export async function readPaymentSettings/.test(conf));
+    ok("14 · config.ts: a failed read yields settingsReadFailed, never a silent 'feature stays off'",
+      /settingsReadFailed: rows === null/.test(conf) && !/restrictive defaults \(feature stays off\)/.test(conf));
+  }
+  {
+    const cs = read("src/lib/payments/checkout-session.ts");
+    ok("14 · checkout-session.ts: settingsReadFailed → CONFIG_UNAVAILABLE checked BEFORE the DISABLED gate",
+      cs.indexOf('if (config.settingsReadFailed) return fail("CONFIG_UNAVAILABLE")') <
+        cs.indexOf('if (!config.sessionsEnabled) return fail("DISABLED")') &&
+      cs.indexOf('if (config.settingsReadFailed)') !== -1);
+  }
+  {
+    const cf = read("src/components/checkout/checkout-flow.tsx");
+    ok("14 · checkout-flow.tsx: a payment-init failure after order creation routes to the order page",
+      /router\.push\(`\/order\/\$\{res\.orderNumber\}\?pay=cancelled`\)/.test(cf));
+    ok("14 · checkout-flow.tsx: a successful init still redirects to the hosted checkoutUrl",
+      /window\.location\.assign\(pay\.checkoutUrl\)/.test(cf));
+    ok("14 · checkout-flow.tsx: the COD branch is unchanged (still router.push(`/order/${res.orderNumber}`))",
+      /router\.push\(`\/order\/\$\{res\.orderNumber\}`\);/.test(cf));
+  }
+  {
+    const co = read("src/lib/checkout.ts");
+    ok("14 · checkout.ts COD path unchanged: order still created paymentMethod 'NONE' + pay-on-delivery event",
+      /paymentMethod: "NONE"/.test(co) && /Payment is arranged on delivery/.test(co));
+  }
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   await prisma.$disconnect();

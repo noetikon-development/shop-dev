@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { Prisma } from "@prisma/client";
 import { getSiteUrl } from "@/lib/site-url";
 import { writeAudit } from "@/lib/admin/audit";
-import { getPaymentsConfig } from "@/lib/payments/config";
+import { getPaymentsConfig, type PaymentsConfig } from "@/lib/payments/config";
 import {
   createCheckoutSession,
   PaymongoApiError,
@@ -37,6 +37,7 @@ const ACTIVE_STATUSES = ["PENDING", "AWAITING_PAYMENT", "PAID", "PARTIALLY_REFUN
 
 export type BeginPaymentCode =
   | "DISABLED"
+  | "CONFIG_UNAVAILABLE"
   | "NOT_FOUND"
   | "INVALID_STATE"
   | "ALREADY_PAID"
@@ -55,6 +56,8 @@ export type BeginPaymentResult =
 /** Customer-safe message per failure code — never a raw PayMongo string. */
 const MESSAGE: Record<BeginPaymentCode, string> = {
   DISABLED: "Online payment isn’t available right now. Please try again shortly.",
+  CONFIG_UNAVAILABLE:
+    "We couldn’t confirm the payment settings just now. Your order is saved — please try paying again in a moment.",
   NOT_FOUND: "We couldn’t find that order.",
   INVALID_STATE: "This order can’t be paid online right now.",
   ALREADY_PAID: "This order has already been paid.",
@@ -144,11 +147,21 @@ function buildSessionInput(
   };
 }
 
-export async function beginOnlinePayment(args: {
-  orderNumber: string;
-  userId: string;
-}): Promise<BeginPaymentResult> {
-  const config = await getPaymentsConfig();
+export async function beginOnlinePayment(
+  args: {
+    orderNumber: string;
+    userId: string;
+  },
+  deps: { config?: PaymentsConfig } = {},
+): Promise<BeginPaymentResult> {
+  const config = deps.config ?? (await getPaymentsConfig());
+
+  // The order is already committed by the time we get here. A `payments.*`
+  // StoreSetting read that failed on every retry is NOT a genuine "online
+  // payment is switched off" — it is "we couldn't check". Returning DISABLED
+  // here would permanently strand a paid-intent order. Return a retryable
+  // error so the customer is sent to the order page to try again.
+  if (config.settingsReadFailed) return fail("CONFIG_UNAVAILABLE");
   if (!config.sessionsEnabled) return fail("DISABLED");
 
   const order = await prisma.order.findUnique({
