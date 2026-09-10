@@ -133,6 +133,8 @@ async function main() {
     AdminAuditLog: await prisma.adminAuditLog.count(), Payment: await prisma.payment.count(),
     PaymentRefund: await prisma.paymentRefund.count(), WebhookEvent: await prisma.webhookEvent.count(),
     SellerSettlement: await prisma.sellerSettlement.count(),
+    OfferInventory: await prisma.offerInventory.count(), OfferAdjustment: await prisma.offerAdjustment.count(),
+    Shipment: await prisma.shipment.count(), EmailLog: await prisma.emailLog.count(),
   };
   const realPaidEventsBefore = await prisma.orderEvent.count({ where: { orderId: realBefore.id, status: "PAID" } });
   const realCodAuditsBefore = await prisma.adminAuditLog.count({ where: { action: "order.cod_payment_confirmed", targetId: realBefore.id } });
@@ -167,6 +169,12 @@ async function main() {
 
       // ── A — the exact 100348 shape (real deliveredAt) ─────────────────────
       const A = await seedClone(tx, `a-${t}`, V);
+      // counts AFTER seeding the clone, BEFORE the confirm — the confirm itself
+      // must not move any of these.
+      const invA = await tx.offerInventory.count();
+      const adjA = await tx.offerAdjustment.count();
+      const shipA = await tx.shipment.count();
+      const emailA = await tx.emailLog.count();
       const rA = await confirmCodPaymentReceived(
         { orderId: A.order.id, remittanceReference: "  J&T-REMIT-9F49  ", note: "9F-49 rolled-back verification" },
         actor, tx,
@@ -188,6 +196,11 @@ async function main() {
         (await tx.paymentRefund.count({ where: { payment: { orderId: A.order.id } } })) === 0 &&
         (await tx.webhookEvent.count()) === countsBefore.WebhookEvent);
       ok("A · NO SellerSettlement created", (await tx.sellerSettlement.count()) === settlementBase);
+      ok("A · the confirm moved NO OfferInventory / OfferAdjustment / Shipment / EmailLog row (pure bookkeeping)",
+        (await tx.offerInventory.count()) === invA &&
+        (await tx.offerAdjustment.count()) === adjA &&
+        (await tx.shipment.count()) === shipA &&
+        (await tx.emailLog.count()) === emailA);
 
       // ── B — idempotency (2nd call against the now-PAID clone) ─────────────
       const rB = await confirmCodPaymentReceived({ orderId: A.order.id, note: "again" }, actor, tx);
@@ -267,12 +280,17 @@ async function main() {
     AdminAuditLog: await prisma.adminAuditLog.count(), Payment: await prisma.payment.count(),
     PaymentRefund: await prisma.paymentRefund.count(), WebhookEvent: await prisma.webhookEvent.count(),
     SellerSettlement: await prisma.sellerSettlement.count(),
+    OfferInventory: await prisma.offerInventory.count(), OfferAdjustment: await prisma.offerAdjustment.count(),
+    Shipment: await prisma.shipment.count(), EmailLog: await prisma.emailLog.count(),
   };
   ok("isolation · real AX-260907-100348 row byte-identical before/after", orderSnapshot(realBefore) === orderSnapshot(realAfter), orderSnapshot(realAfter));
   ok("isolation · real order updatedAt unchanged", realBefore.updatedAt.getTime() === realAfter?.updatedAt.getTime());
   ok("isolation · Order / OrderEvent / AdminAuditLog counts unchanged", countsAfter.Order === countsBefore.Order && countsAfter.OrderEvent === countsBefore.OrderEvent && countsAfter.AdminAuditLog === countsBefore.AdminAuditLog);
   ok("isolation · Payment / PaymentRefund / WebhookEvent counts unchanged", countsAfter.Payment === countsBefore.Payment && countsAfter.PaymentRefund === countsBefore.PaymentRefund && countsAfter.WebhookEvent === countsBefore.WebhookEvent);
   ok("isolation · SellerSettlement count unchanged (still 0)", countsAfter.SellerSettlement === countsBefore.SellerSettlement && countsAfter.SellerSettlement === 0);
+  ok("isolation · OfferInventory / OfferAdjustment / Shipment counts unchanged (COD confirm never touches inventory or shipment)",
+    countsAfter.OfferInventory === countsBefore.OfferInventory && countsAfter.OfferAdjustment === countsBefore.OfferAdjustment && countsAfter.Shipment === countsBefore.Shipment);
+  ok("isolation · EmailLog count unchanged (COD confirm sends no email)", countsAfter.EmailLog === countsBefore.EmailLog);
   ok("isolation · real order still has 0 PAID event + 0 cod_payment_confirmed audit",
     (await prisma.orderEvent.count({ where: { orderId: realBefore.id, status: "PAID" } })) === realPaidEventsBefore &&
     (await prisma.adminAuditLog.count({ where: { action: "order.cod_payment_confirmed", targetId: realBefore.id } })) === realCodAuditsBefore);
