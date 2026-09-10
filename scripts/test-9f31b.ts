@@ -101,7 +101,7 @@ function staticTests() {
     /sendSellerReturnRequested[\s\S]{0,1400}loadSellerLifecycleEmailContext\(sellerId/.test(notif) &&
     /type: "seller_return_requested",\s*\n\s*to: ctx\.recipients,\s*\n\s*from: SECURITY_FROM/.test(notif));
   ok("P2 · idempotency key SELLER_RETURN_REQUESTED:<returnId>:<sellerId>",
-    /idempotencyKey: opts\.idempotencyKey \?\? `SELLER_RETURN_REQUESTED:\$\{returnId\}:\$\{sellerId\}`/.test(notif));
+    /const idempotencyKey = opts\.idempotencyKey \?\? `SELLER_RETURN_REQUESTED:\$\{returnId\}:\$\{sellerId\}`/.test(notif));
   ok("P2 · sender selects only its own seller's return lines (orderItem.sellerId scoped)",
     /returnItem\.findMany\(\{\s*\n\s*where: \{ returnRequestId: returnId, orderItem: \{ sellerId \} \}/.test(notif));
   ok("P2 · retry-switch case present, parses both ids back out of the key",

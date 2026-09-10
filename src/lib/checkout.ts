@@ -50,8 +50,12 @@ import {
  *   - availability is `OfferInventory` (quantity - reserved), never
  *     `Variant.stock`.
  *   - a cart must resolve to exactly ONE distinct Seller. Two sellers ->
- *     the whole checkout aborts before any write (multi-seller checkout is
- *     Phase 9E-3E/F, gated by `marketplace.multiSellerCheckout` = false).
+ *     the whole checkout aborts before any write. This is a PERMANENT gate,
+ *     NOT the `marketplace.multiSellerCheckout` flag: that flag only controls
+ *     whether THIRD_PARTY offers may go ACTIVE / appear on the storefront (it
+ *     is `"true"` for the 3P pilot). Real multi-seller checkout (multiple
+ *     SellerOrders per Order) is a future phase; until it ships, this
+ *     `sellerIds.size !== 1` abort is unconditional.
  *   - every new order gets exactly one `SellerOrder`; every `OrderItem` is
  *     linked to it and snapshots `offerId` / `sellerId` / `commissionRate`.
  *
@@ -578,10 +582,12 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     return { ok: false, code: "EMPTY", error: "Your cart has nothing available to order." };
   }
 
-  // 3b. Single-seller gate (9E-3C-2). Multi-seller checkout is Phase 9E-3E/F,
-  //     gated by `marketplace.multiSellerCheckout` (false). Until then a cart
-  //     MUST resolve to exactly one distinct Seller — abort before any write.
-  //     The customer-facing message is deliberately generic.
+  // 3b. Single-seller gate (9E-3C-2). This is UNCONDITIONAL — it does NOT read
+  //     `marketplace.multiSellerCheckout` (that flag only governs 3P offer
+  //     visibility, and is `"true"` for the pilot). Real multi-seller checkout
+  //     is a future phase; until it ships, a cart MUST resolve to exactly one
+  //     distinct Seller or the whole checkout aborts before any write. The
+  //     customer-facing message is deliberately generic.
   if (sellerIds.size !== 1) {
     return { ok: false, code: "SELLER", error: GENERIC_SELLER_ERROR };
   }

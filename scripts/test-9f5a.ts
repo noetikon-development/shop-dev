@@ -20,7 +20,7 @@
  *   11 cross-seller Offer mutation fails
  *   12 seller cannot modify canonical Product/Variant
  *   13 3P ACTIVE gating remains enforced
- *   14 marketplace.multiSellerCheckout false
+ *   14 marketplace.multiSellerCheckout stays pilot "true" (offer visibility only)
  *   15 customer storefront unchanged
  *   16 PayMongo dormant
  *   17 OfferInventory authoritative
@@ -208,7 +208,7 @@ async function dbTests() {
   ok("18 · Product/Variant/Inventory/InventoryAdjustment/StoreSetting counts unchanged", JSON.stringify(before) === JSON.stringify(after), `${JSON.stringify(before)} vs ${JSON.stringify(after)}`);
 
   const gate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("14 · marketplace.multiSellerCheckout false/unset", (gate?.value ?? "false") !== "true");
+  ok("14 · marketplace.multiSellerCheckout is the pilot value \"true\" (3P offer visibility only — multi-seller checkout stays blocked in checkout.ts)", gate?.value === "true");
   ok("16 · payments empty", (await prisma.payment.count()) === 0);
   ok("16 · webhookEvents empty", (await prisma.webhookEvent.count()) === 0);
 }

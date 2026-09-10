@@ -143,11 +143,11 @@ async function dbTests() {
   const offerBefore = await prisma.offer.count();
   const sellerOrderBefore = await prisma.sellerOrder.count();
 
-  // 3 — SAFE: verify the gate still blocks activation using the REAL,
-  // unmodified `marketplace.multiSellerCheckout` value (confirmed false) —
-  // no write to that setting anywhere in this test.
+  // 3 — SAFE: read the REAL, unmodified `marketplace.multiSellerCheckout` value
+  // (pilot "true" — governs 3P offer visibility only). No write to that setting
+  // anywhere in this test.
   const liveGate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("3 · precondition — the real StoreSetting is not \"true\" (nothing here could have enabled it)", liveGate?.value !== "true", JSON.stringify(liveGate));
+  ok("3 · precondition — the real StoreSetting is the pilot value \"true\" (3P offer visibility only; this test never touches it)", liveGate?.value === "true", JSON.stringify(liveGate));
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -294,7 +294,7 @@ async function dbTests() {
   ok("isolation · SellerOrder count unchanged after rollback", (await prisma.sellerOrder.count()) === sellerOrderBefore);
 
   const gateAfter = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("isolation · marketplace.multiSellerCheckout is still not \"true\" after this whole test run", gateAfter?.value !== "true", JSON.stringify(gateAfter));
+  ok("isolation · marketplace.multiSellerCheckout unchanged after this whole test run (pilot \"true\")", gateAfter?.value === "true", JSON.stringify(gateAfter));
 }
 
 async function main() {

@@ -4,7 +4,8 @@
  *  - Rule tests (A–L): the pure `evaluateSellerOrder` against hand-built
  *    fixtures — no DB.
  *  - Live-dataset test (M): the current production Order/SellerOrder rows must
- *    reconcile except the two explicitly grandfathered historical anomalies.
+ *    reconcile with ZERO FAIL findings — 9F-44D repaired the two historical
+ *    anomalies, so there are no grandfathered exceptions left.
  *  - Guardrail: every server action that drives `Order.status` FORWARD also
  *    invokes `cascadeSellerOrderFromParent` (or is a documented exemption), so a
  *    future path cannot silently recreate `Order CANCELLED + SellerOrder
@@ -30,7 +31,6 @@ const ok = (name: string, cond: boolean, detail = "") => {
 };
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 
-const GRANDFATHERED = new Set(["AX-260904-100255", "AX-260902-100023"]);
 
 const baseSo = (o: Partial<ReconcileSellerOrder> = {}): ReconcileSellerOrder => ({
   id: "so-fixture",
@@ -182,7 +182,8 @@ function guardrailTests() {
 }
 
 // ---------------------------------------------------------------------------
-// M — the live production dataset reconciles (bar the grandfathered anomalies)
+// M — the live production dataset reconciles with NO exceptions (9F-44D repaired
+//     the two historical anomalies; there are no grandfathered rows left).
 // ---------------------------------------------------------------------------
 
 async function liveDatasetTest() {
@@ -196,8 +197,7 @@ async function liveDatasetTest() {
   });
 
   const RET = new Set(["RECEIVED", "REFUND_INITIATED", "REFUND_COMPLETED"]);
-  const realFails: string[] = [];
-  const grandfatheredHits: string[] = [];
+  const fails: string[] = [];
 
   for (const o of orders) {
     const returnedBySo = new Map<string, number>();
@@ -208,16 +208,15 @@ async function liveDatasetTest() {
     for (const so of o.sellerOrders) {
       const findings = evaluateSellerOrder({ orderNumber: o.orderNumber, status: o.status }, so, returnedBySo.get(so.id) ?? 0, o.sellerOrders.length === 1);
       for (const f of findings.filter((x) => x.level === "FAIL")) {
-        if (GRANDFATHERED.has(o.orderNumber)) grandfatheredHits.push(`${o.orderNumber} ${f.rule}`);
-        else realFails.push(`${o.orderNumber} ${f.rule}: ${f.invariant} — ${f.current}`);
+        fails.push(`${o.orderNumber} ${f.rule}: ${f.invariant} — ${f.current}`);
       }
     }
   }
 
-  ok("M · zero NON-grandfathered FAIL findings across all production orders", realFails.length === 0, realFails.join(" | "));
-  ok("M · the two grandfathered anomalies are still detected (AX-260904-100255 A, AX-260902-100023 B)",
-    grandfatheredHits.some((h) => h.startsWith("AX-260904-100255")) && grandfatheredHits.some((h) => h.startsWith("AX-260902-100023")),
-    grandfatheredHits.join(" | "));
+  ok("M · zero FAIL findings across all production orders (no grandfathered exceptions)", fails.length === 0, fails.join(" | "));
+  ok("M · the two 9F-44D-repaired orders are consistent (no rule-A / rule-B finding)",
+    fails.every((h) => !h.startsWith("AX-260904-100255") && !h.startsWith("AX-260902-100023")),
+    fails.filter((h) => h.startsWith("AX-260904-100255") || h.startsWith("AX-260902-100023")).join(" | "));
 
   // untouched-real-orders sanity
   const ax348 = await prisma.order.findFirst({ where: { orderNumber: "AX-260907-100348" }, select: { status: true, paymentStatus: true, paymentMethod: true } });

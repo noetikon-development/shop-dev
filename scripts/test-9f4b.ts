@@ -19,7 +19,7 @@
  *   18   content moderation stays 9F-4a-compatible
  *   19   audit records created (static — actions call writeAudit)
  *   20-25 no Product/Variant/Offer/OfferInventory/Inventory/InventoryAdjustment/StoreSetting writes
- *   26   multiSellerCheckout false
+ *   26   multiSellerCheckout stays pilot "true" (offer visibility only)
  *   27   PayMongo dormant
  *   28   storefront unchanged (no admin/sellers import)
  *   +    9F-1 gate: approving a seller never makes an offer buy-box eligible
@@ -208,7 +208,7 @@ async function dbTests() {
   );
 
   const gate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("26 · marketplace.multiSellerCheckout false/unset", (gate?.value ?? "false") !== "true");
+  ok("26 · marketplace.multiSellerCheckout is the pilot value \"true\" (3P offer visibility only — multi-seller checkout stays blocked in checkout.ts)", gate?.value === "true");
   ok("27 · payments empty", (await prisma.payment.count()) === 0);
   ok("27 · webhookEvents empty", (await prisma.webhookEvent.count()) === 0);
 }

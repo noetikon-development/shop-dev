@@ -205,7 +205,7 @@ function staticChecks() {
 
 async function gateCheck() {
   const g = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" } });
-  ok("GATE  marketplace.multiSellerCheckout == 'false'", g?.value === "false", g?.value ?? "<absent>");
+  ok("GATE  marketplace.multiSellerCheckout is the pilot value \"true\" (3P offer visibility only; checkout stays single-seller — checkout.ts sellerIds.size !== 1 abort is flag-independent)", g?.value === "true", g?.value ?? "<absent>");
   const pay = await prisma.payment.count();
   const wh = await prisma.webhookEvent.count();
   ok("GATE  PayMongo dormant (0 payments, 0 webhookEvents)", pay === 0 && wh === 0, `${pay}/${wh}`);

@@ -310,6 +310,47 @@ async function failNoRecipient(meta: {
   return failed;
 }
 
+/**
+ * 9F-45B — a seller-lifecycle notification failed BEFORE `renderAndDispatch` /
+ * `failNoRecipient` could write a durable row: the DB read for the order /
+ * return / settlement threw or returned nothing, or the recipient context
+ * couldn't be loaded. Previously these paths returned `{ status: "FAILED" }`
+ * with NO `EmailLog` row, so `/admin/email` and the 9F-18 Ops alert never saw
+ * the failure (this is why `AX-260907-100348` had no `seller_order_received`
+ * row). Record a FAILED row keyed on the notification's own DETERMINISTIC
+ * idempotency key (computed from the function's params, so it is known even when
+ * the DB read failed), then route it through the 9F-18 alert path. Dedup-safe on
+ * retry via `recordEmailFailure`; a later real send (or `/admin/email` retry)
+ * still goes out because `dispatchEmail` refreshes a FAILED row. Mirrors
+ * `maybeScheduleEmailFailureAlert`'s guards (no alert on retry, from a test
+ * transaction, or for the alert type itself).
+ */
+async function failEmailPreparation(meta: {
+  type: EmailType;
+  idempotencyKey: string;
+  subject: string;
+  error: string;
+  retry?: boolean;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  // No `orderId` on the row — a preparation failure means the entity may not
+  // exist (the row is found by its idempotency key, which is enough for
+  // `/admin/email` and the 9F-18 alert), and passing an unverified id would risk
+  // an `EmailLog_orderId_fkey` violation.
+  const failed = await recordEmailFailure({
+    type: meta.type,
+    to: "(preparation failed — recipient not resolved)",
+    idempotencyKey: meta.idempotencyKey,
+    subject: meta.subject,
+    client: meta.client,
+    error: meta.error.slice(0, 500),
+  });
+  if (!meta.client && !meta.retry && meta.type !== "email_failure_alert_ops") {
+    scheduleEmail(() => sendEmailFailureAlertOps(meta.idempotencyKey));
+  }
+  return failed;
+}
+
 /** True on a Vercel production deployment (never on preview / local / tests). */
 function isProductionRuntime(): boolean {
   return process.env.VERCEL_ENV === "production" || process.env.NODE_ENV === "production";
@@ -669,6 +710,9 @@ export async function sendSellerOrderCancelledOps(
   auditLogId: string,
   opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = `SELLER_ORDER_CANCELLED_OPS:${sellerOrderId}:${auditLogId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_order_cancelled_ops", idempotencyKey, subject: "Seller cancelled an order — Ops notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const so = await db.sellerOrder.findUnique({
@@ -680,7 +724,7 @@ export async function sendSellerOrderCancelledOps(
         items: { select: { quantity: true } },
       },
     });
-    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    if (!so) return failPrep("seller_order_not_found");
     // Ops-only, 3P-only — a FIRST_PARTY seller can't self-cancel anyway.
     if (so.seller.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
 
@@ -711,7 +755,7 @@ export async function sendSellerOrderCancelledOps(
         to,
         from: ORDERS_FROM,
         orderId: so.order.id,
-        idempotencyKey: `SELLER_ORDER_CANCELLED_OPS:${so.id}:${auditLogId}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -732,7 +776,7 @@ export async function sendSellerOrderCancelledOps(
     );
   } catch (err) {
     console.error("[email] sendSellerOrderCancelledOps", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -769,6 +813,18 @@ export async function sendSellerOrderReceived(
   orderId: string,
   opts: { retry?: boolean; idempotencyKey?: string; client?: Prisma.TransactionClient } = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${orderId}`;
+  // 9F-45B — any failure BEFORE renderAndDispatch/failNoRecipient still leaves a
+  // durable FAILED EmailLog row + a 9F-18 Ops alert.
+  const failPrep = (error: string) =>
+    failEmailPreparation({
+      type: "seller_order_received",
+      idempotencyKey,
+      subject: "New order — seller notification",
+      error,
+      retry: opts.retry,
+      client: opts.client,
+    });
   try {
     const db = opts.client ?? prisma;
     const order = await db.order.findUnique({
@@ -795,17 +851,18 @@ export async function sendSellerOrderReceived(
         },
       },
     });
-    if (!order) return { ok: false, status: "FAILED", error: "order_not_found" };
+    if (!order) return failPrep("order_not_found");
     const so = order.sellerOrders[0];
-    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    if (!so) return failPrep("seller_order_not_found");
     // 1P (Axiaro-fulfilled) orders: Axiaro already got `order_received_ops`.
+    // Genuinely nothing to send — SKIPPED, no row (not a delivery failure).
     if (so.sellerType !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
 
     const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
     if (!ctx)
       return failNoRecipient({
         type: "seller_order_received",
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${order.id}`,
+        idempotencyKey,
         subject: `New order ${order.orderNumber} — seller notification`,
         orderId: order.id,
         client: opts.client,
@@ -818,7 +875,7 @@ export async function sendSellerOrderReceived(
         type: "seller_order_received",
         to: ctx.recipients,
         from: ORDERS_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${order.id}`,
+        idempotencyKey,
         orderId: order.id,
         retry: opts.retry,
         client: opts.client,
@@ -852,7 +909,7 @@ export async function sendSellerOrderReceived(
     );
   } catch (err) {
     console.error("[email] sendSellerOrderReceived", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -2963,18 +3020,21 @@ export async function sendSellerOrderCancelled(
   sellerOrderId: string,
   opts: SellerLifecycleEmailOpts = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ORDER_CANCELLED:${sellerOrderId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_order_cancelled", idempotencyKey, subject: "Order cancelled — seller notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const so = await db.sellerOrder.findUnique({
       where: { id: sellerOrderId },
       select: { id: true, sellerId: true, order: { select: { orderNumber: true } } },
     });
-    if (!so) return { ok: false, status: "FAILED", error: "seller_order_not_found" };
+    if (!so) return failPrep("seller_order_not_found");
     const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
     if (!ctx)
       return failNoRecipient({
         type: "seller_order_cancelled",
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_CANCELLED:${sellerOrderId}`,
+        idempotencyKey,
         subject: `Order ${so.order.orderNumber} cancelled — seller notification`,
         client: opts.client,
       });
@@ -2992,7 +3052,7 @@ export async function sendSellerOrderCancelled(
         type: "seller_order_cancelled",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_ORDER_CANCELLED:${sellerOrderId}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -3008,7 +3068,7 @@ export async function sendSellerOrderCancelled(
     );
   } catch (err) {
     console.error("[email] sendSellerOrderCancelled", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -3046,6 +3106,9 @@ export async function sendSellerReturnRequested(
   sellerId: string,
   opts: SellerLifecycleEmailOpts = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_RETURN_REQUESTED:${returnId}:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_return_requested", idempotencyKey, subject: "Return requested — seller notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const ret = await db.returnRequest.findUnique({
@@ -3058,7 +3121,7 @@ export async function sendSellerReturnRequested(
         order: { select: { orderNumber: true } },
       },
     });
-    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (!ret) return failPrep("return_not_found");
 
     // FIRST_PARTY (Axiaro's own) lines: Axiaro processes its own returns and has
     // no seller mailbox to notify — skip, exactly as `sendSellerOrderReceived`
@@ -3071,7 +3134,7 @@ export async function sendSellerReturnRequested(
     if (!ctx)
       return failNoRecipient({
         type: "seller_return_requested",
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_REQUESTED:${returnId}:${sellerId}`,
+        idempotencyKey,
         subject: `Return ${ret.returnNumber} requested — seller notification`,
         client: opts.client,
       });
@@ -3079,14 +3142,14 @@ export async function sendSellerReturnRequested(
       where: { returnRequestId: returnId, orderItem: { sellerId } },
       select: { name: true, variantLabel: true, quantity: true },
     });
-    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+    if (items.length === 0) return failPrep("no_seller_lines");
 
     return renderAndDispatch(
       {
         type: "seller_return_requested",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_REQUESTED:${returnId}:${sellerId}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -3106,7 +3169,7 @@ export async function sendSellerReturnRequested(
     );
   } catch (err) {
     console.error("[email] sendSellerReturnRequested", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -3125,18 +3188,21 @@ export async function sendSellerReturnReceived(
   sellerId: string,
   opts: SellerLifecycleEmailOpts = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_RETURN_RECEIVED:${returnId}:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_return_received", idempotencyKey, subject: "Return received — seller notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const ret = await db.returnRequest.findUnique({
       where: { id: returnId },
       select: { id: true, returnNumber: true, order: { select: { orderNumber: true } } },
     });
-    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (!ret) return failPrep("return_not_found");
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
     if (!ctx)
       return failNoRecipient({
         type: "seller_return_received",
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_RECEIVED:${returnId}:${sellerId}`,
+        idempotencyKey,
         subject: `Return ${ret.returnNumber} received — seller notification`,
         client: opts.client,
       });
@@ -3149,7 +3215,7 @@ export async function sendSellerReturnReceived(
         orderItem: { select: { sellerOrderId: true } },
       },
     });
-    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+    if (items.length === 0) return failPrep("no_seller_lines");
 
     // 9F-20: if this return clawed back an already-settled order, add the
     // bookkeeping line. `null` (the norm) → the email is byte-for-byte unchanged.
@@ -3161,7 +3227,7 @@ export async function sendSellerReturnReceived(
         type: "seller_return_received",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_RECEIVED:${returnId}:${sellerId}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -3180,7 +3246,7 @@ export async function sendSellerReturnReceived(
     );
   } catch (err) {
     console.error("[email] sendSellerReturnReceived", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -3197,6 +3263,9 @@ export async function sendSellerReturnApproved(
   sellerId: string,
   opts: SellerLifecycleEmailOpts = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_RETURN_APPROVED:${returnId}:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_return_approved", idempotencyKey, subject: "Return approved — seller notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { type: true } });
@@ -3213,13 +3282,13 @@ export async function sendSellerReturnApproved(
         order: { select: { orderNumber: true } },
       },
     });
-    if (!ret) return { ok: false, status: "FAILED", error: "return_not_found" };
+    if (!ret) return failPrep("return_not_found");
 
     const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
     if (!ctx)
       return failNoRecipient({
         type: "seller_return_approved",
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_APPROVED:${returnId}:${sellerId}`,
+        idempotencyKey,
         subject: `Return ${ret.returnNumber} approved — seller notification`,
         client: opts.client,
       });
@@ -3228,7 +3297,7 @@ export async function sendSellerReturnApproved(
       where: { returnRequestId: returnId, orderItem: { sellerId } },
       select: { name: true, variantLabel: true, quantity: true },
     });
-    if (items.length === 0) return { ok: false, status: "FAILED", error: "no_seller_lines" };
+    if (items.length === 0) return failPrep("no_seller_lines");
 
     const dest = parseReturnDestination(ret.returnDestination);
     const shipsToThisSeller = dest?.kind === "seller" && dest.sellerId === sellerId && !!dest.address;
@@ -3239,7 +3308,7 @@ export async function sendSellerReturnApproved(
         type: "seller_return_approved",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SELLER_RETURN_APPROVED:${returnId}:${sellerId}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -3260,7 +3329,7 @@ export async function sendSellerReturnApproved(
     );
   } catch (err) {
     console.error("[email] sendSellerReturnApproved", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
@@ -3321,6 +3390,9 @@ export async function sendSellerSettlementRecorded(
   settlementId: string,
   opts: SellerLifecycleEmailOpts = {},
 ): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SETTLEMENT_RECORDED:${settlementId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_settlement_recorded", idempotencyKey, subject: "Settlement recorded — seller notification", error, retry: opts.retry, client: opts.client });
   try {
     const db = opts.client ?? prisma;
     const s = await db.sellerSettlement.findUnique({
@@ -3341,12 +3413,12 @@ export async function sendSellerSettlementRecorded(
         note: true,
       },
     });
-    if (!s) return { ok: false, status: "FAILED", error: "settlement_not_found" };
+    if (!s) return failPrep("settlement_not_found");
     const ctx = await loadSellerLifecycleEmailContext(s.sellerId, opts.client);
     if (!ctx)
       return failNoRecipient({
         type: "seller_settlement_recorded",
-        idempotencyKey: opts.idempotencyKey ?? `SETTLEMENT_RECORDED:${s.id}`,
+        idempotencyKey,
         subject: "Settlement recorded — seller notification",
         client: opts.client,
       });
@@ -3356,7 +3428,7 @@ export async function sendSellerSettlementRecorded(
         type: "seller_settlement_recorded",
         to: ctx.recipients,
         from: SECURITY_FROM,
-        idempotencyKey: opts.idempotencyKey ?? `SETTLEMENT_RECORDED:${s.id}`,
+        idempotencyKey,
         retry: opts.retry,
         client: opts.client,
       },
@@ -3381,7 +3453,7 @@ export async function sendSellerSettlementRecorded(
     );
   } catch (err) {
     console.error("[email] sendSellerSettlementRecorded", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

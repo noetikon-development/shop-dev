@@ -23,7 +23,7 @@
  *   15 admin review actions are audited + reuse manage_content
  *   16 no Product/Variant/Offer/OfferInventory/StoreSetting writes
  *   17 storefront readers untouched by profile fields
- *   18 marketplace.multiSellerCheckout remains false
+ *   18 marketplace.multiSellerCheckout stays the pilot value "true" (offer visibility only)
  *   19 PayMongo dormant (payments / webhookEvents 0)
  *   20/21/22 monitor:9e3d / reconcile:9e3d / test:9f1-3 — run separately
  *
@@ -252,7 +252,7 @@ async function dbTests() {
 
   // 18 / 19 — gate + PayMongo
   const gate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("18 · marketplace.multiSellerCheckout is false / unset", (gate?.value ?? "false") !== "true", gate?.value ?? "unset");
+  ok("18 · marketplace.multiSellerCheckout is the pilot value \"true\" (3P offer visibility only — real multi-seller checkout stays blocked at checkout.ts sellerIds.size !== 1)", gate?.value === "true", gate?.value ?? "unset");
   ok("19 · payments table empty", (await prisma.payment.count()) === 0);
   ok("19 · webhookEvents table empty", (await prisma.webhookEvent.count()) === 0);
 }

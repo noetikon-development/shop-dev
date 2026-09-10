@@ -131,7 +131,7 @@ function staticTests() {
     /if \(so\.seller\.type !== "THIRD_PARTY"\) return \{ ok: true, skipped: true, status: "SKIPPED" \};/.test(notif) &&
     /type: "seller_order_cancelled_ops",\s*\n\s*to,\s*\n\s*from: ORDERS_FROM/.test(notif));
   ok("notifications · idempotency key is audit-row-anchored (never SellerOrder.updatedAt)",
-    /idempotencyKey: `SELLER_ORDER_CANCELLED_OPS:\$\{so\.id\}:\$\{auditLogId\}`/.test(notif));
+    /const idempotencyKey = `SELLER_ORDER_CANCELLED_OPS:\$\{sellerOrderId\}:\$\{auditLogId\}`/.test(notif));
   ok("notifications · action / reason / previousParentStatus re-read off the audit meta (retry-safe)",
     /JSON\.parse\(audit\?\.meta \?\? "\{\}"\)/.test(notif));
   ok("notifications · retry switch case parses both ids back out of the key",

@@ -147,9 +147,9 @@ function staticTests() {
 
   ok("EmailType gained exactly one new (seller-facing) type: seller_order_received", /\| "seller_order_received"/.test(send));
   ok("no NEW customer-facing email type introduced", !/order_(confirmation|processing|shipped|delivered)_v2|customer_/.test(send));
-  ok("sender reuses loadSellerLifecycleEmailContext (no new resolver)", /sendSellerOrderReceived[\s\S]{0,1800}loadSellerLifecycleEmailContext\(so\.sellerId/.test(notifs));
-  ok("sender uses renderAndDispatch (existing dispatchEmail path)", /sendSellerOrderReceived[\s\S]{0,1400}renderAndDispatch\(/.test(notifs));
-  ok("sender key = SELLER_ORDER_RECEIVED:<orderId>", /idempotencyKey: opts\.idempotencyKey \?\? `SELLER_ORDER_RECEIVED:\$\{order\.id\}`/.test(notifs));
+  ok("sender reuses loadSellerLifecycleEmailContext (no new resolver)", /sendSellerOrderReceived[\s\S]{0,2600}loadSellerLifecycleEmailContext\(so\.sellerId/.test(notifs));
+  ok("sender uses renderAndDispatch (existing dispatchEmail path)", /sendSellerOrderReceived[\s\S]{0,2600}renderAndDispatch\(/.test(notifs));
+  ok("sender key = SELLER_ORDER_RECEIVED:<orderId>", /const idempotencyKey = opts\.idempotencyKey \?\? `SELLER_ORDER_RECEIVED:\$\{orderId\}`/.test(notifs));
   ok("sender skips a FIRST_PARTY (Axiaro) order", /so\.sellerType !== "THIRD_PARTY"\) return \{ ok: true, skipped: true, status: "SKIPPED" \}/.test(notifs));
   ok("sender never selects the customer's Order.email / userId / billing", !/sendSellerOrderReceived[\s\S]{0,900}(email: true|userId: true|billingAddress: true)/.test(notifs));
   ok("retryEmailByLog handles seller_order_received", /case "seller_order_received":[\s\S]{0,200}sendSellerOrderReceived\(log\.orderId/.test(notifs));

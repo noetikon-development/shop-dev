@@ -22,10 +22,10 @@
  *
  * Output: [PASS] / [WARN] / [FAIL] with order number, seller-order id, the
  * invariant, current value(s) and expected value(s). Exit code is non-zero ONLY
- * for a true FAIL. The known historical anomalies (`AX-260904-100255`,
- * `AX-260902-100023`) are grandfathered to WARN during the cleanup window — they
- * FAIL once the one-time repair (docs/marketplace-drift-fix-9f44b.md) lands and
- * this set is emptied.
+ * for a true FAIL. There are NO grandfathered exceptions — the two historical
+ * anomalies (`AX-260904-100255`, `AX-260902-100023`) were repaired by 9F-44D
+ * (docs/marketplace-drift-fix-9f44b.md); a recurrence of either now FAILs like
+ * any other drift.
  *
  *   node --env-file=.env --import tsx scripts/reconcile-marketplace.ts
  */
@@ -38,28 +38,27 @@ import {
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
-/** Grandfathered pre-9F-44B drifts — WARN not FAIL until the one-time repair runs. */
-const GRANDFATHERED_DRIFT = new Set<string>(["AX-260904-100255", "AX-260902-100023"]);
+/**
+ * 9F-44D applied the one-time repair (docs/marketplace-drift-fix-9f44b.md) —
+ * AX-260904-100255 and AX-260902-100023 are now consistent. There are NO
+ * grandfathered exceptions: every finding a rule raises is a TRUE FAIL, and a
+ * recurrence of either historical drift FAILs like any other. Do not add back a
+ * demote-to-WARN list.
+ */
 
 let pass = 0;
 let warn = 0;
 let fail = 0;
 
 function emit(orderNumber: string, soId: string | null, f: ConsistencyFinding) {
-  // Grandfathered orders demote a FAIL to WARN during the cleanup window.
-  const level =
-    f.level === "FAIL" && GRANDFATHERED_DRIFT.has(orderNumber) ? "WARN" : f.level;
   const where = soId ? `${orderNumber} · SO ${soId}` : orderNumber;
-  const line = `  [${level}] ${where} · ${f.rule} ${f.invariant}\n         current: ${f.current}  |  expected: ${f.expected}`;
-  if (level === "FAIL") { fail++; console.error(line); }
+  const line = `  [${f.level}] ${where} · ${f.rule} ${f.invariant}\n         current: ${f.current}  |  expected: ${f.expected}`;
+  if (f.level === "FAIL") { fail++; console.error(line); }
   else { warn++; console.warn(line); }
 }
 
 async function run() {
   console.log("PHASE 9F-44B — marketplace state-drift reconciliation (READ-ONLY)\n");
-  if (GRANDFATHERED_DRIFT.size > 0) {
-    console.log(`  grandfathered (WARN until one-time repair): ${[...GRANDFATHERED_DRIFT].join(", ")}\n`);
-  }
 
   const orders = await prisma.order.findMany({
     orderBy: { placedAt: "asc" },
@@ -161,7 +160,7 @@ async function run() {
     console.error("\nMARKETPLACE RECONCILIATION FAILED — real state drift detected.");
     process.exitCode = 1;
   } else if (warn > 0) {
-    console.warn("\nMARKETPLACE RECONCILIATION PASSED WITH WARNINGS — grandfathered historical drift awaits the one-time repair (docs/marketplace-drift-fix-9f44b.md).");
+    console.warn("\nMARKETPLACE RECONCILIATION PASSED WITH WARNINGS — review the WARN lines above.");
   } else {
     console.log("\nMARKETPLACE RECONCILIATION PASSED — every Order / SellerOrder / settlement / commission invariant holds.");
   }

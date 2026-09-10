@@ -664,7 +664,7 @@ model Order {
   // discountTotal (above) is the snapshotted discount amount applied.
 
   paymentMethod String @default("COD") // COD | CARD | GCASH | NONE (no method until the payment step)
-  paymentStatus String @default("UNPAID") // PENDING | UNPAID | PAID | REFUNDED
+  paymentStatus String @default("UNPAID") // PENDING | UNPAID | PAID | PARTIALLY_REFUNDED | REFUNDED  (PENDING/UNPAID both mean "not paid"; PARTIALLY_REFUNDED / REFUNDED are written only by the dormant PayMongo refund webhook)
 
   // The ACTIVE cart this order was created from. `@unique` guarantees one order
   // per cart — the DB-level guard against double submission.
@@ -1506,8 +1506,10 @@ model SellerOrder {
 // an authorized admin records that a payment was made to a THIRD_PARTY seller
 // OUTSIDE the system (bank / GCash / cash) — the same posture as the
 // ReturnRequest refund bookkeeping. No PayMongo, no scheduled runs, no
-// thresholds, no DRAFT state. `netAmount` MAY be <= 0 when clawbacks reconciled
-// this batch exceed the new receivables.
+// thresholds, no DRAFT state. Since 9F-42B `netAmount` is FLOORED at 0 — when
+// clawbacks + a prior carried-forward balance exceed this batch's receivable,
+// the unpaid residual goes to `carryForwardAmount` (consumed by the seller's
+// next settlement) instead of being written as a negative net.
 model SellerSettlement {
   id         String @id @default(cuid())
   sellerId   String

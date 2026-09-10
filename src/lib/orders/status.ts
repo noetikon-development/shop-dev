@@ -39,11 +39,17 @@ export function isOrderStatus(value: string): value is OrderStatus {
   return (ORDER_STATUSES as readonly string[]).includes(value);
 }
 
-/** Payment statuses already used by the model / checkout. Display only. */
+/**
+ * Payment statuses used by the model / checkout. Display only.
+ * `PENDING` (checkout-created) and `UNPAID` (schema default / seed) both mean
+ * "not paid" and are treated identically by every reader. `PARTIALLY_REFUNDED`
+ * / `REFUNDED` are written only by the dormant PayMongo refund webhook.
+ */
 export const PAYMENT_STATUS_LABEL: Record<string, string> = {
   PENDING: "Awaiting payment",
   UNPAID: "Unpaid",
   PAID: "Paid",
+  PARTIALLY_REFUNDED: "Partially refunded",
   REFUNDED: "Refunded",
 };
 
@@ -220,8 +226,10 @@ export function paymentStatusTone(paymentStatus: string): BadgeTone {
     case "PAID":
       return "success";
     case "REFUNDED":
+    case "PARTIALLY_REFUNDED":
       return "info";
     case "PENDING":
+    case "UNPAID":
       return "warning";
     default:
       return "neutral";

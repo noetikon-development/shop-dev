@@ -375,7 +375,7 @@ async function staticTests() {
 
   // gate + payments in prod
   const gate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("46 · marketplace.multiSellerCheckout is false in prod", (gate?.value ?? "false") !== "true");
+  ok("46 · marketplace.multiSellerCheckout is the pilot value \"true\" in prod (3P offer visibility only — multi-seller checkout stays blocked in checkout.ts)", gate?.value === "true");
   ok("47 · payments / webhookEvents empty in prod", (await prisma.payment.count()) === 0 && (await prisma.webhookEvent.count()) === 0);
 }
 

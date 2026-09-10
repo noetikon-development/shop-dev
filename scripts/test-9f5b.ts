@@ -27,7 +27,7 @@
  *   18 no Offer/OfferInventory changes
  *   19 no Inventory changes
  *   20 storefront unchanged
- *   21 marketplace.multiSellerCheckout false
+ *   21 marketplace.multiSellerCheckout stays pilot "true" (offer visibility only)
  *   22 PayMongo dormant
  *
  *   node --env-file=.env --conditions=react-server --import tsx scripts/test-9f5b.ts
@@ -255,7 +255,7 @@ async function dbTests() {
   );
 
   const gate = await prisma.storeSetting.findUnique({ where: { key: "marketplace.multiSellerCheckout" }, select: { value: true } });
-  ok("21 · marketplace.multiSellerCheckout false/unset", (gate?.value ?? "false") !== "true");
+  ok("21 · marketplace.multiSellerCheckout is the pilot value \"true\" (3P offer visibility only — multi-seller checkout stays blocked in checkout.ts)", gate?.value === "true");
   ok("22 · payments empty", (await prisma.payment.count()) === 0);
   ok("22 · webhookEvents empty", (await prisma.webhookEvent.count()) === 0);
 }
