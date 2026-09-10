@@ -21,6 +21,17 @@ export type CourierDef = {
   trackingUrlTemplate: string | null;
   /** Whether a tracking number is expected when shipping with this courier. */
   requiresTracking: boolean;
+  // 9F-47B — courier-API integration config. Pure data; NOTHING reads these yet
+  // (the shipping service layer is 9F-47C onward). Left unset while the
+  // provider ↔ carrier mapping is unconfirmed.
+  /** Axiaro shipping provider that fulfils this courier ("SHIPMATES" | "BITESHIP" | "LALAMOVE" | …). Unset = manual entry only. */
+  provider?: string;
+  /** The provider / aggregator's OWN code for this carrier, when it differs from `code`. Unset until mapping is confirmed. */
+  aggregatorCarrierCode?: string;
+  /** Whether the configured provider can generate an AWB / shipping label for this carrier. */
+  supportsLabel: boolean;
+  /** Whether the configured provider can schedule a pickup for this carrier. */
+  supportsPickup: boolean;
 };
 
 export const COURIERS: CourierDef[] = [
@@ -29,24 +40,32 @@ export const COURIERS: CourierDef[] = [
     name: "J&T Express",
     trackingUrlTemplate: "https://www.jtexpress.ph/index/query/gzquery.html?bills={tracking}",
     requiresTracking: true,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     code: "LBC",
     name: "LBC Express",
     trackingUrlTemplate: "https://www.lbcexpress.com/track/?tracking_no={tracking}",
     requiresTracking: true,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     code: "NINJAVAN",
     name: "Ninja Van",
     trackingUrlTemplate: "https://www.ninjavan.co/en-ph/tracking?id={tracking}",
     requiresTracking: true,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     code: "FLASH",
     name: "Flash Express",
     trackingUrlTemplate: "https://www.flashexpress.ph/tracking/?se={tracking}",
     requiresTracking: true,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     // Same-day / on-demand — tracking is a share link, not a number, so no template.
@@ -54,18 +73,24 @@ export const COURIERS: CourierDef[] = [
     name: "Lalamove",
     trackingUrlTemplate: null,
     requiresTracking: false,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     code: "PICKUP",
     name: "Store Pickup",
     trackingUrlTemplate: null,
     requiresTracking: false,
+    supportsLabel: false,
+    supportsPickup: false,
   },
   {
     code: "OTHER",
     name: "Other / manual courier",
     trackingUrlTemplate: null,
     requiresTracking: false,
+    supportsLabel: false,
+    supportsPickup: false,
   },
 ];
 

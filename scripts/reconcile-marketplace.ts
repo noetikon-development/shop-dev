@@ -19,6 +19,10 @@
  *   E  SellerOrder.total = merchandiseSubtotal − discountAllocated + shippingFee
  *   F  Σ applicable ReturnItem.refundAmount ≤ SellerOrder.total
  *   G  3P OfferInventory opening + Σ OfferAdjustment.delta == quantity
+ *   H  shipping-integration foundation (9F-47B): a non-MANUAL Shipment has an
+ *      externalShipmentId; every ShipmentEvent norm/lifecycle status is known;
+ *      no Shipment lags a PROCESSED DELIVERED event. Manual shipments (provider
+ *      NULL / "MANUAL") are exempt — this rule passes cleanly today (0 events).
  *
  * Output: [PASS] / [WARN] / [FAIL] with order number, seller-order id, the
  * invariant, current value(s) and expected value(s). Exit code is non-zero ONLY
@@ -153,6 +157,56 @@ async function run() {
       fail++;
       console.error(`    [FAIL] offer ${label} OfferAdjustment chain: opening ${opening} + Σδ ${sumDelta} = ${reconstructed}, quantity ${oi.quantity}, reserved ${oi.reserved}`);
     }
+  }
+
+  // ── H · shipping-integration foundation (9F-47B) — READ-ONLY ──────────────
+  //   H1  a Shipment with a non-MANUAL `provider` carries an `externalShipmentId`
+  //       (manual shipments — provider NULL / "MANUAL" — are exempt, unchanged)
+  //   H2  every ShipmentEvent's normStatus is one of the 5 known values and its
+  //       status is one of the 4 lifecycle values
+  //   H3  no Shipment sits behind a PROCESSED "DELIVERED" ShipmentEvent
+  //       (would be a stale-webhook drift once the 9F-47E handler ships)
+  console.log("\n  H · shipping-integration foundation (9F-47B — dormant until 9F-47E):");
+  const NORM_OK = new Set(["PENDING", "IN_TRANSIT", "OUT_FOR_DELIVERY", "DELIVERED", "EXCEPTION"]);
+  const EVT_STATUS_OK = new Set(["RECEIVED", "PROCESSED", "IGNORED", "FAILED"]);
+  const shipments = await prisma.shipment.findMany({
+    select: {
+      id: true,
+      status: true,
+      provider: true,
+      externalShipmentId: true,
+      shipmentEvents: { select: { normStatus: true, status: true, occurredAt: true } },
+    },
+  });
+  const integrated = shipments.filter((s) => s.provider && s.provider !== "MANUAL");
+  const manual = shipments.length - integrated.length;
+  let hClean = true;
+  for (const s of integrated) {
+    if (!s.externalShipmentId) {
+      fail++; hClean = false;
+      console.error(`    [FAIL] shipment ${s.id}: provider ${s.provider} but no externalShipmentId`);
+    }
+  }
+  let evtCount = 0;
+  for (const s of shipments) {
+    for (const e of s.shipmentEvents) {
+      evtCount++;
+      if (!NORM_OK.has(e.normStatus) || !EVT_STATUS_OK.has(e.status)) {
+        fail++; hClean = false;
+        console.error(`    [FAIL] shipment ${s.id}: ShipmentEvent normStatus=${e.normStatus} status=${e.status} (unknown value)`);
+      }
+    }
+    const delivered = s.shipmentEvents.some((e) => e.status === "PROCESSED" && e.normStatus === "DELIVERED");
+    if (delivered && s.status !== "DELIVERED") {
+      fail++; hClean = false;
+      console.error(`    [FAIL] shipment ${s.id}: PROCESSED DELIVERED ShipmentEvent but Shipment.status=${s.status}`);
+    }
+  }
+  // Rule H is a single foundational check — it does NOT add to the `pass` tally
+  // (keeps the headline count stable); a violation still increments `fail` and
+  // sets a non-zero exit, exactly like every other rule.
+  if (hClean) {
+    console.log(`    [PASS] ${shipments.length} shipment(s): ${manual} manual (exempt), ${integrated.length} integrated, ${evtCount} ShipmentEvent(s) — all consistent`);
   }
 
   console.log(`\n  ${pass} pass · ${warn} warn · ${fail} fail`);

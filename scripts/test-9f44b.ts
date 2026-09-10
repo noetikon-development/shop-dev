@@ -222,8 +222,19 @@ async function liveDatasetTest() {
   const ax348 = await prisma.order.findFirst({ where: { orderNumber: "AX-260907-100348" }, select: { status: true, paymentStatus: true, paymentMethod: true } });
   ok("M · AX-260907-100348 unchanged (DELIVERED / PENDING / NONE)",
     ax348?.status === "DELIVERED" && ax348?.paymentStatus === "PENDING" && ax348?.paymentMethod === "NONE", JSON.stringify(ax348));
-  const ax389 = await prisma.sellerOrder.findFirst({ where: { order: { orderNumber: "AX-260907-100389" } }, select: { status: true } });
-  ok("M · AX-260907-100389 SellerOrder unchanged (PENDING_PAYMENT)", ax389?.status === "PENDING_PAYMENT", JSON.stringify(ax389));
+  // AX-260907-100389 was PENDING_PAYMENT at 9F-44B; the authorized Style Avenue
+  // operator then advanced it through the normal seller machine in 9F-46A/B
+  // (Accept → Mark ready to ship). It must sit in a valid forward state that is
+  // consistent with its still-PROCESSING parent — never CANCELLED, never drifted
+  // ahead of the parent.
+  const ax389 = await prisma.sellerOrder.findFirst({
+    where: { order: { orderNumber: "AX-260907-100389" } },
+    select: { status: true, order: { select: { status: true } } },
+  });
+  ok("M · AX-260907-100389 SellerOrder in a valid forward state consistent with its PROCESSING parent",
+    (ax389?.status === "PENDING_PAYMENT" || ax389?.status === "PROCESSING" || ax389?.status === "READY_TO_SHIP") &&
+      ax389?.order.status === "PROCESSING",
+    JSON.stringify(ax389));
 }
 
 // ---------------------------------------------------------------------------

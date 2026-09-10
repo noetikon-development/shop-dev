@@ -10,15 +10,10 @@ import {
   shipmentStatusForSellerOrder,
   type SellerOrderStatus,
 } from "@/lib/marketplace/seller-order-status";
-import {
-  getCourier,
-  isCourierCode,
-  isSafeTrackingUrl,
-  buildTrackingUrl,
-  courierLabel,
-} from "@/lib/orders/couriers";
+import { getCourier, isCourierCode, courierLabel } from "@/lib/orders/couriers";
 import { canTransition, CANCELLABLE_STATUSES } from "@/lib/orders/status";
 import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
+import { resolveShippingProvider } from "@/lib/shipping/registry";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
 
@@ -688,42 +683,19 @@ export type ShipmentInput = {
 
 export type SaveShipmentResult = { ok: true; shipmentId: string } | SellerOrderRepoError;
 
-function resolveShipment(
-  input: ShipmentInput,
-): { ok: true; data: { carrier: string; carrierName: string | null; trackingNumber: string | null; trackingUrl: string | null; note: string | null } } | { ok: false; error: string } {
-  const carrier = input.carrier?.trim();
-  if (!carrier || !isCourierCode(carrier)) return { ok: false, error: "Choose a valid carrier." };
-  const def = getCourier(carrier);
-
-  const trackingNumber = input.trackingNumber?.trim() || null;
-  if (trackingNumber && !/^[A-Za-z0-9_-]{1,40}$/.test(trackingNumber)) {
-    return { ok: false, error: "Tracking number: up to 40 letters, numbers, hyphens or underscores." };
-  }
-  if (def?.requiresTracking && !trackingNumber) {
-    return { ok: false, error: `${def.name} needs a tracking number.` };
-  }
-
-  let carrierName = input.carrierName?.trim() || null;
-  if (carrier === "OTHER" && !carrierName) return { ok: false, error: "Enter the courier name." };
-  if (!carrierName && carrier !== "OTHER") carrierName = def?.name ?? null;
-
-  let trackingUrl = input.trackingUrl?.trim() || null;
-  if (trackingUrl && !isSafeTrackingUrl(trackingUrl)) {
-    return { ok: false, error: "Tracking link must be a valid https:// URL." };
-  }
-  if (!trackingUrl && trackingNumber) trackingUrl = buildTrackingUrl(carrier, trackingNumber);
-
-  const note = input.note?.trim() || null;
-  if (note && note.length > 300) return { ok: false, error: "Note is too long (max 300)." };
-
-  return { ok: true, data: { carrier, carrierName, trackingNumber, trackingUrl, note } };
-}
-
 /**
  * Create the SellerOrder's shipment, or update it if one already exists. MVP:
  * exactly one shipment per SellerOrder (the schema comment) — a second create is
  * refused. Scoped so a seller can only ever touch a shipment on THEIR own
  * SellerOrder.
+ *
+ * 9F-47C: validation / normalisation now runs through the shipping provider
+ * resolved from store config. Production resolves to the MANUAL provider (fail
+ * closed), whose `createShipment` is the same pure `resolveManualShipment` check
+ * as before — same errors, same normalised fields. The transaction, the
+ * one-shipment-per-SellerOrder guard, the ownership checks and the persisted
+ * columns are unchanged; the provider-integration columns stay NULL for manual
+ * shipments.
  */
 export async function saveSellerShipment(
   ctx: SellerContext,
@@ -732,8 +704,18 @@ export async function saveSellerShipment(
   shipmentId?: string,
   externalTx?: Prisma.TransactionClient,
 ): Promise<SaveShipmentResult> {
-  const resolved = resolveShipment(input);
-  if (!resolved.ok) return { ok: false, code: "VALIDATION", error: resolved.error };
+  const provider = await resolveShippingProvider();
+  const outcome = await provider.createShipment({ sellerOrderId, ...input });
+  if (!outcome.ok) return { ok: false, code: "VALIDATION", error: outcome.error };
+  const resolved = {
+    data: {
+      carrier: outcome.value.carrier,
+      carrierName: outcome.value.carrierName,
+      trackingNumber: outcome.value.trackingNumber,
+      trackingUrl: outcome.value.trackingUrl,
+      note: outcome.value.note,
+    },
+  };
 
   const run = async (tx: Prisma.TransactionClient): Promise<SaveShipmentResult> => {
     const so = await tx.sellerOrder.findFirst({

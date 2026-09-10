@@ -180,6 +180,35 @@ export const SETTINGS_REGISTRY: SettingField[] = [
   { key: "shipping.freeThreshold", label: "Free-shipping threshold (centavos)", type: "number", group: "shipping", default: 250000, help: "Order subtotal at or above which shipping is free. 0 disables free shipping." },
   { key: "shipping.countries", label: "Supported delivery countries", type: "json", group: "shipping", default: ["PH"], help: "ISO 3166-1 alpha-2 codes the store delivers to." },
 
+  // Courier-API integration (9F-47B foundation). DORMANT: with the switch off and
+  // no provider env vars the shipment workflow is exactly as today (manual entry
+  // only). Provider API keys / webhook secrets stay in the server environment,
+  // NEVER in this table.
+  {
+    key: "shipping.integrationEnabled",
+    label: "Courier API integration enabled",
+    type: "boolean",
+    group: "shipping",
+    default: false,
+    help: "Master switch for booking shipments / labels / tracking through a courier or aggregator API. Off = shipments are created by manually entering the carrier and tracking number (unchanged). Also requires a configured provider and its credentials in the server environment.",
+  },
+  {
+    key: "shipping.provider",
+    label: "Shipping provider",
+    type: "string",
+    group: "shipping",
+    default: "",
+    help: "Provider name only, e.g. SHIPMATES | BITESHIP | LALAMOVE. Blank = manual entry only. API keys stay in the server environment.",
+  },
+  {
+    key: "shipping.mode",
+    label: "Shipping provider mode",
+    type: "string",
+    group: "shipping",
+    default: "test",
+    help: "test | live — which provider credentials / webhook signature to use. Stays 'test' until a live integration is deliberately switched on.",
+  },
+
   // Returns
   { key: "returns.windowDays", label: "Return window (days)", type: "number", group: "returns", default: 30, help: "How many days after delivery a customer can open a return. An admin can still assist outside this window." },
   { key: "returns.instructions", label: "Return instructions", type: "text", group: "returns", default: "", help: "Shown to the customer in the “return approved” email — e.g. the return address and how to pack the parcel. Plain text." },

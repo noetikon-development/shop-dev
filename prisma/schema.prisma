@@ -1571,11 +1571,55 @@ model Shipment {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  sellerOrder SellerOrder @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  // 9F-47B — courier-API integration foundation. ALL nullable, no default, NO
+  // backfill: a row with `provider` NULL or "MANUAL" is a manually-entered
+  // shipment and behaves EXACTLY as before 9F-47B. Nothing in 9F-47B reads or
+  // writes these columns — the service / webhook layer lands in 9F-47C onward.
+  provider             String? // "MANUAL" (implicit for pre-9F-47B rows) | "SHIPMATES" | "BITESHIP" | "LALAMOVE" | …
+  externalShipmentId   String? // provider's shipment/order id — the create-idempotency anchor
+  externalOrderId      String? // provider's order ref when distinct from externalShipmentId
+  service              String? // provider service level ("standard" | "nextday" | "same_day" | …)
+  labelUrl             String? // AWB / label PDF (HTTPS; may be time-limited — fetch-once)
+  shippingCostAmount   Int? // provider-quoted actual cost, integer MINOR units (₱ centavos)
+  shippingCostCurrency String? // ISO 4217 — "PHP" when populated
+  estimatedDeliveryAt  DateTime? // provider ETA
+  lastCarrierStatus    String? // raw provider status string (audit / debugging)
+  lastCarrierStatusAt  DateTime? // when the carrier reported it
+  metadata             Json? // provider-specific extras; NEVER business-critical
+
+  sellerOrder    SellerOrder     @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  shipmentEvents ShipmentEvent[]
 
   @@index([sellerOrderId])
   @@index([status])
   @@index([carrier])
+}
+
+// 9F-47B — carrier / aggregator status callbacks. Mirrors `WebhookEvent` (the
+// PayMongo pattern): claim-by-unique for replay safety, RECEIVED → PROCESSED /
+// IGNORED / FAILED. No rows are created until the 9F-47E webhook handler ships;
+// this model is inert schema foundation only.
+model ShipmentEvent {
+  id              String    @id @default(cuid())
+  shipmentId      String
+  provider        String
+  providerEventId String
+  rawStatus       String // provider's own status string
+  normStatus      String // PENDING | IN_TRANSIT | OUT_FOR_DELIVERY | DELIVERED | EXCEPTION
+  description     String?
+  occurredAt      DateTime
+  payloadHash     String // sha256(raw body)
+  status          String    @default("RECEIVED") // RECEIVED | PROCESSED | IGNORED | FAILED
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  error           String?
+
+  shipment Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerEventId])
+  @@index([shipmentId])
+  @@index([normStatus])
+  @@index([status])
 }
 
 // ----------------------------------------------------------------------------
