@@ -202,6 +202,13 @@ async function main() {
     !/There is no `\/v2\/checkout_sessions`/.test(read("src/lib/payments/config.ts")));
 
   // ── DB (rolled back) ────────────────────────────────────────────────────
+  // `payments.holdForReview` is a shared StoreSetting: when ON, a verified
+  // payment moves the order to PAID but NOT automatically to PROCESSING (an
+  // admin advances it). The 9F-54 Preview bring-up turns it ON. Read it once so
+  // the happy-path assertions hold in either configuration.
+  const holdForReview = (await getPaymentsConfig()).holdForReview;
+  const paidOrderStatus = holdForReview ? "PAID" : "PROCESSING";
+  const paidProcessingEvents = holdForReview ? 0 : 1;
   try {
     await prisma.$transaction(async (tx) => {
       const t = Date.now().toString(36);
@@ -214,10 +221,10 @@ async function main() {
       await handleEvent("evt-a", "checkout_session.payment.paid", evA, tx);
       const aOrder = await tx.order.findUniqueOrThrow({ where: { id: A.order.id }, select: { status: true, paymentStatus: true, paymentMethod: true } });
       const aPay = await tx.payment.findUniqueOrThrow({ where: { id: A.payment.id }, select: { status: true, method: true, paidAt: true, metadata: true } });
-      ok("3 · Order PENDING_PAYMENT → PAID → PROCESSING; paymentStatus PAID; method GCASH",
-        aOrder.status === "PROCESSING" && aOrder.paymentStatus === "PAID" && aOrder.paymentMethod === "GCASH", JSON.stringify(aOrder));
+      ok(`3 · Order PENDING_PAYMENT → PAID → ${paidOrderStatus} (holdForReview=${holdForReview}); paymentStatus PAID; method GCASH`,
+        aOrder.status === paidOrderStatus && aOrder.paymentStatus === "PAID" && aOrder.paymentMethod === "GCASH", JSON.stringify(aOrder));
       ok("3 · Payment → PAID with paidAt + method", aPay.status === "PAID" && aPay.method === "gcash" && !!aPay.paidAt);
-      ok("3 · exactly one OrderEvent{PAID} + one PROCESSING", (await evPaid(A.order.id)) === 1 && (await tx.orderEvent.count({ where: { orderId: A.order.id, status: "PROCESSING" } })) === 1);
+      ok(`3 · exactly one OrderEvent{PAID} + ${paidProcessingEvents} PROCESSING`, (await evPaid(A.order.id)) === 1 && (await tx.orderEvent.count({ where: { orderId: A.order.id, status: "PROCESSING" } })) === paidProcessingEvents);
       ok("3 · exactly one AdminAuditLog payment.paid", (await auditPaid(A.order.id)) === 1);
 
       // 12 — pay_… persistence
