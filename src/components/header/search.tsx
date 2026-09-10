@@ -76,7 +76,7 @@ export function HeaderSearch({ variant = "bar" }: { variant?: "bar" | "panel" })
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onFocus={() => setFocused(true)}
-          placeholder="Search furniture, lighting, wardrobe…"
+          placeholder="Search in Axiaro…"
           className="h-11 w-full rounded-sm border border-line-strong bg-surface pl-10 pr-10 text-sm outline-none transition-colors focus:border-ink"
           aria-label="Search products"
         />
