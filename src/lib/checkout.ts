@@ -333,6 +333,8 @@ async function nextOrderNumber(): Promise<string> {
     d.getDate(),
   ).padStart(2, "0")}`;
   const rows = await prisma.$queryRaw<{ v: bigint }[]>`SELECT nextval('order_number_seq') AS v`;
+  // `order_number_seq` is MINVALUE 100001, so `v` is always 6+ digits — the
+  // padStart is a historical no-op kept for clarity, never a truncation.
   return `AX-${stamp}-${String(rows[0].v).padStart(5, "0")}`;
 }
 

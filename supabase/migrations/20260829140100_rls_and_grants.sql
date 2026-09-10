@@ -192,8 +192,8 @@ REVOKE ALL ON "Address" FROM anon, authenticated;
 -- ============================================================================
 -- 9. Order-number sequence (Step 9). Collision-free order numbers under
 --    concurrent checkout — replaces the old Math.random() 4-digit suffix.
---    Order numbers are AX-<YYMMDD>-<nextval, zero-padded to 5>. Started above
---    every existing/seed order number.
+--    Order numbers are AX-<YYMMDD>-<nextval>. The sequence starts at 100001, so
+--    the suffix is always 6+ digits. Started above every existing/seed order.
 -- ============================================================================
 CREATE SEQUENCE IF NOT EXISTS "order_number_seq" AS bigint INCREMENT BY 1 MINVALUE 100001 START WITH 100001;
 
@@ -209,8 +209,8 @@ ALTER TABLE "ShippingMethod" ADD  CONSTRAINT shippingmethod_rate_nonneg CHECK ("
 --     src/lib/admin/returns-actions.ts also guard these; the DB is the final
 --     authority under concurrent writes.
 -- ============================================================================
--- Return numbers are RET-<YYMMDD>-<nextval, zero-padded to 5>. Independent of
--- the order-number sequence.
+-- Return numbers are RET-<YYMMDD>-<nextval> (sequence starts at 100001, so the
+-- suffix is always 6+ digits). Independent of the order-number sequence.
 CREATE SEQUENCE IF NOT EXISTS "return_number_seq" AS bigint INCREMENT BY 1 MINVALUE 100001 START WITH 100001;
 
 -- At most one OPEN (non-terminal) return per order. A rejected / cancelled /

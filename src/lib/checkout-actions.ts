@@ -36,10 +36,15 @@ export async function placeOrder(raw: unknown): Promise<PlaceOrderResult> {
   return createOrderFromCart(parsed.data);
 }
 
+// `AX-<YYMMDD>-<order_number_seq>`. The sequence is `MINVALUE 100001` (see
+// supabase/migrations/20260829140100_rls_and_grants.sql), so the suffix is
+// always 6+ digits — e.g. AX-260910-100737. `.max(24)` bounds the input before
+// the regex runs.
 const orderNumberSchema = z
   .string()
   .trim()
-  .regex(/^AX-\d{6}-\d{5}$/, "invalid order reference");
+  .max(24)
+  .regex(/^AX-\d{6}-\d{6,}$/, "invalid order reference");
 
 /**
  * Phase 6B — start a PayMongo hosted-checkout payment for an order the customer

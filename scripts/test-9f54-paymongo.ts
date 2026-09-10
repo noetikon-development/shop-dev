@@ -632,6 +632,111 @@ async function main() {
       /return beginOnlinePayment\(\{ orderNumber: parsed\.data, userId: user\.id \}\)/.test(act));
   }
 
+  // ── 16 — order-number validation accepts the real 6-digit-suffix format ──
+  // `order_number_seq` is MINVALUE 100001, so every real order number is
+  // AX-<YYMMDD>-<6+ digits>. The Phase-6B regex required exactly 5 digits, so
+  // startCheckoutPayment rejected EVERY real order at safeParse — before
+  // beginOnlinePayment / getPaymentsConfig / any lookup. ("We couldn't find
+  // that order." on Pay now for AX-260910-100737.)
+  {
+    const act = read("src/lib/checkout-actions.ts");
+    const m = /const orderNumberSchema = z[\s\S]*?\.regex\((\/[^/]+\/)[^)]*\)/.exec(act);
+    ok("16 · checkout-actions.ts: orderNumberSchema regex literal found", m !== null);
+    const schemaBlock = m ? m[0] : "";
+    const literal = m ? m[1] : "/^AX-\\d{6}-\\d{5}$/"; // fallback = the OLD buggy one → these tests then fail loudly
+    const RE = new RegExp(literal.slice(1, -1));
+    ok("16 · the regex is NOT the old 5-digit one", literal !== "/^AX-\\d{6}-\\d{5}$/");
+    ok("16 · schema still trims and bounds the input (.trim() + .max())", /\.trim\(\)/.test(schemaBlock) && /\.max\(\d+\)/.test(schemaBlock));
+
+    // zod-equivalent: .trim() then .regex(), and .max() rejects an over-long input first
+    const maxLen = Number((/\.max\((\d+)\)/.exec(schemaBlock) ?? [])[1] ?? 24);
+    const accepts = (s: string) => s.trim().length <= maxLen && RE.test(s.trim());
+
+    ok("16 · AX-260910-100737 (the reported order) is ACCEPTED", accepts("AX-260910-100737") === true);
+    ok("16 · a 6-digit suffix at the sequence start (AX-260101-100001) is ACCEPTED", accepts("AX-260101-100001") === true);
+    ok("16 · a 6-digit suffix ceiling (AX-991231-999999) is ACCEPTED", accepts("AX-991231-999999") === true);
+    ok("16 · a future 7-digit suffix (AX-260910-1000000) is ACCEPTED (headroom)", accepts("AX-260910-1000000") === true);
+    ok("16 · trailing whitespace is trimmed then ACCEPTED", accepts("  AX-260910-100737  ") === true);
+
+    ok("16 · a 5-digit suffix (the old format — never generated) is REJECTED", accepts("AX-260910-10073") === false);
+    ok("16 · a 4-digit suffix is REJECTED", accepts("AX-260910-1007") === false);
+    ok("16 · a 5-digit date is REJECTED (AX-26091-100737)", accepts("AX-26091-100737") === false);
+    ok("16 · lowercase prefix is REJECTED", accepts("ax-260910-100737") === false);
+    ok("16 · wrong prefix (RET-…) is REJECTED", accepts("RET-260910-100737") === false);
+    ok("16 · a trailing junk char is REJECTED", accepts("AX-260910-100737x") === false);
+    ok("16 · an empty string is REJECTED", accepts("") === false);
+    ok("16 · an absurdly long suffix is REJECTED by .max()", accepts(`AX-260910-${"1".repeat(40)}`) === false);
+  }
+
+  // static — the flow after a successful parse + the ownership guard are intact
+  {
+    const act = read("src/lib/checkout-actions.ts");
+    ok("16 · startCheckoutPayment: auth check precedes the parse, beginOnlinePayment is the LAST step on success",
+      act.indexOf("if (!user)") < act.indexOf("orderNumberSchema.safeParse") &&
+      act.indexOf("orderNumberSchema.safeParse") < act.indexOf("return beginOnlinePayment(") &&
+      /if \(!parsed\.success\) \{[\s\S]*?return \{ ok: false, code: "NOT_FOUND"/.test(act));
+    const cs = read("src/lib/payments/checkout-session.ts");
+    ok("16 · beginOnlinePayment: ownership guard unchanged (order.userId !== args.userId → NOT_FOUND)",
+      /if \(!order \|\| order\.userId !== args\.userId\) return fail\("NOT_FOUND"\)/.test(cs));
+    ok("16 · nextOrderNumber unchanged — still `AX-${stamp}-${...seq...}` (no behaviour change)",
+      /return `AX-\$\{stamp\}-\$\{String\(rows\[0\]\.v\)/.test(read("src/lib/checkout.ts")));
+  }
+
+  // rolled-back DB — a regex-valid 6-digit order number reaches beginOnlinePayment
+  // and the ownership check still gates it
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = Date.now().toString(36);
+      const owner = await tx.user.create({ data: { email: `on-${t}@example.test`, name: "ON" }, select: { id: true } });
+      // a real-format number: AX-<6 digits>-<6 digits>
+      const orderNumber = `AX-2609${Math.floor(10 + Math.random() * 89)}-9${Math.floor(10000 + Math.random() * 89999)}`;
+      const order = await tx.order.create({
+        data: {
+          orderNumber, userId: owner.id, email: `on-${t}@example.test`, status: "PENDING_PAYMENT",
+          paymentMethod: "NONE", paymentStatus: "PENDING", subtotal: GRAND, grandTotal: GRAND,
+          shippingAddress: JSON.stringify({ firstName: "T", city: "M", country: "PH" }),
+        },
+        select: { id: true, orderNumber: true },
+      });
+      const url = "https://checkout.paymongo.test/on";
+      await tx.payment.create({
+        data: {
+          orderId: order.id, provider: "paymongo", providerObject: "checkout_session",
+          providerId: `cs_on_${t}`, status: "AWAITING_PAYMENT", amount: GRAND, currency: "PHP",
+          checkoutUrl: url, metadata: "{}",
+        },
+      });
+
+      const owned = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: owner.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("16 · a regex-valid 6-digit order number reaches beginOnlinePayment and past the ownership check (resumes)",
+        owned.ok === true && owned.resumed === true && owned.checkoutUrl === url);
+
+      const stranger = await tx.user.create({ data: { email: `on-x-${t}@example.test`, name: "X" }, select: { id: true } });
+      const notOwned = await beginOnlinePayment(
+        { orderNumber: order.orderNumber, userId: stranger.id },
+        { config: fakeConfig({ sessionsEnabled: true }), db: tx },
+      );
+      ok("16 · ownership STILL enforced — a non-owner on the same valid order → NOT_FOUND",
+        !notOwned.ok && notOwned.code === "NOT_FOUND");
+
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+
+  // static — the misleading "zero-padded to 5" docs are corrected
+  {
+    const rls = read("supabase/migrations/20260829140100_rls_and_grants.sql");
+    ok("16 · rls migration no longer claims order/return numbers are 'zero-padded to 5'",
+      !/zero-padded to 5/.test(rls) && /suffix is always 6\+ digits/.test(rls));
+    ok("16 · returns.ts return-number comment corrected too",
+      !/zero-padded to 5/.test(read("src/lib/returns.ts")));
+  }
+
   console.log(`\n${pass} passed, ${fail} failed\n`);
   await prisma.$disconnect();
   process.exit(fail === 0 ? 0 : 1);

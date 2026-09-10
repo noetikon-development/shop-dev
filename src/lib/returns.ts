@@ -50,7 +50,8 @@ export async function getReturnsConfig(): Promise<ReturnsConfig> {
 }
 
 // ---------------------------------------------------------------------------
-// Return-number generation — RET-<YYMMDD>-<nextval, zero-padded to 5>
+// Return-number generation — RET-<YYMMDD>-<nextval>. `return_number_seq` starts
+// at 100001, so the suffix is always 6+ digits.
 // ---------------------------------------------------------------------------
 
 export async function nextReturnNumber(client: Client = prisma): Promise<string> {
