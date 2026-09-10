@@ -1,5 +1,5 @@
 import Image from "next/image";
-import { parseArtRef } from "@/lib/art-ref";
+import { parseArtRef, thumbnailBypassesOptimizer } from "@/lib/art-ref";
 import { ProductArt } from "@/lib/product-art";
 import { PhotoComingSoon } from "@/components/photo-coming-soon";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,9 @@ import { cn } from "@/lib/utils";
  *
  * - A real image URL (http/https, /public) renders through `next/image` with
  *   `fill` — the catalogue's most frequent image gets responsive srcset,
- *   lazy-loading and zero layout shift (Phase 5D Stage 3).
+ *   lazy-loading and zero layout shift (Phase 5D Stage 3). Small fixed-size
+ *   thumbnails (`compact`, or a bare `Npx` `sizes` ≤ 128) set `unoptimized` so
+ *   they load straight from the source URL — see `thumbnailBypassesOptimizer`.
  * - Otherwise the reference is an in-house `art:` illustration ref, which means
  *   the product has no real photo yet. In the storefront that renders the
  *   branded "image coming soon" placeholder. Admin previews pass
@@ -58,7 +60,15 @@ export function ProductImage({
 
   return (
     <div className={cn("relative h-full w-full overflow-hidden", className)}>
-      <Image src={src} alt={alt} fill sizes={sizes} className="object-cover" priority={priority} />
+      <Image
+        src={src}
+        alt={alt}
+        fill
+        sizes={sizes}
+        className="object-cover"
+        priority={priority}
+        unoptimized={thumbnailBypassesOptimizer({ compact, sizes })}
+      />
     </div>
   );
 }
