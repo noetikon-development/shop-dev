@@ -44,6 +44,13 @@ export type EmailType =
   | "return_refund_initiated"
   | "return_refund_completed"
   | "payment_confirmation"
+  // 9F-55 — the two PayMongo webhook outcomes that were previously silent:
+  // a declined/failed payment attempt, and a checkout session that expired or
+  // was cancelled before completion. Both are keyed by Payment id (never Order
+  // id) because a customer can retry — each independent failed/expired attempt
+  // gets its own email.
+  | "payment_failed"
+  | "payment_expired_or_cancelled"
   | "refund_issued"
   | "refund_completed"
   | "email_verification"

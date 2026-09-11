@@ -159,6 +159,24 @@ export function orderPaymentMethodFromProvider(providerMethod: string | null | u
   }
 }
 
+/**
+ * Customer-facing payment-METHOD label (distinct from `paymentStatusLabel`) for
+ * the store's coarse method enum (CARD | GCASH) — e.g. a "Payment method" row in
+ * a transactional email. Case-insensitive so it also accepts PayMongo's raw
+ * lowercase provider strings ("card" / "gcash") straight off a `Payment.method`
+ * column. Never used for COD — a COD email uses its own separate wording.
+ */
+export function paymentMethodDisplayLabel(method: string | null | undefined): string {
+  switch ((method ?? "").toUpperCase()) {
+    case "CARD":
+      return "Card";
+    case "GCASH":
+      return "GCash";
+    default:
+      return "your payment method";
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Webhook event types this integration handles. Anything else is acknowledged
 // and marked IGNORED so the provider stops retrying.

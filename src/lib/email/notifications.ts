@@ -28,8 +28,11 @@ import { renderReturnReceived } from "@/lib/email/templates/return-received";
 import { renderReturnRefundInitiated } from "@/lib/email/templates/return-refund-initiated";
 import { renderReturnRefundCompleted } from "@/lib/email/templates/return-refund-completed";
 import { renderPaymentConfirmation } from "@/lib/email/templates/payment-confirmation";
+import { renderPaymentFailed } from "@/lib/email/templates/payment-failed";
+import { renderPaymentExpiredOrCancelled } from "@/lib/email/templates/payment-expired-or-cancelled";
 import { renderRefundIssued } from "@/lib/email/templates/refund-issued";
 import { renderRefundCompleted } from "@/lib/email/templates/refund-completed";
+import { paymentMethodDisplayLabel, PAYMENT_REFUND_STATUS_LABEL } from "@/lib/payments/status";
 import { renderEmailVerification, renderPasswordReset } from "@/lib/email/templates/auth";
 import {
   renderSellerProductRequestSubmitted,
@@ -1990,15 +1993,23 @@ export async function sendReturnRefundCompletedOps(
 }
 
 // ---------------------------------------------------------------------------
-// Payments / PayMongo (Step 21 P4). DORMANT in Phase 4-A — no Payment /
-// PaymentRefund row can exist, so these are never called. Each loads the
-// authoritative record and dispatches from orders@axiaro.shop. No card data,
-// no token, no provider secret ever reaches an email. Keys:
-//   PAYMENT_CONFIRMATION:<orderId>
+// Payments / PayMongo (Step 21 P4; 9F-55 added payment_failed /
+// payment_expired_or_cancelled and the durable-failure pattern). Fired ONLY
+// from the signature-verified webhook handler (`src/lib/payments/webhook.ts`),
+// never from a browser action. Each loads the authoritative record and
+// dispatches from orders@axiaro.shop. No card data, no token, no provider
+// secret ever reaches an email. Keys:
+//   PAYMENT_CONFIRMATION:<orderId>               — one PAID payment per order
+//   PAYMENT_FAILED:<paymentId>                   — keyed per ATTEMPT, not order
+//   PAYMENT_EXPIRED_OR_CANCELLED:<paymentId>      — keyed per ATTEMPT, not order
 //   REFUND_ISSUED:<paymentRefundId>
 //   REFUND_COMPLETED:<paymentRefundId>
 // ---------------------------------------------------------------------------
 
+/** Narrative phrasing for refund-related prose ("...sent to your GCash
+ *  account"). Distinct from `paymentMethodDisplayLabel` (a plain "Card" /
+ *  "GCash" for a label/value row) — kept separate so changing one never
+ *  reflows the other's sentence. */
 function paidMethodLabel(method: string | null | undefined): string {
   switch ((method ?? "").toLowerCase()) {
     case "card":
@@ -2014,30 +2025,38 @@ function paidMethodLabel(method: string | null | undefined): string {
   }
 }
 
-/** Verified payment captured. Key: PAYMENT_CONFIRMATION:<orderId>. */
-export async function sendPaymentConfirmation(orderId: string): Promise<DispatchResult> {
+/** Verified payment captured. Key: PAYMENT_CONFIRMATION:<orderId> — an order
+ *  can only ever have one payment reach PAID, so keying by order is safe. */
+export async function sendPaymentConfirmation(
+  orderId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = `PAYMENT_CONFIRMATION:${orderId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "payment_confirmation", idempotencyKey, subject: "Payment confirmation", error, retry: opts.retry, client: opts.client });
   try {
-    const order = await prisma.order.findUnique({
+    const db = opts.client ?? prisma;
+    const order = await db.order.findUnique({
       where: { id: orderId },
       select: {
         id: true,
         orderNumber: true,
         email: true,
         userId: true,
-        grandTotal: true,
+        paymentMethod: true,
         shippingAddress: true,
         user: { select: { name: true } },
         payments: {
           where: { status: { in: ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"] } },
           orderBy: { paidAt: "desc" },
           take: 1,
-          select: { amount: true, method: true, paidAt: true },
+          select: { amount: true, paidAt: true },
         },
       },
     });
-    if (!order?.email) return { ok: false, status: "FAILED", error: "order_not_found" };
+    if (!order?.email) return failPrep("order_not_found");
     const payment = order.payments[0];
-    if (!payment) return { ok: false, status: "FAILED", error: "no_paid_payment" };
+    if (!payment) return failPrep("no_paid_payment");
 
     const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
     const shipping = safeParse<Record<string, unknown>>(order.shippingAddress, {});
@@ -2051,9 +2070,11 @@ export async function sendPaymentConfirmation(orderId: string): Promise<Dispatch
         type: "payment_confirmation",
         to: order.email,
         from: ORDERS_FROM,
-        idempotencyKey: `PAYMENT_CONFIRMATION:${order.id}`,
+        idempotencyKey,
         userId: order.userId,
         orderId: order.id,
+        retry: opts.retry,
+        client: opts.client,
       },
       () =>
         renderPaymentConfirmation({
@@ -2063,19 +2084,154 @@ export async function sendPaymentConfirmation(orderId: string): Promise<Dispatch
           orderNumber: order.orderNumber,
           customerName,
           amount: payment.amount,
-          methodLabel: paidMethodLabel(payment.method),
+          // 9F-55: a plain "Card" / "GCash" for the label/value row — the store's
+          // own coarse enum, set by the webhook's `applyPaid` alongside this
+          // same payment (`orderPaymentMethodFromProvider`).
+          methodLabel: paymentMethodDisplayLabel(order.paymentMethod),
           paidAt: payment.paidAt ?? new Date(),
         }),
     );
   } catch (err) {
     console.error("[email] sendPaymentConfirmation", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+const PAYMENT_ATTEMPT_SELECT = {
+  id: true,
+  amount: true,
+  status: true,
+  order: {
+    select: {
+      id: true,
+      orderNumber: true,
+      email: true,
+      userId: true,
+      shippingAddress: true,
+      user: { select: { name: true } },
+    },
+  },
+} as const;
+
+/** Shared context loader for the two attempt-level (per-Payment, not
+ *  per-Order) notifications below. */
+async function loadPaymentAttemptContext(
+  db: Prisma.TransactionClient | typeof prisma,
+  paymentId: string,
+) {
+  const payment = await db.payment.findUnique({ where: { id: paymentId }, select: PAYMENT_ATTEMPT_SELECT });
+  if (!payment?.order.email) return null;
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  const shipping = safeParse<Record<string, unknown>>(payment.order.shippingAddress, {});
+  const customerName =
+    firstNameOf(payment.order.user?.name) ??
+    (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
+    "there";
+  return { payment, order: payment.order, brand, siteUrl, customerName };
+}
+
+/**
+ * A payment attempt was declined (verified `payment.failed` webhook). Key:
+ * PAYMENT_FAILED:<paymentId> — keyed per ATTEMPT: a customer can retry, and
+ * each independent failed attempt is its own notification, not a dedupe of the
+ * order's first failure.
+ */
+export async function sendPaymentFailed(
+  paymentId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = `PAYMENT_FAILED:${paymentId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "payment_failed", idempotencyKey, subject: "Payment failed", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadPaymentAttemptContext(db, paymentId);
+    if (!ctx) return failPrep("payment_not_found");
+    // Defensive re-check — the state that triggered this must still hold. A
+    // FAILED Payment never transitions further (`PAYMENT_TRANSITIONS.FAILED =
+    // []`), so this only matters if the caller passed a stale/wrong id.
+    if (ctx.payment.status !== "FAILED") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    return renderAndDispatch(
+      {
+        type: "payment_failed",
+        to: ctx.order.email,
+        from: ORDERS_FROM,
+        idempotencyKey,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderPaymentFailed({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          orderUrl: orderLink(ctx.siteUrl, ctx.order),
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          amount: ctx.payment.amount,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendPaymentFailed", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * A checkout session expired (or was left without completing — PayMongo emits
+ * no separate "cancelled" event for the types this integration handles;
+ * verified `checkout_session.expired` webhook covers both). Key:
+ * PAYMENT_EXPIRED_OR_CANCELLED:<paymentId> — keyed per ATTEMPT, same reasoning
+ * as `sendPaymentFailed`.
+ */
+export async function sendPaymentExpiredOrCancelled(
+  paymentId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = `PAYMENT_EXPIRED_OR_CANCELLED:${paymentId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "payment_expired_or_cancelled", idempotencyKey, subject: "Payment session expired", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadPaymentAttemptContext(db, paymentId);
+    if (!ctx) return failPrep("payment_not_found");
+    // Defensive re-check, mirrors sendPaymentFailed (EXPIRED is also terminal).
+    if (ctx.payment.status !== "EXPIRED") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    return renderAndDispatch(
+      {
+        type: "payment_expired_or_cancelled",
+        to: ctx.order.email,
+        from: ORDERS_FROM,
+        idempotencyKey,
+        userId: ctx.order.userId,
+        orderId: ctx.order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderPaymentExpiredOrCancelled({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          orderUrl: orderLink(ctx.siteUrl, ctx.order),
+          orderNumber: ctx.order.orderNumber,
+          customerName: ctx.customerName,
+          amount: ctx.payment.amount,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendPaymentExpiredOrCancelled", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
 const REFUND_EMAIL_SELECT = {
   id: true,
   amount: true,
+  status: true,
+  succeededAt: true,
   payment: {
     select: {
       amount: true,
@@ -2095,8 +2251,11 @@ const REFUND_EMAIL_SELECT = {
   returnRequest: { select: { returnNumber: true } },
 } as const;
 
-async function loadRefundEmailContext(paymentRefundId: string) {
-  const r = await prisma.paymentRefund.findUnique({
+async function loadRefundEmailContext(
+  paymentRefundId: string,
+  db: Prisma.TransactionClient | typeof prisma = prisma,
+) {
+  const r = await db.paymentRefund.findUnique({
     where: { id: paymentRefundId },
     select: REFUND_EMAIL_SELECT,
   });
@@ -2154,20 +2313,33 @@ export async function sendRefundIssued(paymentRefundId: string): Promise<Dispatc
   }
 }
 
-/** Provider refund settled. Key: REFUND_COMPLETED:<paymentRefundId>. */
-export async function sendRefundCompleted(paymentRefundId: string): Promise<DispatchResult> {
+/** Provider refund settled. Key: REFUND_COMPLETED:<paymentRefundId> — a given
+ *  PaymentRefund can only reach SUCCEEDED once (`applyRefundUpdate`'s
+ *  status-scoped `updateMany` guards it), so keying by its own id is safe. */
+export async function sendRefundCompleted(
+  paymentRefundId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = `REFUND_COMPLETED:${paymentRefundId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "refund_completed", idempotencyKey, subject: "Refund completed", error, retry: opts.retry, client: opts.client });
   try {
-    const ctx = await loadRefundEmailContext(paymentRefundId);
-    if (!ctx) return { ok: false, status: "FAILED", error: "refund_not_found" };
+    const db = opts.client ?? prisma;
+    const ctx = await loadRefundEmailContext(paymentRefundId, db);
+    if (!ctx) return failPrep("refund_not_found");
+    // Defensive re-check — only a SUCCEEDED refund is "completed".
+    if (ctx.r.status !== "SUCCEEDED") return { ok: true, skipped: true, status: "SKIPPED" };
 
     return renderAndDispatch(
       {
         type: "refund_completed",
         to: ctx.order.email,
         from: ORDERS_FROM,
-        idempotencyKey: `REFUND_COMPLETED:${ctx.r.id}`,
+        idempotencyKey,
         userId: ctx.order.userId,
         orderId: ctx.order.id,
+        retry: opts.retry,
+        client: opts.client,
       },
       () =>
         renderRefundCompleted({
@@ -2178,13 +2350,17 @@ export async function sendRefundCompleted(paymentRefundId: string): Promise<Disp
           returnNumber: ctx.returnNumber,
           customerName: ctx.customerName,
           amount: ctx.r.amount,
-          methodLabel: paidMethodLabel(ctx.r.payment.method),
+          // 9F-55: plain "Card" / "GCash" (was the narrative "your GCash
+          // account" — still used verbatim by refund_issued's prose above).
+          methodLabel: paymentMethodDisplayLabel(ctx.r.payment.method),
           partial: ctx.r.amount < ctx.r.payment.amount,
+          refundedAt: ctx.r.succeededAt ?? new Date(),
+          statusLabel: PAYMENT_REFUND_STATUS_LABEL[ctx.r.status] ?? ctx.r.status,
         }),
     );
   } catch (err) {
     console.error("[email] sendRefundCompleted", err);
-    return { ok: false, status: "FAILED", error: "unexpected" };
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

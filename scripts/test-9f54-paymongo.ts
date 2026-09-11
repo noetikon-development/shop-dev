@@ -35,6 +35,17 @@ import {
   type PaymentsConfig,
 } from "../src/lib/payments/config";
 import { beginOnlinePayment, canResumeOnlinePayment } from "../src/lib/payments/checkout-session";
+import { paymentMethodDisplayLabel } from "../src/lib/payments/status";
+import {
+  sendPaymentConfirmation,
+  sendPaymentFailed,
+  sendPaymentExpiredOrCancelled,
+  sendRefundCompleted,
+} from "../src/lib/email/notifications";
+import { renderPaymentConfirmation } from "../src/lib/email/templates/payment-confirmation";
+import { renderPaymentFailed } from "../src/lib/email/templates/payment-failed";
+import { renderPaymentExpiredOrCancelled } from "../src/lib/email/templates/payment-expired-or-cancelled";
+import { renderRefundCompleted } from "../src/lib/email/templates/refund-completed";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -804,6 +815,261 @@ async function main() {
         ok(`17 · seeded order (intended method ${method}) — 'Order placed' detail is the neutral message, no COD/online branching`,
           ev?.detail === NEW_MSG);
       }
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+
+  // ── 18 — customer payment-email notifications (PAYMENT_RECEIVED / FAILED /
+  // EXPIRED_OR_CANCELLED / REFUND_COMPLETED) ────────────────────────────────
+  // Triggered ONLY from the webhook handlers above (applyPaid / applyFailed /
+  // applyExpired / applyRefundUpdate) — never from browser UI. Reuses
+  // dispatchEmail()'s EmailLog.idempotencyKey UNIQUE dedup; every sender is
+  // keyed deterministically off its own input id so calling it twice — exactly
+  // what a duplicate/replayed webhook does — writes at most one row.
+
+  // 18a — pure wording: CARD → "Card", GCASH → "GCash".
+  {
+    ok("18 · paymentMethodDisplayLabel('CARD') === 'Card'", paymentMethodDisplayLabel("CARD") === "Card");
+    ok("18 · paymentMethodDisplayLabel('card') === 'Card' (case-insensitive)", paymentMethodDisplayLabel("card") === "Card");
+    ok("18 · paymentMethodDisplayLabel('GCASH') === 'GCash'", paymentMethodDisplayLabel("GCASH") === "GCash");
+    ok("18 · paymentMethodDisplayLabel('gcash') === 'GCash' (case-insensitive)", paymentMethodDisplayLabel("gcash") === "GCash");
+    ok("18 · paymentMethodDisplayLabel(null) falls back, never throws", paymentMethodDisplayLabel(null) === "your payment method");
+    ok("18 · paymentMethodDisplayLabel('NONE') is NOT a card/GCash label (COD stays out of this vocabulary)",
+      !["Card", "GCash"].includes(paymentMethodDisplayLabel("NONE")));
+  }
+
+  // 18b — pure render content: each template carries its required fields and
+  // the correct method wording, with no card/token/secret data.
+  {
+    const confInput = {
+      brand: "Axiaro", siteUrl: "https://axiaro.shop", orderUrl: "https://axiaro.shop/account/orders/AX-1",
+      orderNumber: "AX-260911-100001", customerName: "Jo", amount: 319000, methodLabel: "Card", paidAt: new Date("2026-09-11T10:00:00.000Z"),
+    };
+    const conf = renderPaymentConfirmation(confInput);
+    ok("18 · PAYMENT_RECEIVED (Card): order number present", conf.html.includes("AX-260911-100001") && conf.text.includes("AX-260911-100001"));
+    ok("18 · PAYMENT_RECEIVED (Card): method wording is exactly 'Card'", conf.html.includes(">Card<") && conf.text.includes("Paid with:    Card"));
+    ok("18 · PAYMENT_RECEIVED: amount paid present", conf.html.includes("₱3,190") || conf.text.includes("₱3,190"));
+    ok("18 · PAYMENT_RECEIVED: paid-at date present", conf.text.includes("2026-09-11 10:00"));
+    ok("18 · PAYMENT_RECEIVED: link to view the order present", conf.html.includes("https://axiaro.shop/account/orders/AX-1"));
+
+    const confG = renderPaymentConfirmation({ ...confInput, methodLabel: "GCash" });
+    ok("18 · PAYMENT_RECEIVED (GCash): method wording is exactly 'GCash'", confG.html.includes(">GCash<") && confG.text.includes("Paid with:    GCash"));
+
+    const failed = renderPaymentFailed({
+      brand: "Axiaro", siteUrl: "https://axiaro.shop", orderUrl: "https://axiaro.shop/account/orders/AX-2",
+      orderNumber: "AX-260911-100002", customerName: "Jo", amount: 150000,
+    });
+    ok("18 · PAYMENT_FAILED: order number + amount present", failed.text.includes("AX-260911-100002") && failed.text.includes("₱1,500"));
+    ok("18 · PAYMENT_FAILED: explains payment was not completed", /wasn.t (be )?(completed|process)/i.test(failed.text));
+    ok("18 · PAYMENT_FAILED: retry link/button present", failed.html.includes("Retry payment") && failed.html.includes("https://axiaro.shop/account/orders/AX-2"));
+
+    const expired = renderPaymentExpiredOrCancelled({
+      brand: "Axiaro", siteUrl: "https://axiaro.shop", orderUrl: "https://axiaro.shop/account/orders/AX-3",
+      orderNumber: "AX-260911-100003", customerName: "Jo", amount: 275000,
+    });
+    ok("18 · PAYMENT_EXPIRED_OR_CANCELLED: order number + amount present", expired.text.includes("AX-260911-100003") && expired.text.includes("₱2,750"));
+    ok("18 · PAYMENT_EXPIRED_OR_CANCELLED: explains payment was not completed", /wasn.t completed/i.test(expired.text));
+    ok("18 · PAYMENT_EXPIRED_OR_CANCELLED: resume-payment link present", expired.html.includes("Resume payment") && expired.html.includes("https://axiaro.shop/account/orders/AX-3"));
+
+    const refund = renderRefundCompleted({
+      brand: "Axiaro", siteUrl: "https://axiaro.shop", returnUrl: "https://axiaro.shop/account/returns/RET-1",
+      orderNumber: "AX-260911-100004", returnNumber: "RET-260911-100001", customerName: "Jo",
+      amount: 119900, methodLabel: "GCash", partial: false,
+      refundedAt: new Date("2026-09-11T11:30:00.000Z"), statusLabel: "Succeeded",
+    });
+    ok("18 · REFUND_COMPLETED: order number present", refund.text.includes("AX-260911-100004"));
+    ok("18 · REFUND_COMPLETED: refund amount present", refund.text.includes("₱1,199"));
+    ok("18 · REFUND_COMPLETED: payment method wording is exactly 'GCash'", refund.text.includes("Payment method:    GCash"));
+    ok("18 · REFUND_COMPLETED: refund date/time present", refund.text.includes("2026-09-11 11:30"));
+    ok("18 · REFUND_COMPLETED: refund status present", refund.text.includes("Refund status:     Succeeded"));
+    for (const r of [conf, confG, failed, expired, refund]) {
+      ok("18 · no card number / token / provider secret leaks into a rendered email",
+        !/\b\d{12,19}\b/.test(r.html) && !/pk_|sk_|whsk_/i.test(r.html) && !/cvv|cvc/i.test(r.html));
+    }
+  }
+
+  // 18c — static wiring: triggered ONLY from the webhook, never from browser UI.
+  {
+    const wh = read("src/lib/payments/webhook.ts");
+    ok("18 · webhook.ts imports the two new senders",
+      /sendPaymentFailed/.test(wh) && /sendPaymentExpiredOrCancelled/.test(wh));
+    // applyFailed: the email is scheduled strictly AFTER the canTransitionPayment
+    // guard's early return — a duplicate/replayed webhook hitting an
+    // already-FAILED Payment never reaches this line.
+    const failedGuardIdx = wh.indexOf('if (!canTransitionPayment(payment.status, "FAILED")) return;');
+    const failedScheduleIdx = wh.indexOf("scheduleEmail(() => sendPaymentFailed(payment.id));");
+    ok("18 · applyFailed: scheduleEmail(sendPaymentFailed) is AFTER the canTransitionPayment guard",
+      failedGuardIdx !== -1 && failedScheduleIdx !== -1 && failedGuardIdx < failedScheduleIdx);
+    ok("18 · applyFailed: the email is gated `if (db === prisma)` — same pattern as applyPaid/applyRefundUpdate",
+      /if \(db === prisma\) scheduleEmail\(\(\) => sendPaymentFailed\(payment\.id\)\);/.test(wh));
+    const expiredGuardIdx = wh.indexOf('if (!payment || !canTransitionPayment(payment.status, "EXPIRED")) return;');
+    const expiredScheduleIdx = wh.indexOf("scheduleEmail(() => sendPaymentExpiredOrCancelled(payment.id));");
+    ok("18 · applyExpired: scheduleEmail(sendPaymentExpiredOrCancelled) is AFTER the canTransitionPayment guard",
+      expiredGuardIdx !== -1 && expiredScheduleIdx !== -1 && expiredGuardIdx < expiredScheduleIdx);
+    ok("18 · applyExpired: the email is gated `if (db === prisma)`",
+      /if \(db === prisma\) scheduleEmail\(\(\) => sendPaymentExpiredOrCancelled\(payment\.id\)\);/.test(wh));
+    // The two PRE-EXISTING trigger points (applyPaid / applyRefundUpdate) are
+    // untouched — this phase only ADDED the two missing ones.
+    ok("18 · applyPaid's PAYMENT_RECEIVED trigger is unchanged",
+      /scheduleEmail\(\(\) => sendPaymentConfirmation\(payment\.order\.id\)\);/.test(wh));
+    ok("18 · applyRefundUpdate's REFUND_COMPLETED trigger is unchanged",
+      /scheduleEmail\(\(\) => sendRefundCompleted\(refund\.id\)\);/.test(wh));
+
+    // Never triggered from browser UI — these 4 senders are referenced only
+    // from the server-only webhook + the email module itself.
+    const referencingFiles = [
+      "src/lib/payments/webhook.ts",
+      "src/lib/email/notifications.ts",
+      "src/lib/email/index.ts",
+    ];
+    const SENDERS = ["sendPaymentConfirmation", "sendPaymentFailed", "sendPaymentExpiredOrCancelled", "sendRefundCompleted"];
+    const suspects = [
+      "src/lib/checkout.ts",
+      "src/lib/checkout-actions.ts",
+      "src/lib/payments/checkout-session.ts",
+      "src/components/checkout/checkout-flow.tsx",
+      "src/components/order/complete-payment-button.tsx",
+      "src/components/order/order-detail.tsx",
+      "src/components/order/order-timeline.tsx",
+      "src/app/(shop)/account/orders/[orderNumber]/page.tsx",
+    ];
+    const leaked = suspects.filter((s) => SENDERS.some((fn) => read(s).includes(fn)));
+    ok("18 · none of the 4 payment-email senders are referenced from checkout/browser-facing modules",
+      leaked.length === 0 && referencingFiles.length === 3, JSON.stringify(leaked));
+
+    // COD confirmation is a completely separate flow and must never touch any
+    // PayMongo email sender.
+    const codPayments = read("src/lib/admin/payments.ts");
+    ok("18 · COD payment confirmation (admin/payments.ts) references NO PayMongo email sender",
+      !SENDERS.some((fn) => codPayments.includes(fn)));
+  }
+
+  // 18d — DB (rolled back): each trigger prepares exactly the right email, and
+  // idempotency holds under a duplicate/replayed call.
+  async function seedAttempt(
+    tx: Tx,
+    sfx: string,
+    over: { paymentStatus: string; orderPaymentMethod?: string; providerMethod?: string; amount?: number },
+  ) {
+    const amount = over.amount ?? GRAND;
+    const email = `pe-${sfx}-${Date.now().toString(36)}@example.test`;
+    const user = await tx.user.create({ data: { email, name: "Pat Payer" }, select: { id: true } });
+    const order = await tx.order.create({
+      data: {
+        orderNumber: `AX-T9F18-${sfx}-${Math.random().toString(36).slice(2, 6)}`,
+        userId: user.id, email, status: "PENDING_PAYMENT",
+        paymentMethod: over.orderPaymentMethod ?? "NONE", paymentStatus: "PENDING",
+        subtotal: amount, grandTotal: amount,
+        shippingAddress: JSON.stringify({ firstName: "Pat", city: "M", country: "PH" }),
+      },
+      select: { id: true, orderNumber: true },
+    });
+    const payment = await tx.payment.create({
+      data: {
+        orderId: order.id, provider: "paymongo", providerObject: "checkout_session",
+        providerId: `cs_t9f18_${sfx}_${Math.random().toString(36).slice(2, 8)}`,
+        status: over.paymentStatus, method: over.providerMethod ?? null,
+        amount, currency: "PHP", checkoutUrl: "https://checkout.paymongo.test/x", metadata: "{}",
+        paidAt: over.paymentStatus === "PAID" ? new Date() : null,
+      },
+      select: { id: true },
+    });
+    return { order, payment, email };
+  }
+
+  try {
+    await prisma.$transaction(async (tx) => {
+      // successful Card payment → PAYMENT_RECEIVED prepared
+      const card = await seedAttempt(tx, "card", { paymentStatus: "PAID", orderPaymentMethod: "CARD", providerMethod: "card" });
+      const r1 = await sendPaymentConfirmation(card.order.id, { client: tx });
+      ok("18 · successful CARD payment → PAYMENT_RECEIVED (payment_confirmation) email prepared",
+        r1.ok === true && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_CONFIRMATION:${card.order.id}` } })));
+      const cardLog = await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_CONFIRMATION:${card.order.id}` }, select: { type: true, recipient: true } });
+      ok("18 · that row is type payment_confirmation, addressed to the customer's own email",
+        cardLog?.type === "payment_confirmation" && cardLog.recipient === card.email);
+
+      // successful GCash payment → PAYMENT_RECEIVED prepared
+      const gcash = await seedAttempt(tx, "gcash", { paymentStatus: "PAID", orderPaymentMethod: "GCASH", providerMethod: "gcash" });
+      const r2 = await sendPaymentConfirmation(gcash.order.id, { client: tx });
+      ok("18 · successful GCASH payment → PAYMENT_RECEIVED (payment_confirmation) email prepared",
+        r2.ok === true && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_CONFIRMATION:${gcash.order.id}` } })));
+
+      // failed payment → PAYMENT_FAILED prepared
+      const failedAttempt = await seedAttempt(tx, "failed", { paymentStatus: "FAILED" });
+      const r3 = await sendPaymentFailed(failedAttempt.payment.id, { client: tx });
+      ok("18 · failed payment → PAYMENT_FAILED (payment_failed) email prepared",
+        r3.ok === true && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_FAILED:${failedAttempt.payment.id}` } })));
+
+      // expired/cancelled session → PAYMENT_EXPIRED_OR_CANCELLED prepared
+      const expiredAttempt = await seedAttempt(tx, "expired", { paymentStatus: "EXPIRED" });
+      const r4 = await sendPaymentExpiredOrCancelled(expiredAttempt.payment.id, { client: tx });
+      ok("18 · expired session → PAYMENT_EXPIRED_OR_CANCELLED (payment_expired_or_cancelled) email prepared",
+        r4.ok === true && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_EXPIRED_OR_CANCELLED:${expiredAttempt.payment.id}` } })));
+
+      // completed refund → REFUND_COMPLETED prepared
+      const paidForRefund = await seedAttempt(tx, "refundbase", { paymentStatus: "REFUNDED", orderPaymentMethod: "GCASH", providerMethod: "gcash" });
+      const refundRow = await tx.paymentRefund.create({
+        data: { paymentId: paidForRefund.payment.id, amount: GRAND, status: "SUCCEEDED", succeededAt: new Date("2026-09-11T12:00:00.000Z") },
+        select: { id: true },
+      });
+      const r5 = await sendRefundCompleted(refundRow.id, { client: tx });
+      ok("18 · completed refund → REFUND_COMPLETED (refund_completed) email prepared",
+        r5.ok === true && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `REFUND_COMPLETED:${refundRow.id}` } })));
+
+      // duplicate webhook / repeated identical state transition → no duplicate email
+      const r3dup = await sendPaymentFailed(failedAttempt.payment.id, { client: tx });
+      ok("18 · duplicate webhook (2nd sendPaymentFailed for the SAME payment) → deduped, not a new send",
+        r3dup.deduped === true || r3dup.status === "DEDUPED");
+      ok("18 · duplicate webhook → still exactly ONE payment_failed EmailLog row for this payment",
+        (await tx.emailLog.count({ where: { idempotencyKey: `PAYMENT_FAILED:${failedAttempt.payment.id}` } })) === 1);
+      const r5dup = await sendRefundCompleted(refundRow.id, { client: tx });
+      ok("18 · repeated identical state transition (2nd sendRefundCompleted for the SAME refund) → deduped",
+        r5dup.deduped === true || r5dup.status === "DEDUPED");
+      ok("18 · repeated transition → still exactly ONE refund_completed EmailLog row for this refund",
+        (await tx.emailLog.count({ where: { idempotencyKey: `REFUND_COMPLETED:${refundRow.id}` } })) === 1);
+
+      // do not send an email when the payment state did not actually change —
+      // the defensive re-check inside each sender (mirrors the SLA-notification
+      // pattern) catches a stale/mismatched call even if something upstream
+      // ever schedules one for a payment that isn't ACTUALLY in that state.
+      const stillAwaiting = await seedAttempt(tx, "noop", { paymentStatus: "AWAITING_PAYMENT" });
+      const r6 = await sendPaymentFailed(stillAwaiting.payment.id, { client: tx });
+      ok("18 · sendPaymentFailed on a Payment that is NOT actually FAILED → SKIPPED, no email prepared",
+        r6.status === "SKIPPED" && !(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_FAILED:${stillAwaiting.payment.id}` } })));
+      const r7 = await sendPaymentExpiredOrCancelled(stillAwaiting.payment.id, { client: tx });
+      ok("18 · sendPaymentExpiredOrCancelled on a Payment that is NOT actually EXPIRED → SKIPPED, no email prepared",
+        r7.status === "SKIPPED" && !(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_EXPIRED_OR_CANCELLED:${stillAwaiting.payment.id}` } })));
+
+      // email preparation failure is durably logged — a nonexistent id must
+      // still leave a FAILED EmailLog row (9F-45B's failEmailPreparation),
+      // never a silent { ok:false } with nothing to see in /admin/email.
+      const missingId = `missing-${Date.now().toString(36)}`;
+      const rf1 = await sendPaymentFailed(missingId, { client: tx });
+      ok("18 · sendPaymentFailed(nonexistent id) → FAILED result", rf1.ok === false);
+      const failRow1 = await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_FAILED:${missingId}` } });
+      ok("18 · ...and a durable FAILED EmailLog row exists for it (failEmailPreparation)",
+        !!failRow1 && failRow1.status === "FAILED" && failRow1.error === "payment_not_found");
+
+      const rf2 = await sendPaymentExpiredOrCancelled(missingId, { client: tx });
+      ok("18 · sendPaymentExpiredOrCancelled(nonexistent id) → durable FAILED row",
+        rf2.ok === false && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_EXPIRED_OR_CANCELLED:${missingId}` } })));
+
+      const rf3 = await sendPaymentConfirmation(missingId, { client: tx });
+      ok("18 · sendPaymentConfirmation(nonexistent order) → durable FAILED row",
+        rf3.ok === false && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `PAYMENT_CONFIRMATION:${missingId}` } })));
+
+      const rf4 = await sendRefundCompleted(missingId, { client: tx });
+      ok("18 · sendRefundCompleted(nonexistent refund) → durable FAILED row",
+        rf4.ok === false && !!(await tx.emailLog.findUnique({ where: { idempotencyKey: `REFUND_COMPLETED:${missingId}` } })));
+
+      // existing order/payment behaviour unchanged — the seeded rows above still
+      // carry exactly the fields this phase did not touch.
+      const cardOrderCheck = await tx.order.findUnique({ where: { id: card.order.id }, select: { paymentMethod: true, paymentStatus: true, status: true } });
+      ok("18 · seeding a PAID Card order left Order fields exactly as set (no extra mutation from the email path)",
+        cardOrderCheck?.paymentMethod === "CARD" && cardOrderCheck.paymentStatus === "PENDING" && cardOrderCheck.status === "PENDING_PAYMENT");
+
       throw new Rollback();
     }, { timeout: 60_000, maxWait: 15_000 });
   } catch (e) {

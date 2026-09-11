@@ -11,7 +11,12 @@ import { prisma } from "@/lib/prisma";
 type Db = Prisma.TransactionClient | typeof prisma;
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendPaymentConfirmation, sendRefundCompleted } from "@/lib/email/notifications";
+import {
+  sendPaymentConfirmation,
+  sendPaymentFailed,
+  sendPaymentExpiredOrCancelled,
+  sendRefundCompleted,
+} from "@/lib/email/notifications";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { verifyWebhookSignature } from "@/lib/payments/paymongo";
 import {
@@ -569,6 +574,11 @@ async function applyFailed(
     db === prisma ? undefined : (db as Prisma.TransactionClient),
   );
   // Order stays PENDING_PAYMENT — the customer can start a new session.
+
+  // 9F-55 — only on the real (non-test) path: the `canTransitionPayment` guard
+  // above already ensures this only runs on a GENUINE FAILED transition, never
+  // a duplicate/replayed webhook re-hitting an already-FAILED Payment.
+  if (db === prisma) scheduleEmail(() => sendPaymentFailed(payment.id));
 }
 
 async function applyExpired(eventId: string, objId: string, db: Db): Promise<void> {
@@ -592,6 +602,9 @@ async function applyExpired(eventId: string, objId: string, db: Db): Promise<voi
     },
     db === prisma ? undefined : (db as Prisma.TransactionClient),
   );
+
+  // 9F-55 — same guard reasoning as applyFailed above.
+  if (db === prisma) scheduleEmail(() => sendPaymentExpiredOrCancelled(payment.id));
 }
 
 async function applyRefundUpdate(

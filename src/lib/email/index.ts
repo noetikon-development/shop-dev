@@ -24,6 +24,8 @@ export {
   sendReturnRefundInitiated,
   sendReturnRefundCompleted,
   sendPaymentConfirmation,
+  sendPaymentFailed,
+  sendPaymentExpiredOrCancelled,
   sendRefundIssued,
   sendRefundCompleted,
   sendEmailVerification,
