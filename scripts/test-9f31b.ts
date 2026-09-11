@@ -111,9 +111,10 @@ function staticTests() {
   ok("P2 · fired from the ADMIN-ASSISTED return-create path, one per affected seller",
     /const affectedSellerIds = await getReturnAffectedSellerIds\(created\.id\);\s*\n\s*for \(const sellerId of affectedSellerIds\) \{\s*\n\s*scheduleEmail\(\(\) => sendSellerReturnRequested\(created\.id, sellerId\)\)/.test(adminReturns));
   // 9F-31B added exactly ONE new EmailType (`seller_return_requested`).
-  // (`seller_return_approved` arrived later in 9F-41B and is out of scope here.)
+  // (`seller_return_approved` arrived later in 9F-41B, `seller_return_rejected`
+  // later still in 9F-56 — both out of scope for this 9F-31B-specific check.)
   ok("P2 · 9F-31B itself added no settlement/refund/payment EmailType + no settlement-action marker",
-    !/seller_return_rejected|seller_settlement_.*_9f31b/.test(send) &&
+    !/seller_settlement_.*_9f31b/.test(send) &&
     !/9F-31B/.test(read("src/lib/admin/settlement-actions.ts")));
 
   // ── scope ──

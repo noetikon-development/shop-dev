@@ -1,34 +1,46 @@
 /**
- * Seller lifecycle — the pure state machine (Phase 9F-4b).
+ * Seller lifecycle — the pure state machine (Phase 9F-4b; 9F-56 added REJECTED).
  *
- * Plain data, safe to import anywhere. The exact transition set is fixed by the
- * 9F-4b spec — no statuses are invented here:
+ * Plain data, safe to import anywhere. The transition set:
  *
- *   PENDING   → APPROVED
+ *   PENDING   → APPROVED | REJECTED
  *   APPROVED  → SUSPENDED | CLOSED
  *   SUSPENDED → APPROVED  | CLOSED
+ *   REJECTED  → PENDING   (reopen — give the applicant another chance)
  *   CLOSED    → (terminal)
  *
- * `PENDING → CLOSED` (reject an application) is deliberately NOT included — it is
- * out of the 9F-4b scope and would be an additive change later.
+ * 9F-56: `PENDING → REJECTED` and `REJECTED → PENDING` were added so a rejected
+ * application notification (with the admin's actual reason) and a reopen
+ * notification can exist at all — the action layer (`transitionSellerAction`)
+ * REQUIRES a non-empty reason for both of these two transitions specifically.
+ * No other transition gained a reason requirement.
  */
 
-export const SELLER_STATUSES = ["PENDING", "APPROVED", "SUSPENDED", "CLOSED"] as const;
+export const SELLER_STATUSES = ["PENDING", "APPROVED", "SUSPENDED", "CLOSED", "REJECTED"] as const;
 export type SellerLifecycleStatus = (typeof SELLER_STATUSES)[number];
 
 export const SELLER_TRANSITIONS: Record<SellerLifecycleStatus, SellerLifecycleStatus[]> = {
-  PENDING: ["APPROVED"],
+  PENDING: ["APPROVED", "REJECTED"],
   APPROVED: ["SUSPENDED", "CLOSED"],
   SUSPENDED: ["APPROVED", "CLOSED"],
+  REJECTED: ["PENDING"],
   CLOSED: [],
 };
+
+/** Transitions where the admin MUST supply a non-empty reason — enforced at the
+ *  action layer, never silently defaulted or invented. */
+export function sellerTransitionRequiresReason(from: string, to: string): boolean {
+  return (from === "PENDING" && to === "REJECTED") || (from === "REJECTED" && to === "PENDING");
+}
 
 export function canTransitionSeller(from: string, to: string): boolean {
   const allowed = SELLER_TRANSITIONS[from as SellerLifecycleStatus];
   return Array.isArray(allowed) && allowed.includes(to as SellerLifecycleStatus);
 }
 
-/** The audit action string for a given transition (used by the admin actions). */
+/** The audit action string for a given transition (used by the admin actions).
+ *  `to: "PENDING"` is only ever reached by reopening a REJECTED application
+ *  (see SELLER_TRANSITIONS) — there is no other path into PENDING. */
 export function sellerTransitionAction(to: SellerLifecycleStatus): string {
   switch (to) {
     case "APPROVED":
@@ -37,6 +49,10 @@ export function sellerTransitionAction(to: SellerLifecycleStatus): string {
       return "seller.suspended";
     case "CLOSED":
       return "seller.closed";
+    case "REJECTED":
+      return "seller.rejected";
+    case "PENDING":
+      return "seller.reopened";
     default:
       return "seller.updated";
   }
@@ -52,6 +68,8 @@ export function sellerStatusLabel(status: string): string {
       return "Suspended";
     case "CLOSED":
       return "Closed";
+    case "REJECTED":
+      return "Rejected";
     default:
       return status;
   }
@@ -66,6 +84,7 @@ export function sellerStatusTone(status: string): "neutral" | "success" | "warni
     case "SUSPENDED":
       return "warning";
     case "CLOSED":
+    case "REJECTED":
       return "danger";
     default:
       return "neutral";

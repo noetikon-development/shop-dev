@@ -143,12 +143,15 @@ async function emailDurabilityTests() {
   ok("B · notifications.ts defines failEmailPreparation (durable FAILED row + 9F-18 alert)",
     /async function failEmailPreparation\(meta: \{[\s\S]{0,500}recordEmailFailure\(\{[\s\S]{0,600}scheduleEmail\(\(\) => sendEmailFailureAlertOps\(meta\.idempotencyKey\)\)/.test(notif));
   // 9F-55 extended the same durable-failure pattern to the 4 PayMongo customer
-  // payment-email senders (sendPaymentConfirmation / sendPaymentFailed /
-  // sendPaymentExpiredOrCancelled / sendRefundCompleted) — 7 + 4 = 11.
-  ok("B · the 7 seller + 4 payment senders each define a failPrep → failEmailPreparation closure",
-    (notif.match(/const failPrep = \(error: string\) =>\s*\n?\s*failEmailPreparation\(\{/g) ?? []).length === 11);
-  ok("B · those 11 senders' catch blocks route the unexpected error through failPrep (not a bare FAILED)",
-    (notif.match(/return failPrep\(`unexpected: \$\{err instanceof Error \? err\.message : String\(err\)\}`\);/g) ?? []).length === 11);
+  // payment-email senders (7 + 4 = 11). 9F-56 extended it further to 8 more
+  // seller-lifecycle/order/return/refund/product-request senders (11 + 8 = 19):
+  // sendSellerAccountSubmitted/Rejected/Reopened, sendSellerReturnRejected,
+  // sendSellerRefundNotice, sendSellerOrderMilestone, sendSellerShipmentCreated,
+  // sendSellerProductRequestResubmittedOps.
+  ok("B · the 19 seller/payment senders each define a failPrep → failEmailPreparation closure",
+    (notif.match(/const failPrep = \(error: string\) =>\s*\n?\s*failEmailPreparation\(\{/g) ?? []).length === 19);
+  ok("B · those 19 senders' catch blocks route the unexpected error through failPrep (not a bare FAILED)",
+    (notif.match(/return failPrep\(`unexpected: \$\{err instanceof Error \? err\.message : String\(err\)\}`\);/g) ?? []).length === 19);
   for (const fn of [
     "sendSellerOrderReceived", "sendSellerOrderCancelled", "sendSellerOrderCancelledOps",
     "sendSellerReturnRequested", "sendSellerReturnReceived", "sendSellerReturnApproved",

@@ -379,3 +379,41 @@ export function renderReturnRefundCompletedOps(d: RefundOpsBase & { refundRefere
     ]),
   };
 }
+
+/**
+ * 9F-56 — a seller resubmitted a product request that already went through a
+ * review cycle (REJECTED → reopened → DRAFT → PENDING again). Distinct from
+ * the seller's own "submitted for review" ack, which fires for a first-time
+ * submission too — this is the signal that tells Ops the review queue has a
+ * request worth a second look, not a fresh one.
+ */
+export function renderSellerProductRequestResubmittedOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  sellerName: string;
+  productName: string;
+}) {
+  const subject = `Resubmitted for review: ${d.sellerName} — ${d.productName}`;
+  const body = `
+    ${heading("A product request was resubmitted")}
+    ${paragraph(`${d.sellerName} resubmitted "${d.productName}" after an earlier review cycle. It's ready for another look.`)}
+    ${infoBox(kvRow("Seller", d.sellerName) + kvRow("Product", d.productName, { last: true }))}
+    ${button("Review the request", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A product request was resubmitted",
+      ``,
+      `${d.sellerName} resubmitted "${d.productName}" after an earlier review cycle. It's ready for another look.`,
+      ``,
+      `Seller: ${d.sellerName}`,
+      `Product: ${d.productName}`,
+      ``,
+      `Review the request: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}

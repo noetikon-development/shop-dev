@@ -18,6 +18,8 @@ import {
   sendOrderProcessing,
   sendOrderCancelled,
   sendSellerOrderCancelledOps,
+  sendSellerOrderMilestone,
+  sendSellerShipmentCreated,
 } from "@/lib/email/notifications";
 import { sellerAdvanceLabels, sellerCancelLabels } from "@/lib/marketplace/seller-order-status";
 
@@ -100,6 +102,24 @@ export async function advanceSellerOrderAction(
   if (res.from === "PENDING_PAYMENT" && parsed.data.to === "PROCESSING") {
     revalidateOrderPaths(res.orderNumber, res.orderId);
     scheduleEmail(() => sendOrderProcessing(res.orderId));
+  }
+
+  // 9F-56 — a self-confirmation receipt to the SELLER for its own SellerOrder
+  // milestone, independent of whether the customer-facing parent-order rollup
+  // above fired (that's gated on every seller in the order, not just this
+  // one). One per milestone, never re-sent (see sendSellerOrderMilestone).
+  const milestone: "accepted" | "ready_to_ship" | "shipped" | "delivered" | undefined =
+    res.from === "PENDING_PAYMENT" && parsed.data.to === "PROCESSING"
+      ? "accepted"
+      : parsed.data.to === "READY_TO_SHIP"
+        ? "ready_to_ship"
+        : parsed.data.to === "SHIPPED"
+          ? "shipped"
+          : parsed.data.to === "DELIVERED"
+            ? "delivered"
+            : undefined;
+  if (milestone) {
+    scheduleEmail(() => sendSellerOrderMilestone(parsed.data.sellerOrderId, milestone));
   }
 
   // 9F-14: "accepted" when this was PENDING_PAYMENT → PROCESSING, not the
@@ -241,6 +261,7 @@ export async function saveShipmentAction(
   }
   const d = parsed.data;
 
+  const isCreate = !d.shipmentId;
   const res = await saveSellerShipment(
     ctx,
     d.sellerOrderId,
@@ -254,6 +275,13 @@ export async function saveShipmentAction(
     d.shipmentId || undefined,
   );
   if (!res.ok) return fromRepoError(res);
+
+  // 9F-56 — only on a genuine CREATE, never an edit (a Shipment can only ever
+  // be created once per SellerOrder — `saveSellerShipment` itself refuses a
+  // 2nd create with CONFLICT — so this can't double-fire for the same row).
+  if (isCreate) {
+    scheduleEmail(() => sendSellerShipmentCreated(res.shipmentId));
+  }
 
   revalidate(d.sellerOrderId);
   return { ok: true, message: d.shipmentId ? "Shipment updated." : "Shipment saved." };

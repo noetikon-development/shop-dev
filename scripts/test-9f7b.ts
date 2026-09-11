@@ -83,7 +83,10 @@ function staticTests() {
   // recipients
   ok("recipients · order_received_ops uses the ops inbox (getSupportInboxEmail)", /sendOrderReceivedOps[\s\S]{0,800}getSupportInboxEmail\(\)/.test(notifs));
   ok("recipients · refund ops senders use the ops inbox", /sendReturnRefundInitiatedOps[\s\S]{0,900}getSupportInboxEmail\(\)/.test(notifs) && /sendReturnRefundCompletedOps[\s\S]{0,900}getSupportInboxEmail\(\)/.test(notifs));
-  ok("recipients · seller senders reuse loadSellerLifecycleEmailContext (9F-6b pattern), not a new resolver", /sendSellerOrderCancelled[\s\S]{0,600}loadSellerLifecycleEmailContext/.test(notifs) && /sendSellerReturnReceived[\s\S]{0,600}loadSellerLifecycleEmailContext/.test(notifs));
+  // Window widened 600→900: unrelated later phases (9F-55/9F-56) grew the file,
+  // pushing this call further from the function's own declaration — still the
+  // same function body, same resolver, nothing about this wiring changed.
+  ok("recipients · seller senders reuse loadSellerLifecycleEmailContext (9F-6b pattern), not a new resolver", /sendSellerOrderCancelled[\s\S]{0,900}loadSellerLifecycleEmailContext/.test(notifs) && /sendSellerReturnReceived[\s\S]{0,900}loadSellerLifecycleEmailContext/.test(notifs));
 
   // trigger wiring
   ok("trigger · new order schedules the ops companion alongside order_confirmation, doesn't replace it", /scheduleEmail\(\(\) => sendOrderConfirmation\(created\.id\)\);\s*\n[\s\S]{0,200}scheduleEmail\(\(\) => sendOrderReceivedOps\(created\.id\)\);/.test(checkout));

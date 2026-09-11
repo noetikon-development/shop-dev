@@ -110,7 +110,9 @@ async function dbTests() {
         // 2 / 18
         const detail = await getAdminSeller(A.id, tx);
         ok("2 · getAdminSeller returns detail", detail?.id === A.id && detail?.type === "THIRD_PARTY");
-        ok("2 · detail exposes allowedTransitions from the state machine", JSON.stringify(detail?.allowedTransitions) === JSON.stringify(["APPROVED"]));
+        // 9F-56 added PENDING → REJECTED (an application can now be rejected,
+        // not just approved).
+        ok("2 · detail exposes allowedTransitions from the state machine", JSON.stringify(detail?.allowedTransitions) === JSON.stringify(["APPROVED", "REJECTED"]));
         ok("18 · detail reads contentStatus from the 9F-4a columns (no 2nd machine)", detail?.content.status === "DRAFT");
 
         // 6
@@ -237,11 +239,11 @@ function staticTests() {
   const catalog = read("src/lib/rbac/catalog.ts");
   const seedRbac = read("scripts/seed-rbac.ts");
 
-  // 10 — no invented statuses
-  ok("10 · exactly the four spec statuses", Object.keys(SELLER_TRANSITIONS).sort().join(",") === "APPROVED,CLOSED,PENDING,SUSPENDED");
+  // 10 — no invented statuses beyond the 9F-56 addition (REJECTED)
+  ok("10 · exactly the five statuses (9F-4b's four + 9F-56's REJECTED)", Object.keys(SELLER_TRANSITIONS).sort().join(",") === "APPROVED,CLOSED,PENDING,REJECTED,SUSPENDED");
   ok(
     "10 · transition map matches the spec exactly",
-    JSON.stringify(SELLER_TRANSITIONS) === JSON.stringify({ PENDING: ["APPROVED"], APPROVED: ["SUSPENDED", "CLOSED"], SUSPENDED: ["APPROVED", "CLOSED"], CLOSED: [] }),
+    JSON.stringify(SELLER_TRANSITIONS) === JSON.stringify({ PENDING: ["APPROVED", "REJECTED"], APPROVED: ["SUSPENDED", "CLOSED"], SUSPENDED: ["APPROVED", "CLOSED"], REJECTED: ["PENDING"], CLOSED: [] }),
   );
 
   // 11 — no seller-plane path imports the admin seller area

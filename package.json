@@ -115,6 +115,7 @@
     "test:email-retry": "node --env-file=.env --conditions=react-server --import tsx scripts/test-email-retry.ts",
     "test:9f6b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f6b.ts",
     "test:9f7b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f7b.ts",
+    "test:9f56": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f56.ts",
     "test:9f8c": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c.ts",
     "test:9f8c1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c1.ts",
     "test:9f8d1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8d1.ts",

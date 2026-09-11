@@ -386,6 +386,231 @@ export function renderSellerReturnApproved(
 }
 
 /**
+ * 9F-56 — Axiaro REJECTED a return that covers one or more of this THIRD_PARTY
+ * seller's lines (the missing counterpart of `renderSellerReturnApproved`).
+ * `reason` is the admin's actual customer-facing rejection reason
+ * (`ReturnRequest.resolutionNote`, already required non-empty by
+ * `rejectReturnAction`'s zod schema) — never invented here. No further action
+ * is needed from the seller; nothing ships back.
+ */
+export function renderSellerReturnRejected(
+  d: SellerOrderBase & {
+    returnNumber: string;
+    returnsUrl: string;
+    reasonLabel: string;
+    reason: string;
+    items: { name: string; variantLabel: string | null; quantity: number }[];
+  },
+) {
+  const subject = `Return rejected: ${d.returnNumber} (order ${d.orderNumber})`;
+  const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const reasonHtml = `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.reason).replace(/\n/g, "<br>")}</p>`;
+  const body = `
+    ${heading("A return was rejected")}
+    ${paragraph(`Axiaro reviewed and rejected a return request that included item(s) from ${d.sellerName}. Nothing ships back — no action is needed from you.`)}
+    ${infoBox(
+      kvRow("Return", d.returnNumber) +
+        kvRow("Order", d.orderNumber) +
+        kvRow("Reason requested", d.reasonLabel) +
+        kvRow("Your item(s)", itemLines.join("; ") || "—", { last: true }),
+    )}
+    ${paragraph("The reason given to the customer:")}
+    ${reasonHtml}
+    ${button("View your returns", d.returnsUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "A return was rejected",
+      ``,
+      `Axiaro reviewed and rejected a return request that included item(s) from ${d.sellerName}. Nothing ships back — no action is needed from you.`,
+      ``,
+      `Return: ${d.returnNumber}`,
+      `Order: ${d.orderNumber}`,
+      `Reason requested: ${d.reasonLabel}`,
+      `Your item(s): ${itemLines.join("; ") || "—"}`,
+      ``,
+      "The reason given to the customer:",
+      d.reason,
+      ``,
+      `Your returns: ${d.returnsUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
+ * 9F-56 — a bookkeeping refund completed on an order covering this THIRD_PARTY
+ * seller's line(s) (`completeRefundAction`'s bookkeeping path only — a
+ * PayMongo-provider refund never reaches a 3P seller, since 3P online payment
+ * stays disabled). Purely informational: Axiaro handles the customer refund,
+ * and this is a bookkeeping/bookkeeping-clawback signal, not a request for
+ * seller action.
+ */
+export function renderSellerRefundNotice(
+  d: SellerOrderBase & {
+    returnNumber: string;
+    returnsUrl: string;
+    refundAmount: number;
+    items: { name: string; variantLabel: string | null; quantity: number }[];
+    clawback?: ClawbackNote;
+  },
+) {
+  const subject = `Refund completed: ${d.returnNumber} (order ${d.orderNumber})`;
+  const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const c = d.clawback ?? null;
+  const body = `
+    ${heading("A refund was completed")}
+    ${paragraph(`Axiaro completed a refund for return ${d.returnNumber}, which included item(s) from ${d.sellerName}. Axiaro handles the customer refund directly — no action is needed from you.`)}
+    ${infoBox(
+      kvRow("Return", d.returnNumber) +
+        kvRow("Order", d.orderNumber) +
+        kvRow("Refund amount", peso(d.refundAmount)) +
+        kvRow("Your item(s)", itemLines.join("; ") || "—", { last: true }),
+    )}
+    ${c ? clawbackHtml(c) : ""}
+    ${button("View your returns", d.returnsUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "A refund was completed",
+      ``,
+      `Axiaro completed a refund for return ${d.returnNumber}, which included item(s) from ${d.sellerName}. Axiaro handles the customer refund directly — no action is needed from you.`,
+      ``,
+      `Return: ${d.returnNumber}`,
+      `Order: ${d.orderNumber}`,
+      `Refund amount: ${peso(d.refundAmount)}`,
+      `Your item(s): ${itemLines.join("; ") || "—"}`,
+      ...(c ? clawbackText(c) : []),
+      ``,
+      `Your returns: ${d.returnsUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
+ * 9F-56 — a self-confirmation "receipt" of the seller's OWN fulfilment action
+ * on its own SellerOrder: accepted / marked ready-to-ship / shipped /
+ * delivered. This is deliberately NOT the customer-facing order_shipped /
+ * order_delivered email (which is gated on every seller in a multi-seller
+ * order reaching the same milestone) — it fires the moment THIS seller's own
+ * SellerOrder reaches the milestone, so every team member with portal access
+ * gets a paper trail even though one of them just performed the action.
+ */
+export type SellerOrderMilestone = "accepted" | "ready_to_ship" | "shipped" | "delivered";
+
+const MILESTONE_COPY: Record<SellerOrderMilestone, { verb: string; heading: string; detail: string }> = {
+  accepted: {
+    verb: "accepted",
+    heading: "You accepted an order",
+    detail: "It's now in your queue to prepare and ship.",
+  },
+  ready_to_ship: {
+    verb: "marked ready to ship",
+    heading: "You marked an order ready to ship",
+    detail: "Add a shipment with tracking details when you hand it to the courier.",
+  },
+  shipped: {
+    verb: "marked shipped",
+    heading: "You marked an order shipped",
+    detail: "The customer has been notified once every seller on the order has shipped their part.",
+  },
+  delivered: {
+    verb: "marked delivered",
+    heading: "You marked an order delivered",
+    detail: "This order is now complete on your side.",
+  },
+};
+
+export function renderSellerOrderMilestone(
+  d: SellerOrderBase & {
+    orderUrl: string;
+    milestone: SellerOrderMilestone;
+    items: { name: string; variantLabel: string | null; quantity: number }[];
+  },
+) {
+  const copy = MILESTONE_COPY[d.milestone];
+  const subject = `Order ${d.orderNumber} ${copy.verb}`;
+  const itemLines = d.items.map((i) => `${i.quantity} × ${i.name}${i.variantLabel ? ` (${i.variantLabel})` : ""}`);
+  const body = `
+    ${heading(copy.heading)}
+    ${paragraph(`Order ${d.orderNumber} for ${d.sellerName} was ${copy.verb}. ${copy.detail}`)}
+    ${infoBox(
+      kvRow("Order", d.orderNumber) +
+        kvRow("Items", itemLines.join("; ") || "—", { last: true }),
+    )}
+    ${button("Open the order", d.orderUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      copy.heading,
+      ``,
+      `Order ${d.orderNumber} for ${d.sellerName} was ${copy.verb}. ${copy.detail}`,
+      ``,
+      `Order: ${d.orderNumber}`,
+      `Items: ${itemLines.join("; ") || "—"}`,
+      ``,
+      `Open the order: ${d.orderUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
+ * 9F-56 — a shipment record was created for this seller's SellerOrder (a
+ * receipt of the carrier/tracking details just entered — distinct from the
+ * later "marked shipped" milestone, which can happen separately once a
+ * shippable shipment exists).
+ */
+export function renderSellerShipmentCreated(
+  d: SellerOrderBase & {
+    orderUrl: string;
+    carrierLabel: string;
+    trackingNumber: string | null;
+    trackingUrl: string | null;
+  },
+) {
+  const subject = `Shipment recorded for order ${d.orderNumber}`;
+  const rows =
+    kvRow("Order", d.orderNumber) +
+    kvRow("Carrier", d.carrierLabel) +
+    kvRow("Tracking number", d.trackingNumber ?? "—", { last: !d.trackingUrl });
+  const body = `
+    ${heading("Shipment recorded")}
+    ${paragraph(`A shipment was recorded for order ${d.orderNumber} (${d.sellerName}).`)}
+    ${infoBox(d.trackingUrl ? rows + kvRow("Tracking link", d.trackingUrl, { last: true }) : rows)}
+    ${button("Open the order", d.orderUrl)}
+  `;
+  const reason = `You're receiving this because you manage a seller account on ${d.brand}.`;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason }),
+    text: textBody([
+      "Shipment recorded",
+      ``,
+      `A shipment was recorded for order ${d.orderNumber} (${d.sellerName}).`,
+      ``,
+      `Order: ${d.orderNumber}`,
+      `Carrier: ${d.carrierLabel}`,
+      `Tracking number: ${d.trackingNumber ?? "—"}`,
+      ...(d.trackingUrl ? [`Tracking link: ${d.trackingUrl}`] : []),
+      ``,
+      `Open the order: ${d.orderUrl}`,
+      ...textFooter(d.brand, d.siteUrl, reason),
+    ]),
+  };
+}
+
+/**
  * 9F-20 — a bookkeeping settlement was recorded for this THIRD_PARTY seller.
  *
  * IMPORTANT: this describes a RECORD Axiaro entered, not an electronic transfer.

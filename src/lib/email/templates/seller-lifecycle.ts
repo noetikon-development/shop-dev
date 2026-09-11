@@ -116,6 +116,94 @@ export function renderSellerAccountClosed(d: SellerBase) {
   };
 }
 
+/**
+ * 9F-56 — the seller's application was received (Seller row created, status
+ * PENDING). Sent straight to `Seller.supportEmail` — the only address that can
+ * possibly exist this early, before any seller-portal team member or
+ * `notifyEmail` is configured.
+ */
+export function renderSellerAccountSubmitted(d: { brand: string; siteUrl: string; sellerName: string }) {
+  const subject = `Your ${d.brand} seller application was received`;
+  const body = `
+    ${heading("Your application was received")}
+    ${paragraph(`Thanks — Axiaro received ${d.sellerName}'s seller application and it's now under review.`)}
+    ${infoBox(kvRow("Seller", d.sellerName) + kvRow("Status", "Pending review", { last: true }))}
+    ${paragraph("Axiaro will email you once a decision is made. No action is needed from you right now.")}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: sellerReason(d.brand) }),
+    text: textBody([
+      "Your application was received",
+      ``,
+      `Thanks — Axiaro received ${d.sellerName}'s seller application and it's now under review.`,
+      ``,
+      "Axiaro will email you once a decision is made. No action is needed from you right now.",
+      ...textFooter(d.brand, d.siteUrl, sellerReason(d.brand)),
+    ]),
+  };
+}
+
+/**
+ * 9F-56 — the application was rejected. `reason` is the admin's ACTUAL
+ * rejection reason (enforced non-empty at the action layer) — never invented
+ * or defaulted here.
+ */
+export function renderSellerAccountRejected(d: { brand: string; siteUrl: string; sellerName: string; reason: string }) {
+  const subject = `Your ${d.brand} seller application was not approved`;
+  const reasonHtml = `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.reason).replace(/\n/g, "<br>")}</p>`;
+  const body = `
+    ${heading("Your seller application was not approved")}
+    ${paragraph(`Axiaro reviewed ${d.sellerName}'s seller application and it was not approved this time.`)}
+    ${reasonHtml}
+    ${paragraph("If you believe this is a mistake or you'd like to address the reason above, reply to this email.")}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: sellerReason(d.brand) }),
+    text: textBody([
+      "Your seller application was not approved",
+      ``,
+      `Axiaro reviewed ${d.sellerName}'s seller application and it was not approved this time.`,
+      ``,
+      d.reason,
+      ``,
+      "If you believe this is a mistake or you'd like to address the reason above, reply to this email.",
+      ...textFooter(d.brand, d.siteUrl, sellerReason(d.brand)),
+    ]),
+  };
+}
+
+/**
+ * 9F-56 — a previously-rejected application was reopened (REJECTED → PENDING),
+ * giving the applicant another chance. `note` explains what to fix/expect —
+ * enforced non-empty at the action layer, same as the rejection reason.
+ */
+export function renderSellerAccountReopened(d: { brand: string; siteUrl: string; sellerName: string; note: string }) {
+  const subject = `Your ${d.brand} seller application has been reopened`;
+  const noteHtml = `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.note).replace(/\n/g, "<br>")}</p>`;
+  const body = `
+    ${heading("Your application has been reopened")}
+    ${paragraph(`Good news — Axiaro has reopened ${d.sellerName}'s seller application for another look.`)}
+    ${noteHtml}
+    ${paragraph("Your application is back under review. Axiaro will email you again once a decision is made.")}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: sellerReason(d.brand) }),
+    text: textBody([
+      "Your application has been reopened",
+      ``,
+      `Good news — Axiaro has reopened ${d.sellerName}'s seller application for another look.`,
+      ``,
+      d.note,
+      ``,
+      "Your application is back under review. Axiaro will email you again once a decision is made.",
+      ...textFooter(d.brand, d.siteUrl, sellerReason(d.brand)),
+    ]),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Store-profile moderation
 // ---------------------------------------------------------------------------

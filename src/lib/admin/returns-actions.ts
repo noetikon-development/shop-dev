@@ -24,6 +24,8 @@ import {
   sendSellerReturnReceived,
   sendSellerReturnRequested,
   sendSellerReturnApproved,
+  sendSellerReturnRejected,
+  sendSellerRefundNotice,
   getReturnAffectedSellerIds,
 } from "@/lib/email/notifications";
 import { resolveReturnDestination } from "@/lib/marketplace/return-destination";
@@ -256,6 +258,15 @@ export async function rejectReturnAction(input: unknown): Promise<ReturnAdminSta
 
   revalidateReturn(ret.id, ret.returnNumber, ret.order.orderNumber);
   scheduleEmail(() => sendReturnRejected(ret.id));
+
+  // 9F-56 — one "return rejected" email per affected THIRD_PARTY seller (the
+  // missing counterpart of the approve path's sendSellerReturnApproved loop
+  // just above). `sendSellerReturnRejected` filters 1P (→ SKIPPED).
+  const affectedSellerIds = await getReturnAffectedSellerIds(ret.id);
+  for (const sellerId of affectedSellerIds) {
+    scheduleEmail(() => sendSellerReturnRejected(ret.id, sellerId));
+  }
+
   return { ok: true, message: "Return rejected.", returnId: ret.id };
 }
 
@@ -762,6 +773,17 @@ export async function completeRefundAction(input: unknown): Promise<ReturnAdminS
   scheduleEmail(() => sendReturnRefundCompleted(ret.id));
   // Axiaro Operations companion (9F-7b) — bookkeeping-only refund path only.
   scheduleEmail(() => sendReturnRefundCompletedOps(ret.id));
+
+  // 9F-56 — one "refund completed" email per affected THIRD_PARTY seller. This
+  // whole function is already the bookkeeping-only path (a live provider
+  // refund is refused above with "being processed by PayMongo"), so this never
+  // fires for a PayMongo-routed refund — 3P never has one anyway (3P online
+  // payment stays disabled). `sendSellerRefundNotice` filters 1P (→ SKIPPED).
+  const affectedSellerIds = await getReturnAffectedSellerIds(ret.id);
+  for (const sellerId of affectedSellerIds) {
+    scheduleEmail(() => sendSellerRefundNotice(ret.id, sellerId));
+  }
+
   return { ok: true, message: "Refund marked complete (bookkeeping only).", returnId: ret.id };
 }
 

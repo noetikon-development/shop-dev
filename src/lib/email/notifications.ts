@@ -43,20 +43,28 @@ import {
   renderSellerAccountApproved,
   renderSellerAccountSuspended,
   renderSellerAccountClosed,
+  renderSellerAccountSubmitted,
+  renderSellerAccountRejected,
+  renderSellerAccountReopened,
   renderSellerProfileApproved,
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
   renderSellerReturnRequested,
   renderSellerReturnReceived,
   renderSellerReturnApproved,
+  renderSellerReturnRejected,
+  renderSellerRefundNotice,
   renderSellerOrderReceived,
+  renderSellerOrderMilestone,
+  renderSellerShipmentCreated,
   renderSellerSettlementRecorded,
   type ClawbackNote,
+  type SellerOrderMilestone,
 } from "@/lib/email/templates/seller-order-notifications";
 import {
   SELLER_ORDER_ACCEPTANCE_SLA,
@@ -2700,6 +2708,56 @@ export async function sendSellerProductRequestSubmitted(
 }
 
 /**
+ * 9F-56 — Ops-only: a seller resubmitted a request that already went through a
+ * review cycle. Fired by `submitRequestAction` only when `wasResubmission` is
+ * true (the request's `reviewedAt` was already set before this submit).
+ * Key: SELLER_PRODUCT_REQUEST_RESUBMITTED_OPS:<id>:<submittedAt-ms>. Bucketing
+ * on `submittedAt` (re-read fresh, not a caller value) lets a SECOND
+ * resubmission cycle (reject → reopen → resubmit, again) raise its own alert
+ * rather than being deduped against the first one.
+ */
+export async function sendSellerProductRequestResubmittedOps(
+  requestId: string,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idKeyBase = `SELLER_PRODUCT_REQUEST_RESUBMITTED_OPS:${requestId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_product_request_resubmitted_ops", idempotencyKey: idKeyBase, subject: "Product request resubmitted", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const req = await db.sellerProductRequest.findUnique({
+      where: { id: requestId },
+      select: { proposedName: true, submittedAt: true, seller: { select: { displayName: true } } },
+    });
+    if (!req) return failPrep("request_not_found");
+    const idempotencyKey = `${idKeyBase}:${req.submittedAt?.getTime() ?? "0"}`;
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    return renderAndDispatch(
+      {
+        type: "seller_product_request_resubmitted_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerProductRequestResubmittedOps({
+          brand,
+          siteUrl,
+          adminUrl: `${siteUrl}/admin/seller-product-requests/${requestId}`,
+          sellerName: req.seller.displayName,
+          productName: req.proposedName,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerProductRequestResubmittedOps", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
  * Seller — the request was approved (linked to an existing product OR a new
  * canonical product was created). Everything is derived from the request row:
  * `reviewedAt` buckets the key so a later review round sends again; `linked` vs
@@ -3033,6 +3091,120 @@ export async function sendSellerAccountClosed(
   }
 }
 
+// ---------------------------------------------------------------------------
+// 9F-56 — seller APPLICATION notices (submitted / rejected / reopened). These
+// fire before a seller has any portal team member or `notifyEmail` configured
+// (PENDING/REJECTED both precede first approval), so — unlike every other
+// seller-lifecycle email — recipients resolve to `Seller.supportEmail`
+// directly rather than `loadSellerLifecycleEmailContext`'s team-member fan-out.
+// ---------------------------------------------------------------------------
+
+type SellerApplicationEmailContext = { brand: string; siteUrl: string; sellerName: string; recipient: string };
+
+async function loadSellerApplicationEmailContext(
+  sellerId: string,
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<SellerApplicationEmailContext | null> {
+  const seller = await client.seller.findUnique({
+    where: { id: sellerId },
+    select: { displayName: true, supportEmail: true },
+  });
+  if (!seller) return null;
+  const recipient = seller.supportEmail?.trim().toLowerCase();
+  if (!recipient || !EMAIL_RE.test(recipient)) return null;
+  const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+  return { brand, siteUrl, sellerName: seller.displayName, recipient };
+}
+
+/** Seller — application received (Seller row created, PENDING). Key: SELLER_ACCOUNT_SUBMITTED:<sellerId>. */
+export async function sendSellerAccountSubmitted(
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ACCOUNT_SUBMITTED:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_account_submitted", idempotencyKey, subject: "Seller application received", error, retry: opts.retry, client: opts.client });
+  try {
+    const ctx = await loadSellerApplicationEmailContext(sellerId, opts.client);
+    if (!ctx) return failPrep("no_recipient");
+
+    return renderAndDispatch(
+      { type: "seller_account_submitted", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      () => renderSellerAccountSubmitted({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountSubmitted", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Seller — application rejected (PENDING → REJECTED). `reason` is the admin's
+ * actual reason, read back off the transition's own audit row (never a caller
+ * flag, never invented) — same anchor pattern as `sendSellerAccountApproved`
+ * reading `reactivate` off its audit row. A missing/blank reason on the audit
+ * row (which the action layer should never produce) fails the send rather
+ * than inventing generic text.
+ * Key: SELLER_ACCOUNT_REJECTED:<sellerId>:<auditLogId>.
+ */
+export async function sendSellerAccountRejected(
+  sellerId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ACCOUNT_REJECTED:${sellerId}:${auditLogId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_account_rejected", idempotencyKey, subject: "Seller application rejected", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadSellerApplicationEmailContext(sellerId, opts.client);
+    if (!ctx) return failPrep("no_recipient");
+    const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { meta: true } });
+    const reason = safeParse<{ reason?: unknown }>(audit?.meta, {}).reason;
+    if (typeof reason !== "string" || !reason.trim()) return failPrep("missing_reason_on_audit_row");
+
+    return renderAndDispatch(
+      { type: "seller_account_rejected", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      () => renderSellerAccountRejected({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName, reason: reason.trim() }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountRejected", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Seller — a rejected application was reopened (REJECTED → PENDING). `note`
+ * comes from the same audit-row `meta.reason` field the reject email reads —
+ * required non-empty at the action layer.
+ * Key: SELLER_ACCOUNT_REOPENED:<sellerId>:<auditLogId>.
+ */
+export async function sendSellerAccountReopened(
+  sellerId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ACCOUNT_REOPENED:${sellerId}:${auditLogId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_account_reopened", idempotencyKey, subject: "Seller application reopened", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadSellerApplicationEmailContext(sellerId, opts.client);
+    if (!ctx) return failPrep("no_recipient");
+    const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { meta: true } });
+    const note = safeParse<{ reason?: unknown }>(audit?.meta, {}).reason;
+    if (typeof note !== "string" || !note.trim()) return failPrep("missing_reason_on_audit_row");
+
+    return renderAndDispatch(
+      { type: "seller_account_reopened", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      () => renderSellerAccountReopened({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName, note: note.trim() }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountReopened", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 /**
  * Seller — store profile approved. Keyed on `Seller.contentReviewedAt` (set
  * only by the review actions, unlike `updatedAt`) plus the resulting state, so
@@ -3244,6 +3416,145 @@ export async function sendSellerOrderCancelled(
     );
   } catch (err) {
     console.error("[email] sendSellerOrderCancelled", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+const SELLER_ORDER_MILESTONE_TYPE: Record<SellerOrderMilestone, EmailType> = {
+  accepted: "seller_order_accepted",
+  ready_to_ship: "seller_order_ready_to_ship",
+  shipped: "seller_order_shipped",
+  delivered: "seller_order_delivered",
+};
+const SELLER_ORDER_MILESTONE_KEY_PREFIX: Record<SellerOrderMilestone, string> = {
+  accepted: "SELLER_ORDER_ACCEPTED",
+  ready_to_ship: "SELLER_ORDER_READY_TO_SHIP",
+  shipped: "SELLER_ORDER_SHIPPED",
+  delivered: "SELLER_ORDER_DELIVERED",
+};
+
+/**
+ * 9F-56 — a self-confirmation receipt for the seller's OWN SellerOrder
+ * fulfilment milestone (accept / ready-to-ship / shipped / delivered). Fired
+ * from `advanceSellerOrderAction` alongside (not instead of) the existing
+ * customer-facing rollup emails. `sellerOrderId` transitions are forward-only
+ * and status-guarded one-shot in the repository (`advanceSellerOrderStatus`'s
+ * status-scoped `updateMany`), so keying on `(sellerOrderId, milestone)` alone
+ * is enough — never `SellerOrder.updatedAt`.
+ * Key: SELLER_ORDER_<MILESTONE>:<sellerOrderId>.
+ */
+export async function sendSellerOrderMilestone(
+  sellerOrderId: string,
+  milestone: SellerOrderMilestone,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const type = SELLER_ORDER_MILESTONE_TYPE[milestone];
+  const idempotencyKey = opts.idempotencyKey ?? `${SELLER_ORDER_MILESTONE_KEY_PREFIX[milestone]}:${sellerOrderId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type, idempotencyKey, subject: "Order update — seller notification", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const so = await db.sellerOrder.findUnique({
+      where: { id: sellerOrderId },
+      select: {
+        id: true,
+        sellerId: true,
+        order: { select: { orderNumber: true } },
+        items: { select: { name: true, variantLabel: true, quantity: true } },
+      },
+    });
+    if (!so) return failPrep("seller_order_not_found");
+    const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type,
+        idempotencyKey,
+        subject: `Order ${so.order.orderNumber} update — seller notification`,
+        client: opts.client,
+      });
+
+    return renderAndDispatch(
+      { type, to: ctx.recipients, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      () =>
+        renderSellerOrderMilestone({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: so.order.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
+          milestone,
+          items: so.items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerOrderMilestone", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * 9F-56 — a shipment record was created (not updated) for this seller's
+ * SellerOrder. Fired from `saveShipmentAction` only on a create (`!shipmentId`
+ * on the way in), never on an edit — `Shipment` rows are created at most once
+ * per SellerOrder (`saveSellerShipment` refuses a 2nd create with CONFLICT), so
+ * keying on the shipment's own id is enough.
+ * Key: SELLER_SHIPMENT_CREATED:<shipmentId>.
+ */
+export async function sendSellerShipmentCreated(
+  shipmentId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_SHIPMENT_CREATED:${shipmentId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_shipment_created", idempotencyKey, subject: "Shipment recorded — seller notification", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const shipment = await db.shipment.findUnique({
+      where: { id: shipmentId },
+      select: {
+        carrier: true,
+        carrierName: true,
+        trackingNumber: true,
+        trackingUrl: true,
+        sellerOrder: { select: { id: true, sellerId: true, order: { select: { orderNumber: true } } } },
+      },
+    });
+    if (!shipment) return failPrep("shipment_not_found");
+    const so = shipment.sellerOrder;
+    const ctx = await loadSellerLifecycleEmailContext(so.sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_shipment_created",
+        idempotencyKey,
+        subject: `Shipment recorded for order ${so.order.orderNumber} — seller notification`,
+        client: opts.client,
+      });
+
+    return renderAndDispatch(
+      {
+        type: "seller_shipment_created",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerShipmentCreated({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: so.order.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
+          carrierLabel: shipment.carrierName || shipment.carrier || "—",
+          trackingNumber: shipment.trackingNumber,
+          trackingUrl: shipment.trackingUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerShipmentCreated", err);
     return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
@@ -3505,6 +3816,161 @@ export async function sendSellerReturnApproved(
     );
   } catch (err) {
     console.error("[email] sendSellerReturnApproved", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * 9F-56 — Axiaro REJECTED a return covering one or more of this THIRD_PARTY
+ * seller's lines (the missing counterpart of `sendSellerReturnApproved`).
+ * Fired from `rejectReturnAction`, one email per affected seller. `reason` is
+ * `ReturnRequest.resolutionNote` — already required non-empty by that action's
+ * zod schema (`min(1)`) before the transition can even happen; this sender
+ * additionally refuses to send if it somehow reads back empty, rather than
+ * ever inventing filler text. 1P → SKIPPED (Axiaro handles its own).
+ * Key: SELLER_RETURN_REJECTED:<returnId>:<sellerId>.
+ */
+export async function sendSellerReturnRejected(
+  returnId: string,
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_RETURN_REJECTED:${returnId}:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_return_rejected", idempotencyKey, subject: "Return rejected — seller notification", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { type: true } });
+    if (seller?.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: { id: true, returnNumber: true, reason: true, resolutionNote: true, order: { select: { orderNumber: true } } },
+    });
+    if (!ret) return failPrep("return_not_found");
+    if (!ret.resolutionNote || !ret.resolutionNote.trim()) return failPrep("missing_resolution_note");
+
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_return_rejected",
+        idempotencyKey,
+        subject: `Return ${ret.returnNumber} rejected — seller notification`,
+        client: opts.client,
+      });
+
+    const items = await db.returnItem.findMany({
+      where: { returnRequestId: returnId, orderItem: { sellerId } },
+      select: { name: true, variantLabel: true, quantity: true },
+    });
+    if (items.length === 0) return failPrep("no_seller_lines");
+
+    return renderAndDispatch(
+      {
+        type: "seller_return_rejected",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerReturnRejected({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          returnNumber: ret.returnNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          reasonLabel: returnReasonLabel(ret.reason),
+          reason: ret.resolutionNote!.trim(),
+          items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerReturnRejected", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * 9F-56 — a bookkeeping refund completed on a return covering this THIRD_PARTY
+ * seller's line(s). Fired from `completeRefundAction`'s bookkeeping path only
+ * (a PayMongo-provider refund never involves a 3P seller — 3P online payment
+ * stays disabled). One email per affected seller. 1P → SKIPPED.
+ * Key: SELLER_REFUND_NOTICE:<returnId>:<sellerId>.
+ */
+export async function sendSellerRefundNotice(
+  returnId: string,
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_REFUND_NOTICE:${returnId}:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_refund_notice", idempotencyKey, subject: "Refund completed — seller notification", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { type: true } });
+    if (seller?.type !== "THIRD_PARTY") return { ok: true, skipped: true, status: "SKIPPED" };
+
+    const ret = await db.returnRequest.findUnique({
+      where: { id: returnId },
+      select: { id: true, returnNumber: true, refundAmount: true, order: { select: { orderNumber: true } } },
+    });
+    if (!ret) return failPrep("return_not_found");
+
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx)
+      return failNoRecipient({
+        type: "seller_refund_notice",
+        idempotencyKey,
+        subject: `Refund for return ${ret.returnNumber} completed — seller notification`,
+        client: opts.client,
+      });
+
+    const items = await db.returnItem.findMany({
+      where: { returnRequestId: returnId, orderItem: { sellerId } },
+      select: {
+        name: true,
+        variantLabel: true,
+        quantity: true,
+        orderItem: { select: { sellerOrderId: true } },
+      },
+    });
+    if (items.length === 0) return failPrep("no_seller_lines");
+
+    // 9F-20-style: if this refund's underlying return clawed back an
+    // already-settled order, fold in the same bookkeeping line the
+    // return-received / order-cancelled emails use.
+    const soIds = [...new Set(items.map((i) => i.orderItem?.sellerOrderId).filter((v): v is string => !!v))];
+    const clawback = await clawbackNoteFor(db, { sellerOrderIds: soIds, returnId, sellerId });
+
+    return renderAndDispatch(
+      {
+        type: "seller_refund_notice",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerRefundNotice({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          returnNumber: ret.returnNumber,
+          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          refundAmount: ret.refundAmount ?? 0,
+          items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
+          clawback,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerRefundNotice", err);
     return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

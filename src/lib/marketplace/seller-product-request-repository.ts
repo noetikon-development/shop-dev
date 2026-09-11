@@ -476,7 +476,9 @@ export async function getSellerRequestForSeller(ctx: SellerContext, requestId: s
 
 export type CreateRequestResult = { ok: true; requestId: string } | SellerRequestError;
 export type MutateRequestResult = { ok: true } | SellerRequestError;
-export type SubmitRequestResult = { ok: true; warnings: DuplicateWarning[] } | SellerRequestError;
+export type SubmitRequestResult =
+  | { ok: true; warnings: DuplicateWarning[]; wasResubmission: boolean }
+  | SellerRequestError;
 
 export async function createSellerRequest(
   ctx: SellerContext,
@@ -565,11 +567,18 @@ export async function submitSellerRequest(
         barcode: true,
         proposedCondition: true,
         proposedVariants: true,
+        // 9F-56 — non-null here means this DRAFT has already been through at
+        // least one review cycle (REJECTED → reopened → DRAFT preserves this
+        // field, per `reopenRejectedRequest`'s doc comment). Used only to tell
+        // a genuine resubmission from a first-time submission for the Ops
+        // notification — never read/written anywhere else in this function.
+        reviewedAt: true,
       },
     });
     if (!current) return { ok: false, code: "NOT_FOUND", error: "No such request for this seller." };
+    const wasResubmission = current.reviewedAt !== null;
     if (current.status !== "DRAFT") {
-      if (current.status === "PENDING") return { ok: true, warnings: [] };
+      if (current.status === "PENDING") return { ok: true, warnings: [], wasResubmission };
       return { ok: false, code: "LOCKED", error: `A ${current.status.toLowerCase()} request can't be submitted.` };
     }
 
@@ -608,7 +617,7 @@ export async function submitSellerRequest(
     if (advanced.count === 0) {
       return { ok: false, code: "CONFLICT", error: "The request changed while you were submitting it. Reload and try again." };
     }
-    return { ok: true, warnings: dup.warnings };
+    return { ok: true, warnings: dup.warnings, wasResubmission };
   };
 
   try {

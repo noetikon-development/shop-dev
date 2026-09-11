@@ -61,6 +61,12 @@ export type EmailType =
   | "seller_account_approved"
   | "seller_account_suspended"
   | "seller_account_closed"
+  // 9F-56 — the seller-application lifecycle gained a reject/reopen path
+  // (Seller.status PENDING ⇄ REJECTED) so these two outcomes can be notified
+  // with the admin's actual reason, plus the initial "received" ack.
+  | "seller_account_submitted"
+  | "seller_account_rejected"
+  | "seller_account_reopened"
   | "seller_profile_submitted"
   | "seller_profile_approved"
   | "seller_profile_rejected"
@@ -71,16 +77,35 @@ export type EmailType =
   // the SLA. `_reminder` nudges the seller; `_overdue_ops` escalates to Ops.
   | "seller_order_acceptance_reminder"
   | "seller_order_acceptance_overdue_ops"
+  // 9F-56 — seller-facing self-confirmations for its OWN SellerOrder fulfilment
+  // milestones (a record/receipt, mirroring the customer-facing order_shipped /
+  // order_delivered but scoped to just this seller's own line, independent of a
+  // multi-seller parent-order rollup) + the shipment-record-created moment.
+  | "seller_order_accepted"
+  | "seller_order_ready_to_ship"
+  | "seller_shipment_created"
+  | "seller_order_shipped"
+  | "seller_order_delivered"
   // 9F-31B (P2) — a customer opened a return covering a THIRD_PARTY seller's line.
   | "seller_return_requested"
   | "seller_return_received"
   // 9F-41B — Axiaro approved a return covering a THIRD_PARTY seller's line;
   // the seller is told to expect the goods + the frozen return destination.
   | "seller_return_approved"
+  // 9F-56 — the rejected counterpart of seller_return_approved (was missing).
+  | "seller_return_rejected"
+  // 9F-56 — a bookkeeping refund completed on an order covering a THIRD_PARTY
+  // seller's line. PayMongo-provider refunds never reach a 3P seller (3P online
+  // payment stays disabled), so this only ever fires from the bookkeeping path.
+  | "seller_refund_notice"
   // 9F-24D (P1-7) — a THIRD_PARTY seller's offer went ACTIVE (published). Ops-only.
   | "seller_offer_published"
   // 9F-30B — a THIRD_PARTY seller declined / cancelled a customer's order. Ops-only.
   | "seller_order_cancelled_ops"
+  // 9F-56 — Ops-only: a seller resubmitted a previously-reviewed (REJECTED)
+  // product request. Distinct from the seller's own "submitted" ack, which
+  // fires either way.
+  | "seller_product_request_resubmitted_ops"
   // 9F-20 — bookkeeping settlement recorded for a THIRD_PARTY seller.
   | "seller_settlement_recorded"
   | "return_refund_initiated_ops"

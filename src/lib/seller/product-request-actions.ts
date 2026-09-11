@@ -19,7 +19,7 @@ import {
   type DuplicateBlock,
   type DuplicateWarning,
 } from "@/lib/marketplace/seller-product-request-repository";
-import { sendSellerProductRequestSubmitted } from "@/lib/email/notifications";
+import { sendSellerProductRequestSubmitted, sendSellerProductRequestResubmittedOps } from "@/lib/email/notifications";
 import { scheduleEmail } from "@/lib/email/schedule";
 
 /**
@@ -230,7 +230,15 @@ export async function submitRequestAction(
   });
 
   // 9F-5c Part 11 — one "submitted for review" acknowledgement to the seller.
+  // Fires on BOTH a first submission and a resubmission alike.
   scheduleEmail(() => sendSellerProductRequestSubmitted(requestId));
+
+  // 9F-56 — a DISTINCT signal to Ops when this is a resubmission (the request
+  // already went through a review cycle before) — first-time submissions rely
+  // on the admin review queue, same as before this phase.
+  if (res.wasResubmission) {
+    scheduleEmail(() => sendSellerProductRequestResubmittedOps(requestId));
+  }
 
   revalidate(requestId);
   return {

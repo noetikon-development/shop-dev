@@ -10,6 +10,9 @@ import {
   sendSellerAccountApproved,
   sendSellerAccountSuspended,
   sendSellerAccountClosed,
+  sendSellerAccountRejected,
+  sendSellerAccountReopened,
+  sendSellerAccountSubmitted,
 } from "@/lib/email/notifications";
 import {
   createSeller,
@@ -23,7 +26,7 @@ import {
   setSellerUserStatus,
   type SellerUserError,
 } from "@/lib/admin/sellers/seller-users";
-import { SELLER_STATUSES, sellerTransitionAction } from "@/lib/admin/sellers/lifecycle";
+import { SELLER_STATUSES, sellerTransitionAction, sellerTransitionRequiresReason } from "@/lib/admin/sellers/lifecycle";
 
 /**
  * Admin Seller Management server actions — Phase 9F-4b.
@@ -99,6 +102,15 @@ export async function createSellerAction(
   });
 
   revalidateSeller(res.sellerId);
+
+  // 9F-56 — the seller's own acknowledgement that their application was
+  // received and is under review. Fires straight from creation, since at this
+  // point no seller-portal team member / notifyEmail exists yet to resolve via
+  // the usual `loadSellerLifecycleEmailContext` fan-out — `supportEmail` (the
+  // address the admin just typed in) is the only address that can possibly
+  // exist this early.
+  scheduleEmail(() => sendSellerAccountSubmitted(res.sellerId));
+
   redirect(`/admin/sellers/${res.sellerId}`);
 }
 
@@ -106,9 +118,15 @@ export async function createSellerAction(
 // Lifecycle
 // ---------------------------------------------------------------------------
 
+// 9F-56 — `reason` is required ONLY for PENDING→REJECTED and REJECTED→PENDING
+// (enforced below via `sellerTransitionRequiresReason`, not by zod, since the
+// requirement depends on the transition, not the field alone). Every other
+// transition (APPROVED/SUSPENDED/CLOSED) is unchanged — reason stays optional
+// and unused for them, exactly as before this phase.
 const transitionSchema = z.object({
   sellerId: z.string().min(1).max(64),
   to: z.enum(SELLER_STATUSES),
+  reason: z.string().trim().max(2000).optional(),
 });
 
 export async function transitionSellerAction(
@@ -116,20 +134,43 @@ export async function transitionSellerAction(
   formData: FormData,
 ): Promise<SellerAdminActionState> {
   const admin = await requirePermission("manage_settings");
-  const parsed = transitionSchema.safeParse({ sellerId: formData.get("sellerId"), to: formData.get("to") });
+  const parsed = transitionSchema.safeParse({
+    sellerId: formData.get("sellerId"),
+    to: formData.get("to"),
+    reason: formData.get("reason") ?? undefined,
+  });
   if (!parsed.success) return { error: "Invalid request." };
+
+  // 9F-56 — enforced HERE, at the action layer, before any state mutation:
+  // rejecting an application or reopening one MUST carry the admin's actual
+  // reason. Never defaulted, never invented — a missing/blank reason is a
+  // hard validation error, not a generic placeholder.
+  const reason = parsed.data.reason?.trim() || "";
+  if ((parsed.data.to === "REJECTED" || parsed.data.to === "PENDING") && !reason) {
+    return {
+      error:
+        parsed.data.to === "REJECTED"
+          ? "Add a reason so the applicant knows why they were rejected."
+          : "Add a note explaining what changed so the applicant knows why this was reopened.",
+    };
+  }
 
   const res = await transitionSellerStatus(parsed.data.sellerId, parsed.data.to);
   if (!res.ok) return fromError(res);
 
   if (res.from !== res.to) {
+    // `sellerTransitionRequiresReason` re-derives the requirement from the
+    // REAL from/to the repository just confirmed (not the caller's `to`
+    // alone) — belt-and-suspenders against the schema check above ever
+    // drifting out of sync with the actual transition table.
+    const requiresReason = sellerTransitionRequiresReason(res.from, res.to);
     const auditLogId = await writeAudit({
       actorUserId: admin.user.id,
       action: res.reactivate ? "seller.reactivated" : sellerTransitionAction(res.to),
       targetType: "seller",
       targetId: res.sellerId,
       summary: `${admin.user.email} moved seller ${res.displayName} ${res.from} → ${res.to}`,
-      meta: { sellerId: res.sellerId, from: res.from, to: res.to },
+      meta: { sellerId: res.sellerId, from: res.from, to: res.to, ...(requiresReason ? { reason } : {}) },
     });
 
     // Notify the seller — never blocking the response on SMTP delivery. The
@@ -142,6 +183,10 @@ export async function transitionSellerAction(
         scheduleEmail(() => sendSellerAccountSuspended(res.sellerId, auditLogId));
       } else if (res.to === "CLOSED") {
         scheduleEmail(() => sendSellerAccountClosed(res.sellerId, auditLogId));
+      } else if (res.to === "REJECTED") {
+        scheduleEmail(() => sendSellerAccountRejected(res.sellerId, auditLogId));
+      } else if (res.to === "PENDING") {
+        scheduleEmail(() => sendSellerAccountReopened(res.sellerId, auditLogId));
       }
     }
   }
