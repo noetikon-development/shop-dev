@@ -48,8 +48,8 @@ export function OrderTimeline({
       <div className="rounded-md border border-line bg-surface px-4 py-3 text-sm text-ink-soft">
         <p className="font-medium text-ink">Order placed</p>
         <p className="mt-1">
-          We&apos;ve received your order. Payment is arranged on delivery — our team will confirm
-          the details with you and start preparing your items.
+          We&apos;ve received your order. We&apos;ll confirm your payment and start preparing your
+          items.
         </p>
       </div>
     );

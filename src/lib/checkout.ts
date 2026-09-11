@@ -813,7 +813,10 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
               {
                 status: "PENDING_PAYMENT",
                 title: "Order placed",
-                detail: "We’ve received your order. Payment is arranged on delivery.",
+                // Payment-neutral: this event is written for EVERY order at
+                // creation, before the customer's COD-vs-online choice (never
+                // persisted here — see beginOnlinePayment) is known.
+                detail: "We’ve received your order. We’ll confirm your payment and start preparing your items.",
               },
               // 9F-15B: the auto-confirm milestone — same OrderEvent the admin
               // "Confirm order" action writes (title / detail from ORDER_STATUS_META).

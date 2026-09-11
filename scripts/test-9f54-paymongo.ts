@@ -465,8 +465,8 @@ async function main() {
   }
   {
     const co = read("src/lib/checkout.ts");
-    ok("14 · checkout.ts COD path unchanged: order still created paymentMethod 'NONE' + pay-on-delivery event",
-      /paymentMethod: "NONE"/.test(co) && /Payment is arranged on delivery/.test(co));
+    ok("14 · checkout.ts COD path unchanged: order still created paymentMethod 'NONE'",
+      /paymentMethod: "NONE"/.test(co));
   }
 
   // ── 15 — persistent "Pay now" recovery for an eligible unpaid 1P order ────
@@ -735,6 +735,79 @@ async function main() {
       !/zero-padded to 5/.test(rls) && /suffix is always 6\+ digits/.test(rls));
     ok("16 · returns.ts return-number comment corrected too",
       !/zero-padded to 5/.test(read("src/lib/returns.ts")));
+  }
+
+  // ── 17 — the initial "Order placed" timeline message is payment-neutral ──
+  // Every order gets this exact OrderEvent at checkout regardless of whether
+  // the customer ends up paying COD or online (Card/GCash) — the choice isn't
+  // known/persisted yet at this point (see beginOnlinePayment, a later, separate
+  // step). The old copy ("Payment is arranged on delivery") was COD-only and
+  // wrong once an online payment completed. Fix is copy-only: no payment logic,
+  // webhook logic, order-state transition, or COD behaviour changed.
+  {
+    const co = read("src/lib/checkout.ts");
+    const NEW_MSG = "We’ve received your order. We’ll confirm your payment and start preparing your items.";
+    ok("17 · checkout.ts: the 'Order placed' OrderEvent uses the new payment-neutral copy",
+      co.includes(`detail: "${NEW_MSG}",`));
+    ok("17 · checkout.ts: the old COD-specific 'Payment is arranged on delivery' copy is gone",
+      !/Payment is arranged on delivery/.test(co));
+    ok("17 · checkout.ts: the 'Order placed' event is still written UNCONDITIONALLY (one literal, not branched on paymentMethod)",
+      /status: "PENDING_PAYMENT",\s*title: "Order placed",\s*(?:\/\/[^\r\n]*\s*)*detail: "We/.test(co));
+
+    const ot = read("src/components/order/order-timeline.tsx");
+    ok("17 · order-timeline.tsx: the live PENDING_PAYMENT 'Order placed' placeholder uses the same neutral copy",
+      /We&apos;ve received your order\. We&apos;ll confirm your payment and start preparing your\s*\n?\s*items\./.test(ot));
+    ok("17 · order-timeline.tsx: the old COD-specific wording is gone",
+      !/arranged on delivery/.test(ot) && !/Payment is arranged/.test(ot));
+    ok("17 · order-timeline.tsx: no new dynamic rewriting — the PENDING_PAYMENT block still gates on `status` alone (no paymentMethod/paymentStatus branch inside it)",
+      (() => {
+        const start = ot.indexOf('if (status === "PENDING_PAYMENT")');
+        const block = ot.slice(start, ot.indexOf("}", ot.indexOf("</div>", start)) + 1);
+        return start !== -1 && !/paymentMethod|paymentStatus/.test(block);
+      })());
+
+    // requirement 3 — the separate "Payment received / Payment confirmed" event
+    // is untouched by this copy-only change.
+    const constants = read("src/lib/constants.ts");
+    ok("17 · constants.ts: PAID meta unchanged ('Payment confirmed' / 'Payment received')",
+      /PAID: \{ label: "Payment confirmed", description: "Payment received", tone: "progress" \}/.test(constants));
+
+    // email confirmation's own COD-conditional line is a DIFFERENT surface
+    // (already correctly branches on isPayOnDeliveryOrder) — out of scope,
+    // must be untouched.
+    const emailTpl = read("src/lib/email/templates/order-confirmation.ts");
+    ok("17 · scope: transactional email's pay-on-delivery line is untouched (different, already-conditional surface)",
+      /\? "Your order has been received\. Payment is arranged on delivery\."/.test(emailTpl));
+  }
+
+  // rolled-back DB — a freshly created order's "Order placed" event is
+  // payment-neutral regardless of which payment method the customer will
+  // ultimately use (COD vs CARD vs GCASH) — proves requirement 2 end to end.
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = Date.now().toString(36);
+      const NEW_MSG = "We’ve received your order. We’ll confirm your payment and start preparing your items.";
+      for (const method of ["NONE", "CARD", "GCASH"]) {
+        const email = `pn-${method}-${t}@example.test`;
+        const user = await tx.user.create({ data: { email, name: "PN" }, select: { id: true } });
+        const order = await tx.order.create({
+          data: {
+            orderNumber: `AX-T9F17-${method}-${t}`,
+            userId: user.id, email, status: "PENDING_PAYMENT",
+            paymentMethod: "NONE", paymentStatus: "PENDING", subtotal: GRAND, grandTotal: GRAND,
+            shippingAddress: JSON.stringify({ firstName: "T", city: "M", country: "PH" }),
+            events: { create: [{ status: "PENDING_PAYMENT", title: "Order placed", detail: NEW_MSG }] },
+          },
+          select: { id: true },
+        });
+        const ev = await tx.orderEvent.findFirst({ where: { orderId: order.id, status: "PENDING_PAYMENT" }, select: { detail: true } });
+        ok(`17 · seeded order (intended method ${method}) — 'Order placed' detail is the neutral message, no COD/online branching`,
+          ev?.detail === NEW_MSG);
+      }
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
   }
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
