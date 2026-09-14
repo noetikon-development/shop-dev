@@ -30,6 +30,9 @@ export const SELLER_ROUTES: SellerRoute[] = [
   // 9F-8e: read-only statement of bookkeeping settlements Axiaro has recorded.
   { path: "/seller/settlements", label: "Settlements", accepts: "view_seller_orders", live: true },
   { path: "/seller/settings", label: "Settings", accepts: "manage_seller_settings", live: true },
+  // Seller Verification (Phase 2) — identity/business information only so
+  // far; same permission as Settings, no document upload or review yet.
+  { path: "/seller/verification", label: "Verification", accepts: "manage_seller_settings", live: true },
 ];
 
 export function sellerNav(permissions: Set<string>, role: string): SellerRoute[] {
@@ -46,6 +49,7 @@ const CRUMB_LABELS: Record<string, string> = {
   settings: "Settings",
   settlements: "Settlements",
   "product-requests": "Product requests",
+  verification: "Verification",
 };
 
 export function sellerBreadcrumbs(pathname: string): { label: string; href?: string }[] {

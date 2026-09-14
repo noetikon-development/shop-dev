@@ -39,16 +39,16 @@ model User {
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  addresses Address[]
-  orders    Order[]
+  addresses      Address[]
+  orders         Order[]
   returnRequests ReturnRequest[]
-  reviews   Review[]
-  wishlist  WishlistItem[]
-  questions ProductQuestion[]
-  answers   ProductAnswer[]
-  carts     Cart[]
-  emailLogs EmailLog[]
-  signInDevices SignInDevice[]
+  reviews        Review[]
+  wishlist       WishlistItem[]
+  questions      ProductQuestion[]
+  answers        ProductAnswer[]
+  carts          Cart[]
+  emailLogs      EmailLog[]
+  signInDevices  SignInDevice[]
 
   couponRedemptions CouponRedemption[]
 
@@ -60,10 +60,10 @@ model User {
   inventoryAdjustments InventoryAdjustment[] @relation("InventoryAdjustmentActor")
 
   // Marketplace (Phase 9C foundation). Back-relation only — no column on User.
-  sellerUsers          SellerUser[]
+  sellerUsers           SellerUser[]
   // Seller-onboarding foundation (Phase 1). Back-relation only — not yet written.
-  sellerInvitesSent    SellerInvite[]        @relation("SellerInviteInvitedBy")
-  sellerInvitesAccepted SellerInvite[]       @relation("SellerInviteAcceptedBy")
+  sellerInvitesSent     SellerInvite[] @relation("SellerInviteInvitedBy")
+  sellerInvitesAccepted SellerInvite[] @relation("SellerInviteAcceptedBy")
 
   // Analytics (Step 18): new-customers-in-period is a createdAt range scan.
   @@index([createdAt])
@@ -284,13 +284,13 @@ model Product {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  category Category        @relation(fields: [categoryId], references: [id])
+  category  Category          @relation(fields: [categoryId], references: [id])
   images    ProductImage[]
   questions ProductQuestion[]
-  options  ProductOption[]
-  variants Variant[]
-  reviews  Review[]
-  wishedBy WishlistItem[]
+  options   ProductOption[]
+  variants  Variant[]
+  reviews   Review[]
+  wishedBy  WishlistItem[]
 
   // Phase 9F-5b — set (SET NULL) when a seller product request is APPROVED and
   // this Product is the canonical result. Back-relation only; no column on Product.
@@ -302,20 +302,20 @@ model Product {
 }
 
 model ProductImage {
-  id        String @id @default(cuid())
-  productId String
-  url       String // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
-  alt       String @default("")
+  id            String  @id @default(cuid())
+  productId     String
+  url           String // `art:<kind>:<seed>` for seeded illustrations, or a Storage public URL for uploads
+  alt           String  @default("")
   // `sortOrder` is scoped to the (productId, optionValueId) group: images for a
   // given colour are ordered independently, and the lowest sortOrder in a group
   // is that group's primary image.
-  sortOrder Int    @default(0)
+  sortOrder     Int     @default(0)
   // Explicit link to a Colour option value (ProductOptionValue). NULL = the
   // image applies to the whole product ("all colours"). The storefront gallery
   // is driven by THIS relation — never by the filename, slug or image content.
   optionValueId String?
   // set when the image was uploaded via the admin (Supabase Storage / MediaAsset)
-  mediaAssetId String?
+  mediaAssetId  String?
 
   product     Product             @relation(fields: [productId], references: [id], onDelete: Cascade)
   optionValue ProductOptionValue? @relation(fields: [optionValueId], references: [id], onDelete: SetNull)
@@ -589,22 +589,22 @@ model CartItem {
 // ----------------------------------------------------------------------------
 
 model Coupon {
-  id          String    @id @default(cuid())
-  code        String    @unique // canonical, UPPERCASE alphanumeric
-  description String?
-  type        String // PERCENT | FIXED  (FREESHIP kept in data; free-shipping coupons are a later step)
-  value       Int       @default(0) // percent (1-100) or centavos
-  minSubtotal Int       @default(0) // centavos; 0 = no minimum
-  maxDiscount Int? // centavos; caps a PERCENT discount
-  startsAt    DateTime?
-  expiresAt   DateTime?
+  id               String    @id @default(cuid())
+  code             String    @unique // canonical, UPPERCASE alphanumeric
+  description      String?
+  type             String // PERCENT | FIXED  (FREESHIP kept in data; free-shipping coupons are a later step)
+  value            Int       @default(0) // percent (1-100) or centavos
+  minSubtotal      Int       @default(0) // centavos; 0 = no minimum
+  maxDiscount      Int? // centavos; caps a PERCENT discount
+  startsAt         DateTime?
+  expiresAt        DateTime?
   usageLimit       Int? // global redemption cap
   perCustomerLimit Int? // per-customer redemption cap (Step 14)
-  usedCount        Int      @default(0) // loose display mirror — CouponRedemption is the source of truth
-  active           Boolean  @default(true)
+  usedCount        Int       @default(0) // loose display mirror — CouponRedemption is the source of truth
+  active           Boolean   @default(true)
   archivedAt       DateTime? // soft archive (Step 14); distinct from active/inactive
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   orders      Order[]
   redemptions CouponRedemption[]
@@ -703,10 +703,10 @@ model Order {
   placedAt  DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  user       User?           @relation(fields: [userId], references: [id])
-  cart       Cart?           @relation(fields: [cartId], references: [id])
-  address    Address?        @relation("OrderShipTo", fields: [addressId], references: [id])
-  billTo     Address?        @relation("OrderBillTo", fields: [billingAddressId], references: [id])
+  user             User?             @relation(fields: [userId], references: [id])
+  cart             Cart?             @relation(fields: [cartId], references: [id])
+  address          Address?          @relation("OrderShipTo", fields: [addressId], references: [id])
+  billTo           Address?          @relation("OrderBillTo", fields: [billingAddressId], references: [id])
   coupon           Coupon?           @relation(fields: [couponId], references: [id])
   couponRedemption CouponRedemption?
   shipMethod       ShippingMethod?   @relation(fields: [shippingMethodId], references: [id])
@@ -761,22 +761,22 @@ model ShippingMethod {
 }
 
 model OrderItem {
-  id           String  @id @default(cuid())
-  orderId      String
-  productId    String
-  variantId    String?
-  name         String
-  variantLabel String?
-  sku          String?
-  imageUrl     String?
-  unitPrice    Int
-  quantity     Int
-  lineTotal    Int
+  id                String  @id @default(cuid())
+  orderId           String
+  productId         String
+  variantId         String?
+  name              String
+  variantLabel      String?
+  sku               String?
+  imageUrl          String?
+  unitPrice         Int
+  quantity          Int
+  lineTotal         Int
   // 9F-22: the bound Offer's condition at purchase time — a historical snapshot
   // (incl. "NEW") so order/email display and records survive a later
   // Offer.condition edit or a deleted Offer. NULL only for pre-9F-22 lines.
   // Display code shows a condition line only when this is a non-NEW value.
-  condition    String?
+  condition         String?
   // 9F-38B: the bound Offer's compare-at ("was") price at purchase time — a
   // historical snapshot so order/receipt/email display can show the markdown
   // the customer actually received, surviving a later Offer.compareAtPrice edit
@@ -855,15 +855,15 @@ model ReturnRequest {
   status String @default("REQUESTED")
   // REQUESTED | APPROVED | REJECTED | RECEIVED | REFUND_INITIATED | REFUND_COMPLETED | CANCELLED
 
-  reason       String // DAMAGED | WRONG_ITEM | NOT_AS_DESCRIBED | NO_LONGER_NEEDED | OTHER
-  customerNote String? // free text from the customer (sanitised, capped) — shown to admin, escaped in email
-  staffNote    String? // internal only — NEVER emailed or shown to the customer
+  reason         String // DAMAGED | WRONG_ITEM | NOT_AS_DESCRIBED | NO_LONGER_NEEDED | OTHER
+  customerNote   String? // free text from the customer (sanitised, capped) — shown to admin, escaped in email
+  staffNote      String? // internal only — NEVER emailed or shown to the customer
   resolutionNote String? // customer-facing note attached on approve / reject
 
   // Whether this return was raised by an admin on the customer's behalf, and any
   // eligibility rules that were overridden (audited).
-  adminAssisted    Boolean @default(false)
-  overriddenRules  String? // JSON array snapshot, e.g. ["window","status"]
+  adminAssisted   Boolean @default(false)
+  overriddenRules String? // JSON array snapshot, e.g. ["window","status"]
 
   // Refund — BOOKKEEPING ONLY. No gateway, no Payment row, no money movement.
   refundAmount      Int? // centavos
@@ -892,15 +892,15 @@ model ReturnRequest {
   user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   items         ReturnItem[]
   paymentRefund PaymentRefund?
+  // At most one non-terminal return per order is enforced by a partial unique
+  // index added in supabase/migrations/20260829140100_rls_and_grants.sql:
+  //   CREATE UNIQUE INDEX "return_one_open_per_order" ON "ReturnRequest"("orderId")
+  //     WHERE "status" NOT IN ('REJECTED','CANCELLED','REFUND_COMPLETED');
 
   @@index([orderId])
   @@index([userId])
   @@index([status])
   @@index([createdAt])
-  // At most one non-terminal return per order is enforced by a partial unique
-  // index added in supabase/migrations/20260829140100_rls_and_grants.sql:
-  //   CREATE UNIQUE INDEX "return_one_open_per_order" ON "ReturnRequest"("orderId")
-  //     WHERE "status" NOT IN ('REJECTED','CANCELLED','REFUND_COMPLETED');
 }
 
 model ReturnItem {
@@ -971,20 +971,20 @@ model Payment {
   failureReason String? // provider decline reason text — non-sensitive
   checkoutUrl   String? // the hosted PayMongo page (short-lived; "resume payment" link)
   lastEventId   String? // provider evt_xxx of the last webhook that mutated this row
-  metadata      String  @default("{}") // JSON — reference_number, line summary. NEVER a secret.
+  metadata      String    @default("{}") // JSON — reference_number, line summary. NEVER a secret.
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   order   Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
   refunds PaymentRefund[]
-
-  @@index([orderId])
-  @@index([status])
   // At most one "active" payment per order is enforced by a partial unique index
   // in supabase/migrations/20260829140100_rls_and_grants.sql:
   //   CREATE UNIQUE INDEX "payment_one_active_per_order" ON "Payment"("orderId")
   //     WHERE "status" IN ('PENDING','AWAITING_PAYMENT','PAID','PARTIALLY_REFUNDED');
+
+  @@index([orderId])
+  @@index([status])
 }
 
 model PaymentRefund {
@@ -1017,21 +1017,21 @@ model PaymentRefund {
 // `providerId` (evt_xxx) is the dedup key; `payloadHash` catches a tampered
 // re-send of a known event id. No secrets, no raw body stored.
 model WebhookEvent {
-  id          String   @id @default(cuid())
-  provider    String   @default("paymongo")
-  providerId  String   @unique // evt_xxx
-  type        String // "checkout_session.payment.paid" | ...
-  status      String   @default("RECEIVED") // RECEIVED | PROCESSED | IGNORED | FAILED
-  payloadHash String // sha256(raw body)
+  id            String    @id @default(cuid())
+  provider      String    @default("paymongo")
+  providerId    String    @unique // evt_xxx
+  type          String // "checkout_session.payment.paid" | ...
+  status        String    @default("RECEIVED") // RECEIVED | PROCESSED | IGNORED | FAILED
+  payloadHash   String // sha256(raw body)
   // 9F-54 — the raw, ALREADY-SIGNATURE-VERIFIED webhook body. Stored so an
   // authorized `manage_payments` admin can reprocess a FAILED event through the
   // same idempotent handler without a PayMongo dashboard re-send. NULL on every
   // pre-9F-54 row (there are none in production). Never contains a credential.
-  payload     String?
-  error       String?
+  payload       String?
+  error         String?
   reprocessedAt DateTime? // 9F-54 — last admin reprocess attempt
-  receivedAt  DateTime @default(now())
-  processedAt DateTime?
+  receivedAt    DateTime  @default(now())
+  processedAt   DateTime?
 
   @@index([type])
   @@index([status])
@@ -1197,8 +1197,8 @@ model MediaAsset {
 
   // Phase 9F-4a marketplace relations. Three distinct links between a Seller and
   // its media, so each is a named relation.
-  seller        Seller?  @relation("SellerOwnedMedia", fields: [sellerId], references: [id], onDelete: SetNull)
-  sellerLogoOf  Seller[] @relation("SellerLogo")
+  seller         Seller?  @relation("SellerOwnedMedia", fields: [sellerId], references: [id], onDelete: SetNull)
+  sellerLogoOf   Seller[] @relation("SellerLogo")
   sellerBannerOf Seller[] @relation("SellerBanner")
 
   // Phase 9F-5b — seller product-request images. Cascade with the join row.
@@ -1242,12 +1242,12 @@ model MediaAsset {
 // layer (src/lib/marketplace/seller-repository.ts) — there is no per-seller RLS
 // policy in Phase 9C, matching the store's existing "RLS on, no policy" posture.
 model Seller {
-  id             String   @id @default(cuid())
-  type           String   @default("THIRD_PARTY") // FIRST_PARTY | THIRD_PARTY
-  status         String   @default("PENDING") // PENDING | APPROVED | SUSPENDED | CLOSED
-  displayName    String // customer-facing "Sold by …"
-  slug           String   @unique // reserved for a future /seller/<slug> page
-  supportEmail   String // customer contact for this seller's orders
+  id              String  @id @default(cuid())
+  type            String  @default("THIRD_PARTY") // FIRST_PARTY | THIRD_PARTY
+  status          String  @default("PENDING") // PENDING | APPROVED | SUSPENDED | CLOSED
+  displayName     String // customer-facing "Sold by …"
+  slug            String  @unique // reserved for a future /seller/<slug> page
+  supportEmail    String // customer contact for this seller's orders
   // Seller-onboarding foundation (Phase 1) — the applicant's User.id when this
   // Seller originated from a self-service application; null for an
   // admin-created seller (today's only path). Plain snapshot, no FK — matches
@@ -1257,7 +1257,7 @@ model Seller {
   // Marketplace commission withheld from this seller's sales, in BASIS POINTS
   // (1500 = 15.00%). STORED ONLY — Phase 9C never reads or calculates it.
   // FIRST_PARTY (Axiaro) = 0.
-  commissionRate Int      @default(0)
+  commissionRate  Int     @default(0)
 
   // ── Seller-owned store profile (Phase 9F-4a) ──────────────────────────────
   // Editable by the seller at /seller/settings (permission manage_seller_settings,
@@ -1289,11 +1289,11 @@ model Seller {
   contentReviewedBy  String? // admin User.id — plain snapshot, no FK (matches OrderItem.sellerId)
   contentReviewNote  String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  sellerUsers SellerUser[]
-  offers      Offer[]
+  sellerUsers  SellerUser[]
+  offers       Offer[]
   // Marketplace (Phase 9E-3C-1). Back-relation only. RESTRICT on the FK side —
   // a Seller that owns any historical seller order cannot be hard-deleted.
   sellerOrders SellerOrder[]
@@ -1391,8 +1391,41 @@ model SellerVerification {
   reviewedAt  DateTime?
   reviewedBy  String? // admin User.id — plain snapshot, no FK (matches Seller.contentReviewedBy)
   reviewNote  String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+
+  // ── Identity information (Phase 2) — every applicant ────────────────────
+  // Free text, all nullable: collected incrementally via Save Draft, never
+  // required to exist before a row does. `phoneVerifiedAt` mirrors
+  // `User.emailVerified`'s shape (null = not verified) — this phase collects
+  // a phone number but implements no OTP/SMS, so this column is never set by
+  // any code path yet; it exists purely to keep "provided" and "verified"
+  // explicitly distinct rather than letting a plain string imply trust.
+  legalName       String?
+  phone           String?
+  phoneVerifiedAt DateTime?
+  addressLine1    String?
+  addressLine2    String?
+  barangay        String?
+  city            String?
+  province        String?
+  postalCode      String?
+  country         String? // ISO-3166-1 alpha-2, same convention as Address.country
+
+  // ── Business information (Phase 2) — conditional on businessType ───────
+  // An INDIVIDUAL seller leaves all of these null; registration-number fields
+  // stay null even for a business seller until that specific registration
+  // applies to them (never universally mandatory — see businessType below).
+  // No government ID number and no verification document field lives here —
+  // those are a later, separate phase (SellerVerificationDocument metadata
+  // only, never a number/content field on either model).
+  businessType               String? // INDIVIDUAL | SOLE_PROPRIETOR | PARTNERSHIP | CORPORATION
+  businessName               String?
+  businessRegistrationNumber String?
+  dtiRegistrationNumber      String?
+  secRegistrationNumber      String?
+  tin                        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   seller    Seller                       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
   documents SellerVerificationDocument[]
@@ -1460,12 +1493,12 @@ model Offer {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  seller    Seller          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  variant   Variant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  inventory OfferInventory?
+  seller     Seller          @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  variant    Variant         @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  inventory  OfferInventory?
   // Back-relation only — the FK column lives on CartItem (Phase 9E-1). A deleted
   // Offer nulls the binding (onDelete: SetNull on CartItem.offerId).
-  cartItems CartItem[]
+  cartItems  CartItem[]
   // Marketplace (Phase 9E-3C-1). Back-relation only — the FK column lives on
   // OrderItem. A deleted Offer nulls the historical line's `offerId` but leaves
   // its price / name / sku snapshot intact (onDelete: SetNull).
@@ -1575,7 +1608,7 @@ model SellerOrder {
   // Money (centavos).
   merchandiseSubtotal Int    @default(0) // Σ OrderItem.lineTotal, pre-discount
   discountAllocated   Int    @default(0) // this seller's slice of the order coupon
-  discountFundedBy     String @default("PLATFORM") // PLATFORM (this phase) | SELLER (future)
+  discountFundedBy    String @default("PLATFORM") // PLATFORM (this phase) | SELLER (future)
   commissionAmount    Int    @default(0)
   total               Int    @default(0) // merchandiseSubtotal - discountAllocated + shippingFee
 
@@ -1632,12 +1665,12 @@ model SellerSettlement {
 
   // Money (centavos). Seller receivable per order = SellerOrder.total -
   // SellerOrder.commissionAmount (merchandise + shipping, less commission).
-  grossReceivable  Int @default(0) // Σ SellerOrder.total of the orders settled here
-  commissionAmount Int @default(0) // Σ SellerOrder.commissionAmount of those orders
-  clawbackAmount   Int @default(0) // Σ outstanding post-settlement clawback deltas reconciled here + Σ pre-settlement returned-merchandise value deducted from the eligible orders in this batch (9F-42B) — both are "money for goods that came back", disjoint sets, never double-counted (>= 0)
-  netAmount        Int @default(0) // max(0, grossReceivable - commissionAmount - clawbackAmount - carryForwardPrior) — floored at 0 since 9F-42B; a residual goes to carryForwardAmount instead of a negative net
-  orderCount       Int @default(0)
-  clawbackCount    Int @default(0)
+  grossReceivable    Int  @default(0) // Σ SellerOrder.total of the orders settled here
+  commissionAmount   Int  @default(0) // Σ SellerOrder.commissionAmount of those orders
+  clawbackAmount     Int  @default(0) // Σ outstanding post-settlement clawback deltas reconciled here + Σ pre-settlement returned-merchandise value deducted from the eligible orders in this batch (9F-42B) — both are "money for goods that came back", disjoint sets, never double-counted (>= 0)
+  netAmount          Int  @default(0) // max(0, grossReceivable - commissionAmount - clawbackAmount - carryForwardPrior) — floored at 0 since 9F-42B; a residual goes to carryForwardAmount instead of a negative net
+  orderCount         Int  @default(0)
+  clawbackCount      Int  @default(0)
   // 9F-42B — when clawbacks + a prior carried-forward balance exceed this
   // batch's receivable, the unpaid residual is carried here (>= 0) instead of
   // being written as a negative net or silently forgiven. The NEXT settlement
@@ -1788,9 +1821,9 @@ model SellerProductRequest {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  seller           Seller                     @relation(fields: [sellerId], references: [id], onDelete: Cascade)
-  proposedCategory Category?                  @relation("SellerProductRequestCategory", fields: [proposedCategoryId], references: [id], onDelete: SetNull)
-  resultProduct    Product?                   @relation("SellerProductRequestResult", fields: [resultProductId], references: [id], onDelete: SetNull)
+  seller           Seller                      @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  proposedCategory Category?                   @relation("SellerProductRequestCategory", fields: [proposedCategoryId], references: [id], onDelete: SetNull)
+  resultProduct    Product?                    @relation("SellerProductRequestResult", fields: [resultProductId], references: [id], onDelete: SetNull)
   images           SellerProductRequestImage[]
 
   @@index([sellerId])
