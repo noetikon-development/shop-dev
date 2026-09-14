@@ -61,6 +61,9 @@ model User {
 
   // Marketplace (Phase 9C foundation). Back-relation only — no column on User.
   sellerUsers          SellerUser[]
+  // Seller-onboarding foundation (Phase 1). Back-relation only — not yet written.
+  sellerInvitesSent    SellerInvite[]        @relation("SellerInviteInvitedBy")
+  sellerInvitesAccepted SellerInvite[]       @relation("SellerInviteAcceptedBy")
 
   // Analytics (Step 18): new-customers-in-period is a createdAt range scan.
   @@index([createdAt])
@@ -1245,6 +1248,12 @@ model Seller {
   displayName    String // customer-facing "Sold by …"
   slug           String   @unique // reserved for a future /seller/<slug> page
   supportEmail   String // customer contact for this seller's orders
+  // Seller-onboarding foundation (Phase 1) — the applicant's User.id when this
+  // Seller originated from a self-service application; null for an
+  // admin-created seller (today's only path). Plain snapshot, no FK — matches
+  // contentReviewedBy below and OrderItem.sellerId. Not yet written by any
+  // code path; reserved for the customer-facing application flow.
+  applicantUserId String?
   // Marketplace commission withheld from this seller's sales, in BASIS POINTS
   // (1500 = 15.00%). STORED ONLY — Phase 9C never reads or calculates it.
   // FIRST_PARTY (Axiaro) = 0.
@@ -1301,9 +1310,14 @@ model Seller {
   // Phase 9F-8e — bookkeeping-only payout records for this seller.
   settlements SellerSettlement[]
 
+  // Seller-onboarding foundation (Phase 1) — owner invitation/claim records
+  // created after approval. Back-relation only; not yet written to.
+  sellerInvites SellerInvite[]
+
   @@index([type])
   @@index([status])
   @@index([contentStatus])
+  @@index([applicantUserId])
 }
 
 // Membership of an application User in a Seller, with a seller-scoped role.
@@ -1325,6 +1339,32 @@ model SellerUser {
   @@unique([sellerId, userId])
   @@index([userId])
   @@index([sellerId])
+}
+
+// Seller-onboarding foundation (Phase 1) — owner invitation/claim for a
+// Seller. Same shape and claim discipline as AdminInvite: created after an
+// application is approved so an approved seller can associate an existing
+// Axiaro account as its OWNER without auto-creating a SellerUser at approval
+// time, then claimed server-side on the invitee's first authenticated
+// request. Schema only in this phase — nothing writes to this model yet.
+model SellerInvite {
+  id               String    @id @default(cuid())
+  sellerId         String
+  email            String // lower-cased
+  status           String    @default("PENDING") // PENDING | ACCEPTED | REVOKED
+  invitedById      String? // null for a system-generated invite (e.g. on approval)
+  acceptedByUserId String?
+  acceptedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  seller     Seller @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  invitedBy  User?  @relation("SellerInviteInvitedBy", fields: [invitedById], references: [id])
+  acceptedBy User?  @relation("SellerInviteAcceptedBy", fields: [acceptedByUserId], references: [id])
+
+  @@index([sellerId])
+  @@index([email])
+  @@index([status])
 }
 
 // The commercial listing: a Seller offering a catalog Variant on specific terms.
