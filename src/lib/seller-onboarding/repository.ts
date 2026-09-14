@@ -74,3 +74,100 @@ export async function submitSellerApplication(
 
   return { ok: true, sellerId: created.sellerId, displayName: created.displayName, slug: created.slug };
 }
+
+function safeParseMeta(value: string | null | undefined): { reason?: unknown } {
+  if (!value) return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * The status-page view of one applicant's own application — Phase 3.
+ *
+ * Only ever looked up by `applicantUserId` (never supportEmail, displayName,
+ * slug, or any id supplied by the caller) — see `getSellerApplicationStatus`
+ * below. Exposes only what an applicant should ever see about their own
+ * application: never `commissionRate`, `contentReviewNote`, or any other
+ * admin/moderation-only field.
+ *
+ * `reason` is the SAME authoritative value the rejection/reopen emails
+ * already use — read back off the most recent matching `AdminAuditLog` row
+ * (`seller.rejected` / `seller.reopened`, written by `transitionSellerAction`)
+ * rather than re-derived or invented here. `null` when there is none (e.g. a
+ * PENDING application that has never been rejected or reopened).
+ */
+export type SellerApplicationStatusView = {
+  displayName: string;
+  status: string;
+  createdAt: Date;
+  updatedAt: Date;
+  /** True only when the most recent status-defining event was a reopen
+   *  (REJECTED → PENDING), so a PENDING page can say "back under review"
+   *  instead of the plain first-submission copy. */
+  reopened: boolean;
+  /** The admin's actual reason/note for REJECTED or a reopened PENDING;
+   *  null for every other state, and null if — despite the state — no
+   *  audit row could be found (never invented as a fallback string). */
+  reason: string | null;
+};
+
+export async function getSellerApplicationStatus(
+  applicantUserId: string,
+  client: Client = prisma,
+): Promise<SellerApplicationStatusView | null> {
+  const seller = await client.seller.findFirst({
+    where: { applicantUserId },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, displayName: true, status: true, createdAt: true, updatedAt: true },
+  });
+  if (!seller) return null;
+
+  if (seller.status === "REJECTED") {
+    const audit = await client.adminAuditLog.findFirst({
+      where: { targetType: "seller", targetId: seller.id, action: "seller.rejected" },
+      orderBy: { createdAt: "desc" },
+      select: { meta: true },
+    });
+    const reason = safeParseMeta(audit?.meta).reason;
+    return {
+      displayName: seller.displayName,
+      status: seller.status,
+      createdAt: seller.createdAt,
+      updatedAt: seller.updatedAt,
+      reopened: false,
+      reason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+    };
+  }
+
+  if (seller.status === "PENDING") {
+    const reopenAudit = await client.adminAuditLog.findFirst({
+      where: { targetType: "seller", targetId: seller.id, action: "seller.reopened" },
+      orderBy: { createdAt: "desc" },
+      select: { meta: true },
+    });
+    if (reopenAudit) {
+      const reason = safeParseMeta(reopenAudit.meta).reason;
+      return {
+        displayName: seller.displayName,
+        status: seller.status,
+        createdAt: seller.createdAt,
+        updatedAt: seller.updatedAt,
+        reopened: true,
+        reason: typeof reason === "string" && reason.trim() ? reason.trim() : null,
+      };
+    }
+  }
+
+  return {
+    displayName: seller.displayName,
+    status: seller.status,
+    createdAt: seller.createdAt,
+    updatedAt: seller.updatedAt,
+    reopened: false,
+    reason: null,
+  };
+}
