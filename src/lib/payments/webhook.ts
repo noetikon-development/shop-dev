@@ -19,6 +19,7 @@ import {
 } from "@/lib/email/notifications";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { verifyWebhookSignature } from "@/lib/payments/paymongo";
+import { cascadeSellerOrderFromParent } from "@/lib/marketplace/seller-order-repository";
 import {
   isHandledWebhookType,
   orderPaymentMethodFromProvider,
@@ -354,7 +355,7 @@ function flat(o: ProviderPayObj | undefined): ProviderFields & { id?: unknown } 
  * We ALWAYS take the amount from what PayMongo says it captured and then check
  * it against our own snapshot + the live order total — never the reverse.
  */
-export function extractPaidFacts(type: string, attrs: Record<string, unknown>): {
+export function extractPaidFacts(type: string, objId: string, attrs: Record<string, unknown>): {
   amount: number | null;
   currency: string | null;
   method: string | null;
@@ -367,7 +368,11 @@ export function extractPaidFacts(type: string, attrs: Record<string, unknown>): 
       amount: num(f.amount),
       currency: str(f.currency),
       method: str(source?.type) ?? str(f.payment_method_used) ?? str(f.method),
-      providerPaymentId: str(f.id) ?? str(attrs.id),
+      // `attrs` here IS the payment resource's own `.attributes` (handleEvent
+      // already peeled `.data` off to get `objId` = the real `pay_…` id) — the
+      // id never lives inside `attrs` itself, so `objId` is the only correct
+      // source. Reading `attrs.id` (the old code) was always undefined.
+      providerPaymentId: str(objId),
     };
   }
   const piRaw = attrs.payment_intent as ProviderPayObj | undefined;
@@ -434,7 +439,7 @@ async function applyPaid(
     throw new Error(`order ${payment.order.orderNumber} is cancelled — manual review`);
   }
 
-  const facts = extractPaidFacts(type, attrs);
+  const facts = extractPaidFacts(type, objId, attrs);
   if (facts.amount == null) throw new Error("paid event carried no captured amount");
   // The amount PayMongo captured must match BOTH our snapshot AND the live order.
   if (facts.amount !== payment.amount || facts.amount !== payment.order.grandTotal) {
@@ -454,6 +459,7 @@ async function applyPaid(
   const paidAmount = facts.amount;
   const method = facts.method ?? "";
   const config = await getPaymentsConfig();
+  let advancedToProcessing = false;
 
   const runTx = async (tx: Prisma.TransactionClient) => {
     const paidOrder = await tx.order.updateMany({
@@ -500,6 +506,7 @@ async function applyPaid(
             detail: null,
           },
         });
+        advancedToProcessing = true;
       }
     }
   };
@@ -524,6 +531,23 @@ async function applyPaid(
     },
     db === prisma ? undefined : (db as Prisma.TransactionClient),
   );
+
+  if (advancedToProcessing) {
+    // 9F-58 — mirror admin/order-actions.ts: every forward Order transition to
+    // PROCESSING must cascade the seller plane, or a THIRD_PARTY SellerOrder
+    // can sit at PENDING_PAYMENT forever and a FIRST_PARTY shadow row never
+    // clears for settlement. `actorUserId: null` — no human actor here, same
+    // nullable convention this function already uses for its own audit row.
+    await cascadeSellerOrderFromParent(
+      {
+        orderId: payment.order.id,
+        orderNumber: payment.order.orderNumber,
+        parentStatus: "PROCESSING",
+        actorUserId: null,
+      },
+      db === prisma ? undefined : (db as Prisma.TransactionClient),
+    );
+  }
 
   if (db === prisma) {
     scheduleEmail(() => sendPaymentConfirmation(payment.order.id));

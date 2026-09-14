@@ -46,6 +46,7 @@ import { renderPaymentConfirmation } from "../src/lib/email/templates/payment-co
 import { renderPaymentFailed } from "../src/lib/email/templates/payment-failed";
 import { renderPaymentExpiredOrCancelled } from "../src/lib/email/templates/payment-expired-or-cancelled";
 import { renderRefundCompleted } from "../src/lib/email/templates/refund-completed";
+import { cascadeSellerOrderFromParent, adminCascadeAuditInput } from "../src/lib/marketplace/seller-order-repository";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -91,6 +92,31 @@ function paidEvent(sessionId: string, ourPaymentId: string, over: { amount?: num
                 },
               },
             ],
+            metadata: { payment_id: ourPaymentId },
+          },
+        },
+      },
+    },
+  };
+}
+/** A raw `payment.paid` webhook envelope (distinct shape from `checkout_session.payment.paid`
+ *  — `attrs` is the PAYMENT resource's own attributes, never carries its own `id`; the real
+ *  id lives one level up at `attrs.data.id`, mirroring the actual PayMongo payloads captured
+ *  in WebhookEvent.payload for AX-260905-100347 / AX-260910-100737). */
+function paymentPaidEvent(payId: string, ourPaymentId: string, over: { amount?: number; currency?: string; method?: string } = {}) {
+  return {
+    data: {
+      id: `evt_${Math.random().toString(36).slice(2, 10)}`,
+      attributes: {
+        type: "payment.paid",
+        data: {
+          id: payId,
+          type: "payment",
+          attributes: {
+            amount: over.amount ?? GRAND,
+            currency: over.currency ?? "PHP",
+            status: "paid",
+            source: { type: over.method ?? "card" },
             metadata: { payment_id: ourPaymentId },
           },
         },
@@ -164,6 +190,51 @@ async function seedOnlineOrderWithPayment(tx: Tx, sfx: string, over: { paymentSt
   return { order, payment, providerId };
 }
 
+/** Attach a SellerOrder to an already-seeded online order/payment — one row,
+ *  matching the real single-seller-per-order shape (multi-seller checkout is
+ *  still blocked). `seller` is either the real singleton FIRST_PARTY seller
+ *  (read-only reuse, matching test-9f44b's own pattern) or a freshly-seeded
+ *  THIRD_PARTY one. */
+async function seedSellerOrderFor(
+  tx: Tx,
+  orderId: string,
+  seller: { id: string; displayName: string; supportEmail: string },
+  sellerType: "FIRST_PARTY" | "THIRD_PARTY",
+  amount: number,
+) {
+  return tx.sellerOrder.create({
+    data: {
+      orderId,
+      sellerId: seller.id,
+      sellerName: seller.displayName,
+      sellerType,
+      supportEmail: seller.supportEmail,
+      commissionRate: sellerType === "THIRD_PARTY" ? 1500 : 0,
+      merchandiseSubtotal: amount,
+      discountAllocated: 0,
+      shippingFee: 0,
+      total: amount,
+      commissionAmount: 0,
+      status: "PENDING_PAYMENT",
+      settlementStatus: "PENDING_CAPTURE",
+    },
+    select: { id: true, status: true, sellerType: true },
+  });
+}
+async function seedThirdPartySeller(tx: Tx, tag: string) {
+  return tx.seller.create({
+    data: {
+      type: "THIRD_PARTY",
+      status: "APPROVED",
+      displayName: `Seller ${tag}`,
+      slug: `s9f54-${tag}-${Math.random().toString(36).slice(2, 7)}`,
+      supportEmail: `support-${tag}@t.test`,
+      contentStatus: "DRAFT",
+    },
+    select: { id: true, displayName: true, supportEmail: true },
+  });
+}
+
 async function main() {
   console.log("\nPHASE 9F-54 — PayMongo TEST-mode webhook verification\n");
 
@@ -196,13 +267,21 @@ async function main() {
     JSON.parse(mergeMetadata("not json", { x: 1 })).x === 1);
   ok("pure · extractPaidFacts reads the nested checkout_session payments[]",
     (() => {
-      const f = extractPaidFacts("checkout_session.payment.paid", (paidEvent("cs_x", "p_x", { amount: 12345, method: "gcash", payId: "pay_abc" }) as { data: { attributes: { data: { attributes: Record<string, unknown> } } } }).data.attributes.data.attributes);
+      const f = extractPaidFacts("checkout_session.payment.paid", "cs_x", (paidEvent("cs_x", "p_x", { amount: 12345, method: "gcash", payId: "pay_abc" }) as { data: { attributes: { data: { attributes: Record<string, unknown> } } } }).data.attributes.data.attributes);
       return f.amount === 12345 && f.currency === "PHP" && f.method === "gcash" && f.providerPaymentId === "pay_abc";
     })());
-  ok("pure · extractPaidFacts reads a flat payment.paid object",
+  ok("pure · extractPaidFacts uses the caller's objId for payment.paid (never attrs.id)",
     (() => {
-      const f = extractPaidFacts("payment.paid", { id: "pay_flat", amount: 500, currency: "PHP", status: "paid", source: { type: "card" } });
-      return f.amount === 500 && f.method === "card" && f.providerPaymentId === "pay_flat";
+      // `objId` is what handleEvent already resolved from `event.data.attributes.data.id`
+      // — the real source of truth. `attrs` is that object's OWN `.attributes` and
+      // structurally never carries an `id`, so a stray `attrs.id` must be ignored.
+      const f = extractPaidFacts("payment.paid", "pay_real", { id: "pay_WRONG_should_be_ignored", amount: 500, currency: "PHP", status: "paid", source: { type: "card" } });
+      return f.amount === 500 && f.method === "card" && f.providerPaymentId === "pay_real";
+    })());
+  ok("pure · extractPaidFacts payment.paid providerPaymentId === objId even when attrs has no id at all",
+    (() => {
+      const f = extractPaidFacts("payment.paid", "pay_only_source", { amount: 500, currency: "PHP", status: "paid", source: { type: "gcash" } });
+      return f.providerPaymentId === "pay_only_source";
     })());
 
   // ── static: webhook.ts structure ────────────────────────────────────────
@@ -1075,6 +1154,126 @@ async function main() {
   } catch (e) {
     if (!(e instanceof Rollback)) throw e;
   }
+
+  // ── 19 — 9F-58: payment.paid providerPaymentId + PAID→PROCESSING cascade ──
+  ok("19.3/4 · adminCascadeAuditInput(actorUserId: null) produces a system-attributed audit row, not an 'Admin fulfilment' one",
+    (() => {
+      const row = { sellerOrderId: "so_x", sellerId: "sel_x", sellerType: "FIRST_PARTY" as const, from: "PENDING_PAYMENT" as const, to: "PROCESSING" as const, shipment: "none" as const };
+      const input = adminCascadeAuditInput({ actorUserId: null, orderId: "ord_x", orderNumber: "AX-TEST", parentStatus: "PROCESSING" }, row);
+      const meta = input.meta as { trigger?: string };
+      return input.actorUserId === null && meta.trigger === "payment_webhook_cascade" && /^System \(payment webhook\)/.test(input.summary ?? "");
+    })());
+  try {
+    await prisma.$transaction(async (tx) => {
+      const t = Date.now().toString(36);
+      const evPaid = (id: string) => tx.orderEvent.count({ where: { orderId: id, status: "PAID" } });
+      const auditPaid = (id: string) => tx.adminAuditLog.count({ where: { action: "payment.paid", targetId: id } });
+      const fp = await tx.seller.findFirstOrThrow({ where: { type: "FIRST_PARTY" }, select: { id: true, displayName: true, supportEmail: true } });
+      const tp = await seedThirdPartySeller(tx, `19-${t}`);
+
+      // 1 — payment.paid → Payment.metadata.providerPaymentId populated from
+      // the real objId (the actual bug: it used to be read from `attrs`,
+      // which structurally never carries the payment's own id for this event
+      // type — see extractPaidFacts).
+      const F = await seedOnlineOrderWithPayment(tx, `f-${t}`);
+      const payIdF = `pay_${Math.random().toString(36).slice(2, 10)}`;
+      await handleEvent("evt-f", "payment.paid", paymentPaidEvent(payIdF, F.payment.id, { method: "gcash" }), tx);
+      const fPay = await tx.payment.findUniqueOrThrow({ where: { id: F.payment.id }, select: { status: true, metadata: true, providerId: true } });
+      const fMeta = JSON.parse(fPay.metadata) as { providerPaymentId?: string };
+      ok("19.1 · payment.paid → Payment.metadata.providerPaymentId populated from objId",
+        fPay.status === "PAID" && fMeta.providerPaymentId === payIdF, JSON.stringify(fMeta));
+      ok("19.1 · providerId (the checkout session id) is untouched — only metadata gained the pay_… id",
+        fPay.providerId === F.providerId);
+
+      // 2 — duplicate/replayed payment.paid stays idempotent: a second event
+      // (different eventId, same underlying payment) must not create a 2nd
+      // OrderEvent/audit row or corrupt the already-stored metadata.
+      await handleEvent("evt-f", "payment.paid", paymentPaidEvent(payIdF, F.payment.id, { method: "gcash" }), tx);
+      await handleEvent("evt-f2", "payment.paid", paymentPaidEvent(payIdF, F.payment.id, { method: "gcash" }), tx);
+      const fPay2 = await tx.payment.findUniqueOrThrow({ where: { id: F.payment.id }, select: { status: true, metadata: true } });
+      ok("19.2 · duplicate/replayed payment.paid is idempotent — still one OrderEvent{PAID}, one audit row",
+        (await evPaid(F.order.id)) === 1 && (await auditPaid(F.order.id)) === 1);
+      ok("19.2 · replay never corrupts the already-stored providerPaymentId",
+        (JSON.parse(fPay2.metadata) as { providerPaymentId?: string }).providerPaymentId === payIdF);
+
+      // 5 — holdForReview stays whatever the LIVE setting currently is (this
+      // fix makes no policy change): if it's true right now, a real payment.paid
+      // through the full webhook path must leave the attached SellerOrder
+      // completely untouched (still PENDING_PAYMENT) — the cascade must NOT
+      // fire when Order never leaves PAID.
+      const G = await seedOnlineOrderWithPayment(tx, `g-${t}`);
+      const gSo = await seedSellerOrderFor(tx, G.order.id, fp, "FIRST_PARTY", GRAND);
+      await handleEvent("evt-g", "payment.paid", paymentPaidEvent(`pay_${t}g`, G.payment.id, { method: "card" }), tx);
+      const gOrderAfter = await tx.order.findUniqueOrThrow({ where: { id: G.order.id }, select: { status: true } });
+      const gSoAfter = await tx.sellerOrder.findUniqueOrThrow({ where: { id: gSo.id }, select: { status: true } });
+      ok(`19.5 · holdForReview=${holdForReview} (live) preserved — Order → ${paidOrderStatus}, SellerOrder ${holdForReview ? "stays PENDING_PAYMENT (no cascade)" : "cascades to PROCESSING"}`,
+        gOrderAfter.status === paidOrderStatus &&
+          gSoAfter.status === (holdForReview ? "PENDING_PAYMENT" : "PROCESSING"),
+        JSON.stringify({ gOrderAfter, gSoAfter }));
+
+      // 3 / 4 / 8 — the cascade call itself (the exact shape applyPaid now
+      // uses: parentStatus "PROCESSING", actorUserId null — a system caller,
+      // no admin). Exercised directly since the LIVE holdForReview setting
+      // (confirmed true) means the full webhook path can't reach this branch
+      // right now without flipping real settings, which this fix must not do.
+      const H = await seedOnlineOrderWithPayment(tx, `h1p-${t}`);
+      const hSo1p = await seedSellerOrderFor(tx, H.order.id, fp, "FIRST_PARTY", GRAND);
+      const I = await seedOnlineOrderWithPayment(tx, `h3p-${t}`);
+      const hSo3p = await seedSellerOrderFor(tx, I.order.id, tp, "THIRD_PARTY", GRAND);
+
+      const cascade1p = await cascadeSellerOrderFromParent(
+        { orderId: H.order.id, orderNumber: H.order.orderNumber, parentStatus: "PROCESSING", actorUserId: null },
+        tx,
+      );
+      const cascade3p = await cascadeSellerOrderFromParent(
+        { orderId: I.order.id, orderNumber: I.order.orderNumber, parentStatus: "PROCESSING", actorUserId: null },
+        tx,
+      );
+      const hSo1pAfter = await tx.sellerOrder.findUniqueOrThrow({ where: { id: hSo1p.id }, select: { status: true } });
+      const hSo3pAfter = await tx.sellerOrder.findUniqueOrThrow({ where: { id: hSo3p.id }, select: { status: true } });
+      ok("19.3 · cascadeSellerOrderFromParent(parentStatus:PROCESSING) advances a FIRST_PARTY SellerOrder PENDING_PAYMENT → PROCESSING",
+        cascade1p.ok && hSo1pAfter.status === "PROCESSING" && cascade1p.cascaded.length === 1);
+      ok("19.4 · the SAME cascade call, same shape, also advances a THIRD_PARTY SellerOrder — 1P/3P parity, no bespoke divergence",
+        cascade3p.ok && hSo3pAfter.status === "PROCESSING" && cascade3p.cascaded.length === 1);
+      // cascadeSellerOrderFromParent writes its audit row ONLY on the
+      // production (no-externalTx) path — by design, so a rolled-back test
+      // never persists one (same discipline as the 9F-12b rollup audit; see
+      // the function's own docstring). Passing `tx` here for rollback safety
+      // therefore means 0 rows is the CORRECT, expected outcome — the actual
+      // actorUserId/trigger shape is verified statically in test-9f44b.ts
+      // ("applyPaid cascade uses a system actor").
+      ok("19.3/4 · cascade audit write correctly skipped on the externalTx (rolled-back-test) path — no leaked row",
+        (await tx.adminAuditLog.count({ where: { targetId: hSo1p.id, action: "seller_order.status_changed" } })) === 0 &&
+        (await tx.adminAuditLog.count({ where: { targetId: hSo3p.id, action: "seller_order.status_changed" } })) === 0);
+
+      // 8 — replaying the SAME cascade call (as a duplicate/replayed webhook
+      // would) must be a clean no-op: the SellerOrder is already at PROCESSING,
+      // so the status-guarded updateMany matches 0 rows — never a 2nd hop,
+      // never a 2nd audit row.
+      const cascade1pAgain = await cascadeSellerOrderFromParent(
+        { orderId: H.order.id, orderNumber: H.order.orderNumber, parentStatus: "PROCESSING", actorUserId: null },
+        tx,
+      );
+      ok("19.8 · replayed cascade call is a no-op — 0 rows advanced the second time",
+        cascade1pAgain.ok && cascade1pAgain.cascaded.length === 0);
+      ok("19.8 · no duplicate SellerOrder transition — status unchanged by the replayed call",
+        (await tx.sellerOrder.findUniqueOrThrow({ where: { id: hSo1p.id }, select: { status: true } })).status === "PROCESSING");
+
+      // 7 — checkout_session.payment.paid end-to-end behaviour is unchanged by
+      // this fix (extraction logic for that branch was explicitly untouched).
+      const J = await seedOnlineOrderWithPayment(tx, `j-${t}`);
+      const payIdJ = `pay_${Math.random().toString(36).slice(2, 10)}`;
+      await handleEvent("evt-j", "checkout_session.payment.paid", paidEvent(J.providerId, J.payment.id, { method: "card", payId: payIdJ }), tx);
+      const jPay = await tx.payment.findUniqueOrThrow({ where: { id: J.payment.id }, select: { status: true, metadata: true } });
+      ok("19.7 · checkout_session.payment.paid still populates providerPaymentId exactly as before (untouched branch)",
+        jPay.status === "PAID" && (JSON.parse(jPay.metadata) as { providerPaymentId?: string }).providerPaymentId === payIdJ);
+
+      throw new Rollback();
+    }, { timeout: 60_000, maxWait: 15_000 });
+  } catch (e) {
+    if (!(e instanceof Rollback)) throw e;
+  }
+  ok("19 · isolation — no fixture Seller leaked from section 19", (await prisma.seller.count({ where: { displayName: { startsWith: "Seller 19-" } } })) === 0);
 
   console.log(`\n${pass} passed, ${fail} failed\n`);
   await prisma.$disconnect();

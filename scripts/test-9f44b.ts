@@ -176,9 +176,17 @@ function guardrailTests() {
   ok("EXEMPT · 9F-43B COD confirm changes paymentStatus only, never Order.status",
     /data: \{ paymentStatus: "PAID", updatedAt: new Date\(\) \}/.test(codPayments) && !/data: \{[^}]*\bstatus: "(PROCESSING|SHIPPED|DELIVERED)"/.test(codPayments));
 
-  // FUTURE-RISK — flagged, not fixed here (dormant path).
-  ok("FUTURE-RISK noted · payments/webhook.ts PAID→PROCESSING does NOT cascade (dormant; review when PayMongo activates)",
-    /status: "PROCESSING", updatedAt: new Date\(\)/.test(webhook) && !/webhook[\s\S]*cascadeSellerOrderFromParent/.test(webhook));
+  // 9F-58 — the FUTURE-RISK above is fixed: applyPaid's own !holdForReview
+  // PAID→PROCESSING auto-advance now cascades, same as every other forward
+  // Order.status mutation. holdForReview=true stays a deliberate no-cascade
+  // state (Order never leaves PAID) — untouched by this fix, see EXEMPT below.
+  ok("applyPaid (!holdForReview PAID→PROCESSING auto-advance) cascades",
+    /advancedToProcessing = true/.test(webhook) &&
+      /advancedToProcessing\)[\s\S]{0,700}cascadeSellerOrderFromParent\(\s*\{[\s\S]{0,220}parentStatus: "PROCESSING"/.test(webhook));
+  ok("applyPaid cascade uses a system actor (actorUserId: null) — no admin triggered this",
+    /cascadeSellerOrderFromParent\(\s*\{[\s\S]{0,260}actorUserId: null/.test(webhook));
+  ok("EXEMPT · applyPaid holdForReview=true leaves Order at PAID (no seller-plane target); unchanged by 9F-58",
+    /if \(!config\.holdForReview\)/.test(webhook));
 }
 
 // ---------------------------------------------------------------------------

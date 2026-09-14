@@ -812,19 +812,23 @@ export type SellerOrderCascadeResult = {
  * this entirely).
  */
 export function adminCascadeAuditInput(
-  args: { actorUserId: string; orderId: string; orderNumber: string; parentStatus: string },
+  args: { actorUserId: string | null; orderId: string; orderNumber: string; parentStatus: string },
   row: SellerOrderCascadeRow,
 ): AuditInput {
+  // A null actor means a system caller (e.g. the PayMongo webhook's own
+  // PAID→PROCESSING auto-advance) rather than an admin click — same nullable
+  // convention the webhook already uses for its OWN audit rows.
+  const system = args.actorUserId === null;
   return {
     actorUserId: args.actorUserId,
     action: "seller_order.status_changed",
     targetType: "seller_order",
     targetId: row.sellerOrderId,
     summary:
-      `Admin fulfilment of order ${args.orderNumber} advanced seller order ` +
+      `${system ? "System (payment webhook)" : "Admin"} fulfilment of order ${args.orderNumber} advanced seller order ` +
       `${row.sellerOrderId} (${row.sellerType === "FIRST_PARTY" ? "1P" : "3P"}): ${row.from} → ${row.to}`,
     meta: {
-      trigger: "admin_fulfillment_cascade",
+      trigger: system ? "payment_webhook_cascade" : "admin_fulfillment_cascade",
       orderId: args.orderId,
       orderNumber: args.orderNumber,
       sellerOrderId: row.sellerOrderId,
@@ -862,8 +866,9 @@ export async function cascadeSellerOrderFromParent(
     orderId: string;
     orderNumber: string;
     parentStatus: string;
-    /** Admin user id — the cascade audit actor. */
-    actorUserId: string;
+    /** Admin user id — the cascade audit actor. Null for a system caller (e.g.
+     *  the payment webhook's own auto-advance — no human actor to attribute). */
+    actorUserId: string | null;
     /** Courier/tracking to seed a Shipment on a SHIPPED cascade; ignored otherwise. */
     courier?: AdminCascadeCourier;
   },
