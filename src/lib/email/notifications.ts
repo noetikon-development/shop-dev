@@ -3037,6 +3037,7 @@ async function loadSellerLifecycleEmailContext(
       displayName: true,
       notifyEmail: true,
       contentReviewNote: true,
+      applicantUserId: true,
       sellerUsers: {
         where: { status: "ACTIVE", role: { in: ["OWNER", "MANAGER"] } },
         select: { user: { select: { email: true } } },
@@ -3052,6 +3053,26 @@ async function loadSellerLifecycleEmailContext(
   }
   const notify = seller.notifyEmail?.trim().toLowerCase();
   if (notify && EMAIL_RE.test(notify)) addrs.add(notify);
+
+  // 9F-60 — a first-time self-service seller has neither an ACTIVE SellerUser
+  // (none is created until OWNER claim) nor a notifyEmail (never asked for on
+  // the customer-facing application) — with nothing above, every lifecycle
+  // email (approved/suspended/closed) would otherwise fail as no_recipient
+  // until it's claimed. Falls back to the applicant's own CURRENT account
+  // email via applicantUserId — the same identity the status page and claim
+  // flow already anchor on, never Seller.supportEmail. Only reached when
+  // addrs is still empty, so an admin-created seller (applicantUserId null)
+  // or any seller that already has a member/notifyEmail is completely
+  // unaffected — this changes nothing for either.
+  if (addrs.size === 0 && seller.applicantUserId) {
+    const applicant = await client.user.findUnique({
+      where: { id: seller.applicantUserId },
+      select: { email: true },
+    });
+    const applicantEmail = applicant?.email?.trim().toLowerCase();
+    if (applicantEmail && EMAIL_RE.test(applicantEmail)) addrs.add(applicantEmail);
+  }
+
   if (addrs.size === 0) return null;
 
   const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
