@@ -71,8 +71,16 @@ async function main() {
       !/formData\.get\(\s*["'](sellerId|applicantUserId)["']\s*\)/.test(pageSrc));
   ok("static · the page never renders commissionRate, contentReviewNote, or a raw Seller id",
     !/commissionRate|contentReviewNote|app\.sellerId|app\.id\b/.test(pageSrc));
-  ok("static · no SellerInvite reference anywhere in this phase's page or repository code",
-    !/SellerInvite/.test(pageSrc) && !/SellerInvite/.test(repoSrc));
+  // Phase 4 legitimately extended getSellerApplicationStatus (per its own
+  // task instructions) to READ SellerInvite for the status page's claim
+  // button — the narrower, still-true invariant this phase cares about is
+  // that this specific function never WRITES one; creation/claim logic lives
+  // entirely in Phase 4's separate claimSellerOwnerInvite function.
+  ok("static · getSellerApplicationStatus only ever reads SellerInvite, never creates/updates one",
+    (() => {
+      const m = repoSrc.match(/export async function getSellerApplicationStatus[\s\S]*?\n}/);
+      return !!m && !/sellerInvite\.(create|update|updateMany|delete|deleteMany|upsert)/.test(m[0]);
+    })());
   ok("static · no CHANGES_REQUESTED introduced",
     !/CHANGES_REQUESTED/.test(pageSrc) && !/CHANGES_REQUESTED/.test(repoSrc));
 

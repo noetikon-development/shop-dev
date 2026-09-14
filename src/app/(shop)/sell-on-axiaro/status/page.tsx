@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { requireUser } from "@/lib/auth";
 import { getSellerApplicationStatus } from "@/lib/seller-onboarding/repository";
+import { ClaimOwnerButton } from "@/components/seller-onboarding/claim-owner-button";
 import { buttonClasses } from "@/components/ui/button";
 import { formatDate } from "@/lib/utils";
 
@@ -99,12 +100,33 @@ function Pending({ app }: { app: App }) {
 }
 
 function Approved({ app }: { app: App }) {
+  // Neither branch below shows an invite id, a claim URL, or any SellerInvite
+  // field — the button (ClaimOwnerButton) sends no id of any kind, and
+  // "already activated" is a plain, static message.
+  if (app.hasActiveMembership) {
+    return (
+      <StatusCard heading="Application approved">
+        <p className="mt-2 text-sm text-ink-soft">
+          Your seller account for{" "}
+          <span className="font-medium text-ink">{app.displayName}</span> is already activated.
+        </p>
+        <a href="/seller" className="mt-4 inline-block text-sm font-medium underline">
+          Go to Seller Portal
+        </a>
+      </StatusCard>
+    );
+  }
+
   return (
     <StatusCard heading="Application approved">
       <p className="mt-2 text-sm text-ink-soft">
         Your application for <span className="font-medium text-ink">{app.displayName}</span> was
-        approved. Account activation is the next step — we'll email you with what to do next.
+        approved.{" "}
+        {app.hasPendingInvite
+          ? "Activate your account to start selling."
+          : "Account activation is the next step — we'll email you with what to do next."}
       </p>
+      {app.hasPendingInvite && <ClaimOwnerButton />}
     </StatusCard>
   );
 }

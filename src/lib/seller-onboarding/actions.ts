@@ -4,7 +4,7 @@ import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendSellerAccountSubmitted } from "@/lib/email/notifications";
-import { submitSellerApplication } from "@/lib/seller-onboarding/repository";
+import { submitSellerApplication, claimSellerOwnerInvite } from "@/lib/seller-onboarding/repository";
 
 /**
  * Customer-facing seller-application server action — Seller Onboarding
@@ -53,4 +53,31 @@ export async function submitSellerApplicationAction(
   scheduleEmail(() => sendSellerAccountSubmitted(res.sellerId));
 
   return { ok: true };
+}
+
+/**
+ * Claim OWNER access for the caller's own approved application — Phase 4.
+ *
+ * Takes no form fields at all: there is no seller id, invite id, or user id
+ * anywhere in `formData` for this action, by design. The ONLY input is the
+ * authenticated session (`requireUser()`), and `claimSellerOwnerInvite`
+ * itself re-derives everything (which Seller, which invite) from that one
+ * user id — see its own doc comment for the full security model.
+ */
+export type ClaimSellerOwnerInviteActionState = {
+  ok?: boolean;
+  code?: "SUCCESS" | "ALREADY_CLAIMED" | "NOT_ELIGIBLE" | "NO_PENDING_INVITE";
+  error?: string;
+};
+
+export async function claimSellerOwnerInviteAction(
+  _prev: ClaimSellerOwnerInviteActionState,
+  _formData: FormData,
+): Promise<ClaimSellerOwnerInviteActionState> {
+  const user = await requireUser("/sell-on-axiaro/status");
+
+  const res = await claimSellerOwnerInvite(user.id);
+  if (!res.ok) return { error: res.error, code: res.code };
+
+  return { ok: true, code: res.code };
 }

@@ -78,8 +78,17 @@ async function main() {
     })());
   ok("static · the apply page requires an authenticated user (requireUser) before rendering the form",
     /await requireUser\(/.test(pageSrc));
-  ok("static · no file in this phase references SellerInvite — it stays unused",
-    !/SellerInvite/.test(actionsSrc) && !/SellerInvite/.test(repoSrc) && !/SellerInvite/.test(pageSrc) && !/SellerInvite/.test(formSrc));
+  // Phase 4 legitimately added a SECOND, separate function
+  // (claimSellerOwnerInvite) to this same shared repository file — this
+  // checks the narrower, still-true thing: submitSellerApplication ITSELF
+  // never references SellerInvite. The Phase 2 action/page/form files are
+  // untouched by Phase 4 and still reference it nowhere at all.
+  ok("static · submitSellerApplication itself never references SellerInvite (unrelated to Phase 4's claim function elsewhere in the same file)",
+    (() => {
+      const m = repoSrc.match(/export async function submitSellerApplication[\s\S]*?\n}/);
+      return !!m && !/SellerInvite/.test(m[0]);
+    })() &&
+      !/SellerInvite/.test(actionsSrc) && !/SellerInvite/.test(pageSrc) && !/SellerInvite/.test(formSrc));
   ok("static · no CHANGES_REQUESTED introduced in this phase",
     !/CHANGES_REQUESTED/.test(actionsSrc) && !/CHANGES_REQUESTED/.test(repoSrc));
 
