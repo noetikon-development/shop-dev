@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, LayoutTemplate, ImageIcon, PanelBottom, PanelTop, KeyRound } from "lucide-react";
+import { FileText, LayoutTemplate, ImageIcon, PanelBottom, PanelTop, KeyRound, Mail } from "lucide-react";
 import { requireAnyPermission } from "@/lib/admin/rbac";
 import { prisma } from "@/lib/prisma";
 import { authArtworkSchema } from "@/lib/content-blocks";
@@ -20,6 +20,8 @@ export default async function AdminContentHubPage() {
     footerBlock,
     navBlock,
     authArtworkBlock,
+    emailTemplateCount,
+    emailTemplatePublishedCount,
   ] = await Promise.all([
     prisma.contentPage.count(),
     prisma.contentPage.count({ where: { status: "PUBLISHED" } }),
@@ -29,6 +31,8 @@ export default async function AdminContentHubPage() {
     prisma.contentBlock.findUnique({ where: { key: "footer.default" }, select: { status: true } }),
     prisma.contentBlock.findUnique({ where: { key: "nav.primary" }, select: { status: true } }),
     prisma.contentBlock.findUnique({ where: { key: "auth.artwork" }, select: { status: true, data: true } }),
+    prisma.contentBlock.count({ where: { area: "email", type: "email_template" } }),
+    prisma.contentBlock.count({ where: { area: "email", type: "email_template", status: "PUBLISHED" } }),
   ]);
 
   let authArtworkOn = false;
@@ -76,6 +80,13 @@ export default async function AdminContentHubPage() {
       title: "Pages",
       body: `${publishedPages} of ${pageCount} page${pageCount === 1 ? "" : "s"} published`,
       hint: "About, FAQ, policies and other standalone pages.",
+    },
+    {
+      href: "/admin/content/email-templates",
+      icon: <Mail size={18} />,
+      title: "Email Templates",
+      body: `${emailTemplatePublishedCount} of ${emailTemplateCount} customized template${emailTemplateCount === 1 ? "" : "s"} live`,
+      hint: "Subject, heading, body and action button for seller and payment emails.",
     },
     {
       href: "/admin/media",

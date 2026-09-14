@@ -8,6 +8,8 @@ import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { dispatchEmail, recordEmailFailure, type DispatchResult, type EmailType } from "@/lib/email/send";
+import { getEmailTemplateOverride, renderEmailTemplateOverride, genericFallbackFor } from "@/lib/email/template-overrides";
+import type { EmailToken } from "@/lib/email/template-registry";
 import { renderOrderConfirmation } from "@/lib/email/templates/order-confirmation";
 import { renderOrderProcessing } from "@/lib/email/templates/order-processing";
 import { renderOrderShipped } from "@/lib/email/templates/order-shipped";
@@ -80,7 +82,7 @@ import {
   sellerReturnAddressLines,
 } from "@/lib/marketplace/return-destination";
 import { createHash } from "node:crypto";
-import { maskEmail, setEmailFooterContext } from "@/lib/email/html";
+import { maskEmail, setEmailFooterContext, peso } from "@/lib/email/html";
 
 /** Account-security notices go from a no-reply address, not the orders inbox. */
 const SECURITY_FROM = "no-reply@axiaro.shop";
@@ -181,6 +183,18 @@ type DispatchMeta = {
   retry?: boolean;
   /** Optional transaction client for EmailLog bookkeeping (tests only). */
   client?: Prisma.TransactionClient;
+  /**
+   * 9F-57 — CMS email-template override support. When `templateKey` is set,
+   * `renderAndDispatch` checks for a PUBLISHED `ContentBlock` override for it
+   * BEFORE falling back to the caller's own `build()`. `templateTokens` are
+   * the live runtime values available for `{{token}}` substitution — never
+   * CMS-authored; `templateActionUrl` is the link used for the template's
+   * action button when the CMS copy asks for one. Omit `templateKey` entirely
+   * to opt a sender out of CMS overrides (none currently do).
+   */
+  templateKey?: string;
+  templateTokens?: Partial<Record<EmailToken, string>>;
+  templateActionUrl?: string | null;
 };
 
 /**
@@ -245,10 +259,35 @@ async function renderAndDispatch(
   build: () => { subject: string; html: string; text: string },
 ): Promise<DispatchResult> {
   const footer = await getEmailFooter();
+
+  // 9F-57 — resolve a CMS override BEFORE the synchronous render, so a
+  // template-render exception (from either path) still lands in the SAME
+  // try/catch below and gets the same durable-failure handling. No override
+  // (the overwhelming default case) leaves `effectiveBuild` as the caller's
+  // own `build` — byte-identical to pre-9F-57 behavior.
+  let effectiveBuild = build;
+  if (meta.templateKey) {
+    const override = await getEmailTemplateOverride(meta.templateKey, meta.client);
+    if (override) {
+      const templateKey = meta.templateKey;
+      const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+      effectiveBuild = () =>
+        renderEmailTemplateOverride({
+          templateKey,
+          override,
+          brand,
+          siteUrl,
+          tokenValues: { storeName: brand, ...meta.templateTokens },
+          fallback: genericFallbackFor(templateKey),
+          actionUrl: meta.templateActionUrl,
+        });
+    }
+  }
+
   let msg: { subject: string; html: string; text: string };
   try {
     setEmailFooterContext(footer);
-    msg = build();
+    msg = effectiveBuild();
   } catch (err) {
     setEmailFooterContext({});
     const failed = await recordEmailFailure({
@@ -881,6 +920,7 @@ export async function sendSellerOrderReceived(
 
     const shipTo = safeParse<Record<string, unknown> | null>(order.shippingAddress, null);
 
+    const orderUrl = `${ctx.siteUrl}/seller/orders/${so.id}`;
     return renderAndDispatch(
       {
         type: "seller_order_received",
@@ -890,6 +930,9 @@ export async function sendSellerOrderReceived(
         orderId: order.id,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_order_received",
+        templateTokens: { sellerName: ctx.sellerName, orderNumber: order.orderNumber, actionUrl: orderUrl },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderSellerOrderReceived({
@@ -898,7 +941,7 @@ export async function sendSellerOrderReceived(
           sellerName: ctx.sellerName,
           orderNumber: order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
+          orderUrl,
           // 9F-22: fold a "Condition: …" line under a non-NEW item; NEW items
           // are byte-identical to before (no line, no shared-helper change).
           items: so.items.map((i) => ({
@@ -1016,6 +1059,7 @@ export async function sendSellerOrderAcceptanceReminder(
         client: opts.client,
       });
 
+    const orderUrl = `${ctx.siteUrl}/seller/orders/${subj.so.id}`;
     return renderAndDispatch(
       {
         type: "seller_order_acceptance_reminder",
@@ -1025,6 +1069,14 @@ export async function sendSellerOrderAcceptanceReminder(
         orderId: subj.so.orderId,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_order_acceptance_reminder",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          orderNumber: subj.so.orderNumber,
+          status: humanizeWait(subj.ageMs),
+          actionUrl: orderUrl,
+        },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderSellerOrderAcceptanceReminder({
@@ -1033,7 +1085,7 @@ export async function sendSellerOrderAcceptanceReminder(
           sellerName: ctx.sellerName,
           orderNumber: subj.so.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          orderUrl: `${ctx.siteUrl}/seller/orders/${subj.so.id}`,
+          orderUrl,
           waitedLabel: humanizeWait(subj.ageMs),
           itemCount: subj.so.itemCount,
         }),
@@ -1064,6 +1116,7 @@ export async function sendSellerOrderAcceptanceOverdueOps(
     }
     const seller = await db.seller.findUnique({ where: { id: subj.so.sellerId }, select: { displayName: true } });
     const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const adminUrl = `${siteUrl}/admin/orders/${subj.so.orderId}`;
 
     return renderAndDispatch(
       {
@@ -1074,12 +1127,20 @@ export async function sendSellerOrderAcceptanceOverdueOps(
         idempotencyKey: `SELLER_ORDER_ACCEPTANCE_OVERDUE:${sellerOrderId}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_order_acceptance_overdue_ops",
+        templateTokens: {
+          sellerName: seller?.displayName ?? "the seller",
+          orderNumber: subj.so.orderNumber,
+          status: humanizeWait(subj.ageMs),
+          actionUrl: adminUrl,
+        },
+        templateActionUrl: adminUrl,
       },
       () =>
         renderSellerOrderAcceptanceOverdueOps({
           brand,
           siteUrl,
-          adminUrl: `${siteUrl}/admin/orders/${subj.so.orderId}`,
+          adminUrl,
           sellerName: seller?.displayName ?? "the seller",
           orderNumber: subj.so.orderNumber,
           sellerOrderStatus: subj.so.status,
@@ -2073,6 +2134,8 @@ export async function sendPaymentConfirmation(
       (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
       "there";
 
+    const orderUrl = orderLink(siteUrl, order);
+    const methodLabel = paymentMethodDisplayLabel(order.paymentMethod);
     return renderAndDispatch(
       {
         type: "payment_confirmation",
@@ -2083,19 +2146,22 @@ export async function sendPaymentConfirmation(
         orderId: order.id,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "payment_confirmation",
+        templateTokens: { orderNumber: order.orderNumber, status: methodLabel, actionUrl: orderUrl },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderPaymentConfirmation({
           brand,
           siteUrl,
-          orderUrl: orderLink(siteUrl, order),
+          orderUrl,
           orderNumber: order.orderNumber,
           customerName,
           amount: payment.amount,
           // 9F-55: a plain "Card" / "GCash" for the label/value row — the store's
           // own coarse enum, set by the webhook's `applyPaid` alongside this
           // same payment (`orderPaymentMethodFromProvider`).
-          methodLabel: paymentMethodDisplayLabel(order.paymentMethod),
+          methodLabel,
           paidAt: payment.paidAt ?? new Date(),
         }),
     );
@@ -2160,6 +2226,7 @@ export async function sendPaymentFailed(
     // []`), so this only matters if the caller passed a stale/wrong id.
     if (ctx.payment.status !== "FAILED") return { ok: true, skipped: true, status: "SKIPPED" };
 
+    const orderUrl = orderLink(ctx.siteUrl, ctx.order);
     return renderAndDispatch(
       {
         type: "payment_failed",
@@ -2170,12 +2237,15 @@ export async function sendPaymentFailed(
         orderId: ctx.order.id,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "payment_failed",
+        templateTokens: { orderNumber: ctx.order.orderNumber, actionUrl: orderUrl },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderPaymentFailed({
           brand: ctx.brand,
           siteUrl: ctx.siteUrl,
-          orderUrl: orderLink(ctx.siteUrl, ctx.order),
+          orderUrl,
           orderNumber: ctx.order.orderNumber,
           customerName: ctx.customerName,
           amount: ctx.payment.amount,
@@ -2208,6 +2278,7 @@ export async function sendPaymentExpiredOrCancelled(
     // Defensive re-check, mirrors sendPaymentFailed (EXPIRED is also terminal).
     if (ctx.payment.status !== "EXPIRED") return { ok: true, skipped: true, status: "SKIPPED" };
 
+    const orderUrl = orderLink(ctx.siteUrl, ctx.order);
     return renderAndDispatch(
       {
         type: "payment_expired_or_cancelled",
@@ -2218,12 +2289,15 @@ export async function sendPaymentExpiredOrCancelled(
         orderId: ctx.order.id,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "payment_expired_or_cancelled",
+        templateTokens: { orderNumber: ctx.order.orderNumber, actionUrl: orderUrl },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderPaymentExpiredOrCancelled({
           brand: ctx.brand,
           siteUrl: ctx.siteUrl,
-          orderUrl: orderLink(ctx.siteUrl, ctx.order),
+          orderUrl,
           orderNumber: ctx.order.orderNumber,
           customerName: ctx.customerName,
           amount: ctx.payment.amount,
@@ -2338,6 +2412,7 @@ export async function sendRefundCompleted(
     // Defensive re-check — only a SUCCEEDED refund is "completed".
     if (ctx.r.status !== "SUCCEEDED") return { ok: true, skipped: true, status: "SKIPPED" };
 
+    const statusLabel = PAYMENT_REFUND_STATUS_LABEL[ctx.r.status] ?? ctx.r.status;
     return renderAndDispatch(
       {
         type: "refund_completed",
@@ -2348,6 +2423,14 @@ export async function sendRefundCompleted(
         orderId: ctx.order.id,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "refund_completed",
+        templateTokens: {
+          orderNumber: ctx.order.orderNumber,
+          refundAmount: peso(ctx.r.amount),
+          status: statusLabel,
+          actionUrl: ctx.returnUrl,
+        },
+        templateActionUrl: ctx.returnUrl,
       },
       () =>
         renderRefundCompleted({
@@ -2363,7 +2446,7 @@ export async function sendRefundCompleted(
           methodLabel: paymentMethodDisplayLabel(ctx.r.payment.method),
           partial: ctx.r.amount < ctx.r.payment.amount,
           refundedAt: ctx.r.succeededAt ?? new Date(),
-          statusLabel: PAYMENT_REFUND_STATUS_LABEL[ctx.r.status] ?? ctx.r.status,
+          statusLabel,
         }),
     );
   } catch (err) {
@@ -2691,6 +2774,9 @@ export async function sendSellerProductRequestSubmitted(
         idempotencyKey: opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_SUBMITTED:${requestId}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_product_request_submitted",
+        templateTokens: { sellerName: ctx.sellerName, productName: ctx.productName, actionUrl: ctx.requestUrl },
+        templateActionUrl: ctx.requestUrl,
       },
       () =>
         renderSellerProductRequestSubmitted({
@@ -2733,6 +2819,7 @@ export async function sendSellerProductRequestResubmittedOps(
     const idempotencyKey = `${idKeyBase}:${req.submittedAt?.getTime() ?? "0"}`;
 
     const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const adminUrl = `${siteUrl}/admin/seller-product-requests/${requestId}`;
     return renderAndDispatch(
       {
         type: "seller_product_request_resubmitted_ops",
@@ -2741,12 +2828,15 @@ export async function sendSellerProductRequestResubmittedOps(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_product_request_resubmitted_ops",
+        templateTokens: { sellerName: req.seller.displayName, productName: req.proposedName, actionUrl: adminUrl },
+        templateActionUrl: adminUrl,
       },
       () =>
         renderSellerProductRequestResubmittedOps({
           brand,
           siteUrl,
-          adminUrl: `${siteUrl}/admin/seller-product-requests/${requestId}`,
+          adminUrl,
           sellerName: req.seller.displayName,
           productName: req.proposedName,
         }),
@@ -2809,6 +2899,7 @@ export async function sendSellerProductRequestApproved(
           : `/seller/offers/new?q=${encodeURIComponent(ctx.productName)}`;
     }
 
+    const templateActionUrl = listUrl ? `${ctx.siteUrl}${listUrl}` : ctx.requestUrl;
     return renderAndDispatch(
       {
         type: "seller_product_request_approved",
@@ -2818,6 +2909,9 @@ export async function sendSellerProductRequestApproved(
           opts.idempotencyKey ?? `SELLER_PRODUCT_REQUEST_APPROVED:${requestId}:${reviewedAt.getTime()}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_product_request_approved",
+        templateTokens: { sellerName: ctx.sellerName, productName: ctx.productName, actionUrl: templateActionUrl },
+        templateActionUrl,
       },
       () =>
         renderSellerProductRequestApproved({
@@ -2868,6 +2962,14 @@ export async function sendSellerProductRequestRejected(
 
     const outcome = opts.outcome ?? (ctx.status === "REJECTED" ? "rejected" : "changes_requested");
     const reviewedAt = ctx.reviewedAt ?? new Date();
+    // 9F-57 — two distinct CMS templates share this one sender/EmailType,
+    // matching the existing `outcome` branch: "rejected" (terminal) vs
+    // "changes requested" (resubmittable). `ctx.reviewNote` is the admin's
+    // ACTUAL note — required non-empty upstream by both `rejectRequestAction`
+    // and `requestChangesAction`'s zod schema (`min(1)`) before either
+    // transition can happen; never invented here or by the CMS template.
+    const templateKey =
+      outcome === "rejected" ? "seller_product_request_rejected" : "seller_product_request_changes_requested";
 
     return renderAndDispatch(
       {
@@ -2879,6 +2981,9 @@ export async function sendSellerProductRequestRejected(
           `SELLER_PRODUCT_REQUEST_REJECTED:${requestId}:${outcome}:${reviewedAt.getTime()}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey,
+        templateTokens: { sellerName: ctx.sellerName, productName: ctx.productName, reason: ctx.reviewNote ?? "", actionUrl: ctx.requestUrl },
+        templateActionUrl: ctx.requestUrl,
       },
       () =>
         renderSellerProductRequestRejected({
@@ -2997,6 +3102,9 @@ export async function sendSellerAccountApproved(
         idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_APPROVED:${sellerId}:${auditLogId}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_account_approved",
+        templateTokens: { sellerName: ctx.sellerName, actionUrl: ctx.portalUrl },
+        templateActionUrl: ctx.portalUrl,
       },
       () =>
         renderSellerAccountApproved({
@@ -3129,7 +3237,16 @@ export async function sendSellerAccountSubmitted(
     if (!ctx) return failPrep("no_recipient");
 
     return renderAndDispatch(
-      { type: "seller_account_submitted", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      {
+        type: "seller_account_submitted",
+        to: ctx.recipient,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+        templateKey: "seller_account_submitted",
+        templateTokens: { sellerName: ctx.sellerName },
+      },
       () => renderSellerAccountSubmitted({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName }),
     );
   } catch (err) {
@@ -3164,7 +3281,16 @@ export async function sendSellerAccountRejected(
     if (typeof reason !== "string" || !reason.trim()) return failPrep("missing_reason_on_audit_row");
 
     return renderAndDispatch(
-      { type: "seller_account_rejected", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      {
+        type: "seller_account_rejected",
+        to: ctx.recipient,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+        templateKey: "seller_account_rejected",
+        templateTokens: { sellerName: ctx.sellerName, reason: reason.trim() },
+      },
       () => renderSellerAccountRejected({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName, reason: reason.trim() }),
     );
   } catch (err) {
@@ -3196,7 +3322,16 @@ export async function sendSellerAccountReopened(
     if (typeof note !== "string" || !note.trim()) return failPrep("missing_reason_on_audit_row");
 
     return renderAndDispatch(
-      { type: "seller_account_reopened", to: ctx.recipient, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      {
+        type: "seller_account_reopened",
+        to: ctx.recipient,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+        templateKey: "seller_account_reopened",
+        templateTokens: { sellerName: ctx.sellerName, reason: note.trim() },
+      },
       () => renderSellerAccountReopened({ brand: ctx.brand, siteUrl: ctx.siteUrl, sellerName: ctx.sellerName, note: note.trim() }),
     );
   } catch (err) {
@@ -3395,6 +3530,7 @@ export async function sendSellerOrderCancelled(
       sellerId: so.sellerId,
     });
 
+    const ordersUrl = `${ctx.siteUrl}/seller/orders`;
     return renderAndDispatch(
       {
         type: "seller_order_cancelled",
@@ -3403,6 +3539,9 @@ export async function sendSellerOrderCancelled(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_order_cancelled",
+        templateTokens: { sellerName: ctx.sellerName, orderNumber: so.order.orderNumber, actionUrl: ordersUrl },
+        templateActionUrl: ordersUrl,
       },
       () =>
         renderSellerOrderCancelled({
@@ -3410,7 +3549,7 @@ export async function sendSellerOrderCancelled(
           siteUrl: ctx.siteUrl,
           sellerName: ctx.sellerName,
           orderNumber: so.order.orderNumber,
-          ordersUrl: `${ctx.siteUrl}/seller/orders`,
+          ordersUrl,
           clawback,
         }),
     );
@@ -3473,8 +3612,21 @@ export async function sendSellerOrderMilestone(
         client: opts.client,
       });
 
+    const orderUrl = `${ctx.siteUrl}/seller/orders/${so.id}`;
     return renderAndDispatch(
-      { type, to: ctx.recipients, from: SECURITY_FROM, idempotencyKey, retry: opts.retry, client: opts.client },
+      {
+        type,
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+        // `type` here is already exactly the matching CMS templateKey — the
+        // registry uses the same 4 names as SELLER_ORDER_MILESTONE_TYPE.
+        templateKey: type,
+        templateTokens: { sellerName: ctx.sellerName, orderNumber: so.order.orderNumber, actionUrl: orderUrl },
+        templateActionUrl: orderUrl,
+      },
       () =>
         renderSellerOrderMilestone({
           brand: ctx.brand,
@@ -3482,7 +3634,7 @@ export async function sendSellerOrderMilestone(
           sellerName: ctx.sellerName,
           orderNumber: so.order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
+          orderUrl,
           milestone,
           items: so.items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
         }),
@@ -3531,6 +3683,8 @@ export async function sendSellerShipmentCreated(
         client: opts.client,
       });
 
+    const orderUrl = `${ctx.siteUrl}/seller/orders/${so.id}`;
+    const carrierLabel = shipment.carrierName || shipment.carrier || "—";
     return renderAndDispatch(
       {
         type: "seller_shipment_created",
@@ -3539,6 +3693,15 @@ export async function sendSellerShipmentCreated(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_shipment_created",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          orderNumber: so.order.orderNumber,
+          carrier: carrierLabel,
+          trackingNumber: shipment.trackingNumber ?? "",
+          actionUrl: orderUrl,
+        },
+        templateActionUrl: orderUrl,
       },
       () =>
         renderSellerShipmentCreated({
@@ -3547,8 +3710,8 @@ export async function sendSellerShipmentCreated(
           sellerName: ctx.sellerName,
           orderNumber: so.order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          orderUrl: `${ctx.siteUrl}/seller/orders/${so.id}`,
-          carrierLabel: shipment.carrierName || shipment.carrier || "—",
+          orderUrl,
+          carrierLabel,
           trackingNumber: shipment.trackingNumber,
           trackingUrl: shipment.trackingUrl,
         }),
@@ -3631,6 +3794,7 @@ export async function sendSellerReturnRequested(
     });
     if (items.length === 0) return failPrep("no_seller_lines");
 
+    const returnsUrl = `${ctx.siteUrl}/seller/returns`;
     return renderAndDispatch(
       {
         type: "seller_return_requested",
@@ -3639,6 +3803,14 @@ export async function sendSellerReturnRequested(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_return_requested",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          status: returnStatusLabel(ret.status),
+          actionUrl: returnsUrl,
+        },
+        templateActionUrl: returnsUrl,
       },
       () =>
         renderSellerReturnRequested({
@@ -3648,7 +3820,7 @@ export async function sendSellerReturnRequested(
           orderNumber: ret.order.orderNumber,
           returnNumber: ret.returnNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          returnsUrl,
           reasonLabel: returnReasonLabel(ret.reason),
           status: returnStatusLabel(ret.status),
           items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
@@ -3709,6 +3881,7 @@ export async function sendSellerReturnReceived(
     const soIds = [...new Set(items.map((i) => i.orderItem?.sellerOrderId).filter((v): v is string => !!v))];
     const clawback = await clawbackNoteFor(db, { sellerOrderIds: soIds, returnId, sellerId });
 
+    const returnsUrl = `${ctx.siteUrl}/seller/returns`;
     return renderAndDispatch(
       {
         type: "seller_return_received",
@@ -3717,6 +3890,9 @@ export async function sendSellerReturnReceived(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_return_received",
+        templateTokens: { sellerName: ctx.sellerName, orderNumber: ret.order.orderNumber, actionUrl: returnsUrl },
+        templateActionUrl: returnsUrl,
       },
       () =>
         renderSellerReturnReceived({
@@ -3726,7 +3902,7 @@ export async function sendSellerReturnReceived(
           orderNumber: ret.order.orderNumber,
           returnNumber: ret.returnNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          returnsUrl,
           items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
           clawback,
         }),
@@ -3790,6 +3966,7 @@ export async function sendSellerReturnApproved(
     const shipsToThisSeller = dest?.kind === "seller" && dest.sellerId === sellerId && !!dest.address;
     const destinationLines = shipsToThisSeller ? sellerReturnAddressLines(dest.address!) : [];
 
+    const returnsUrl = `${ctx.siteUrl}/seller/returns`;
     return renderAndDispatch(
       {
         type: "seller_return_approved",
@@ -3798,6 +3975,9 @@ export async function sendSellerReturnApproved(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_return_approved",
+        templateTokens: { sellerName: ctx.sellerName, orderNumber: ret.order.orderNumber, actionUrl: returnsUrl },
+        templateActionUrl: returnsUrl,
       },
       () =>
         renderSellerReturnApproved({
@@ -3807,7 +3987,7 @@ export async function sendSellerReturnApproved(
           orderNumber: ret.order.orderNumber,
           returnNumber: ret.returnNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          returnsUrl,
           reasonLabel: returnReasonLabel(ret.reason),
           items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
           shipsToThisSeller,
@@ -3865,6 +4045,7 @@ export async function sendSellerReturnRejected(
     });
     if (items.length === 0) return failPrep("no_seller_lines");
 
+    const returnsUrl = `${ctx.siteUrl}/seller/returns`;
     return renderAndDispatch(
       {
         type: "seller_return_rejected",
@@ -3873,6 +4054,14 @@ export async function sendSellerReturnRejected(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_return_rejected",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          reason: ret.resolutionNote!.trim(),
+          actionUrl: returnsUrl,
+        },
+        templateActionUrl: returnsUrl,
       },
       () =>
         renderSellerReturnRejected({
@@ -3882,7 +4071,7 @@ export async function sendSellerReturnRejected(
           orderNumber: ret.order.orderNumber,
           returnNumber: ret.returnNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
-          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          returnsUrl,
           reasonLabel: returnReasonLabel(ret.reason),
           reason: ret.resolutionNote!.trim(),
           items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
@@ -3946,6 +4135,7 @@ export async function sendSellerRefundNotice(
     const soIds = [...new Set(items.map((i) => i.orderItem?.sellerOrderId).filter((v): v is string => !!v))];
     const clawback = await clawbackNoteFor(db, { sellerOrderIds: soIds, returnId, sellerId });
 
+    const returnsUrl = `${ctx.siteUrl}/seller/returns`;
     return renderAndDispatch(
       {
         type: "seller_refund_notice",
@@ -3954,6 +4144,14 @@ export async function sendSellerRefundNotice(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_refund_notice",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          orderNumber: ret.order.orderNumber,
+          refundAmount: peso(ret.refundAmount ?? 0),
+          actionUrl: returnsUrl,
+        },
+        templateActionUrl: returnsUrl,
       },
       () =>
         renderSellerRefundNotice({
@@ -3963,7 +4161,7 @@ export async function sendSellerRefundNotice(
           orderNumber: ret.order.orderNumber,
           ordersUrl: `${ctx.siteUrl}/seller/orders`,
           returnNumber: ret.returnNumber,
-          returnsUrl: `${ctx.siteUrl}/seller/returns`,
+          returnsUrl,
           refundAmount: ret.refundAmount ?? 0,
           items: items.map((i) => ({ name: i.name, variantLabel: i.variantLabel, quantity: i.quantity })),
           clawback,
@@ -4065,6 +4263,7 @@ export async function sendSellerSettlementRecorded(
         client: opts.client,
       });
 
+    const settlementUrl = `${ctx.siteUrl}/seller/settlements/${s.id}`;
     return renderAndDispatch(
       {
         type: "seller_settlement_recorded",
@@ -4073,13 +4272,20 @@ export async function sendSellerSettlementRecorded(
         idempotencyKey,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_settlement_recorded",
+        templateTokens: {
+          sellerName: ctx.sellerName,
+          settlementAmount: peso(s.netAmount),
+          actionUrl: settlementUrl,
+        },
+        templateActionUrl: settlementUrl,
       },
       () =>
         renderSellerSettlementRecorded({
           brand: ctx.brand,
           siteUrl: ctx.siteUrl,
           sellerName: ctx.sellerName,
-          settlementUrl: `${ctx.siteUrl}/seller/settlements/${s.id}`,
+          settlementUrl,
           paidAt: s.paidAt ? s.paidAt.toISOString().slice(0, 10) : null,
           grossReceivable: s.grossReceivable,
           commissionAmount: s.commissionAmount,

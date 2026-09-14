@@ -84,7 +84,10 @@ function staticTests() {
 
   ok("sender · sendSellerSettlementRecorded exists, keyed SETTLEMENT_RECORDED:<id>", /export async function sendSellerSettlementRecorded/.test(notif) && /const idempotencyKey = opts\.idempotencyKey \?\? `SETTLEMENT_RECORDED:\$\{settlementId\}`/.test(notif));
   ok("sender · from = SECURITY_FROM, recipients via loadSellerLifecycleEmailContext", /type: "seller_settlement_recorded",\s*\n\s*to: ctx\.recipients,\s*\n\s*from: SECURITY_FROM,/.test(notif) && /loadSellerLifecycleEmailContext\(s\.sellerId/.test(notif));
-  ok("sender · deep-link is the ONLY place the settlement id appears", /settlementUrl: `\$\{ctx\.siteUrl\}\/seller\/settlements\/\$\{s\.id\}`/.test(notif));
+  // 9F-57 extracted the inline `settlementUrl: \`...\`` into a shared `const`
+  // (reused for the CMS templateActionUrl too) — same single deep-link, same
+  // one place `s.id` is interpolated, just DRY'd into a variable.
+  ok("sender · deep-link is the ONLY place the settlement id appears", /const settlementUrl = `\$\{ctx\.siteUrl\}\/seller\/settlements\/\$\{s\.id\}`;/.test(notif));
   ok("sender · goes through renderAndDispatch (so 9F-18 failure alerting applies)", /renderAndDispatch\(\s*\{\s*type: "seller_settlement_recorded"/.test(notif));
   ok("sender · no_recipient → failNoRecipient (Class E / 9F-18)", /failNoRecipient\(\{\s*type: "seller_settlement_recorded"/.test(notif));
 

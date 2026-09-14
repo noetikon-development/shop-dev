@@ -11,7 +11,7 @@ import { z } from "zod";
  * the storefront (it is skipped instead).
  */
 
-export const CONTENT_AREAS = ["homepage", "global"] as const;
+export const CONTENT_AREAS = ["homepage", "global", "email"] as const;
 export type ContentArea = (typeof CONTENT_AREAS)[number];
 
 export const BLOCK_STATUSES = ["DRAFT", "PUBLISHED"] as const;
@@ -253,6 +253,33 @@ export const navSchema = z.object({
 
 export type NavData = z.infer<typeof navSchema>;
 
+// --- email templates (Phase 9F-57) ------------------------------------------
+//
+// One `area:"email"` block PER TEMPLATE, keyed `email.<templateKey>` (see
+// `src/lib/email/template-registry.ts` for the fixed catalogue of valid
+// templateKeys and `src/lib/email/template-overrides.ts` for the resolver that
+// reads these and falls back to the application default). `status` doubles as
+// the enable switch: PUBLISHED = customized & live, DRAFT (or the row simply
+// not existing) = fall back to the built-in default — the exact same
+// missing/unpublished-means-fallback convention `footer` / `navigation` /
+// `auth_artwork` already use.
+//
+// Every field is OPTIONAL (blank = "use the application default for this
+// field"), so an admin can customize just the subject and leave the rest
+// alone. `{{token}}` placeholders are substituted by the resolver from
+// per-template allowed tokens ONLY — an unrecognized token is left as literal
+// text, never breaking the render.
+
+export const emailTemplateSchema = z.object({
+  subject: shortText.default(""),
+  heading: shortText.default(""),
+  body: longText.default(""),
+  /** Optional additional message shown after the body (e.g. a closing note). */
+  extraMessage: longText.default(""),
+  actionLabel: shortText.default(""),
+});
+export type EmailTemplateData = z.infer<typeof emailTemplateSchema>;
+
 // --- registry --------------------------------------------------------------
 
 export type BlockTypeKey =
@@ -265,7 +292,8 @@ export type BlockTypeKey =
   | "category_tiles"
   | "footer"
   | "navigation"
-  | "auth_artwork";
+  | "auth_artwork"
+  | "email_template";
 
 export const BLOCK_TYPES: Record<
   BlockTypeKey,
@@ -281,6 +309,7 @@ export const BLOCK_TYPES: Record<
   footer: { label: "Footer", description: "The site-wide footer — brand text, link columns, newsletter copy and copyright.", schema: footerSchema },
   navigation: { label: "Navigation", description: "The header menu, mega-menu and mobile menu — labels, order and visibility.", schema: navSchema },
   auth_artwork: { label: "Authentication artwork", description: "The large illustration on the desktop sign-in / sign-up screens.", schema: authArtworkSchema },
+  email_template: { label: "Email template", description: "Customizable copy for a single transactional email.", schema: emailTemplateSchema },
 };
 
 export const BLOCK_TYPE_KEYS = Object.keys(BLOCK_TYPES) as BlockTypeKey[];
@@ -288,12 +317,13 @@ export const BLOCK_TYPE_KEYS = Object.keys(BLOCK_TYPES) as BlockTypeKey[];
 /**
  * Block types an admin can add as a homepage section. The site-wide blocks
  * (`footer`, `navigation`, `auth_artwork`) are edited on their own pages, never
- * added to a page.
+ * added to a page. `email_template` blocks are edited one-per-template under
+ * Content → Email Templates — also never added to a page.
  */
-export const SITE_WIDE_BLOCK_TYPE_KEYS = ["footer", "navigation", "auth_artwork"] as const;
+export const SITE_WIDE_BLOCK_TYPE_KEYS = ["footer", "navigation", "auth_artwork", "email_template"] as const;
 export const HOMEPAGE_BLOCK_TYPE_KEYS = BLOCK_TYPE_KEYS.filter(
   (k) => !(SITE_WIDE_BLOCK_TYPE_KEYS as readonly string[]).includes(k),
-) as Exclude<BlockTypeKey, "footer" | "navigation" | "auth_artwork">[];
+) as Exclude<BlockTypeKey, "footer" | "navigation" | "auth_artwork" | "email_template">[];
 
 export function isBlockType(v: string): v is BlockTypeKey {
   return v in BLOCK_TYPES;

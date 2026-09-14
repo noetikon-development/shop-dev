@@ -110,7 +110,7 @@ export function SellerLifecyclePanel({
                   onChange={(e) => setReasonDraft(e.target.value)}
                   rows={3}
                   maxLength={2000}
-                  className="input w-full text-sm"
+                  className="field w-full text-sm"
                   placeholder={confirmTo === "REJECTED" ? "Why this application isn't being approved…" : "What changed / what to expect…"}
                 />
               </div>
