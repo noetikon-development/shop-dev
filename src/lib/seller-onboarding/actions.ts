@@ -3,7 +3,7 @@
 import { z } from "zod";
 import { requireUser } from "@/lib/auth";
 import { scheduleEmail } from "@/lib/email/schedule";
-import { sendSellerAccountSubmitted } from "@/lib/email/notifications";
+import { sendSellerAccountSubmitted, sendSellerAccountSubmittedOps } from "@/lib/email/notifications";
 import { submitSellerApplication, claimSellerOwnerInvite } from "@/lib/seller-onboarding/repository";
 
 /**
@@ -51,6 +51,13 @@ export async function submitSellerApplicationAction(
   // Same call, same idempotency key, same email the admin-created path already
   // uses — see createSellerAction's identical scheduleEmail call.
   scheduleEmail(() => sendSellerAccountSubmitted(res.sellerId));
+
+  // 9F-62 — Ops-only, self-service applications ONLY (never scheduled from
+  // createSellerAction): the business need is "alert Axiaro when a CUSTOMER
+  // applies" — an admin creating a seller already knows, so this would be
+  // pure noise on that path. A separate notification, separate recipient,
+  // separate idempotency key from the applicant ack above.
+  scheduleEmail(() => sendSellerAccountSubmittedOps(res.sellerId));
 
   return { ok: true };
 }

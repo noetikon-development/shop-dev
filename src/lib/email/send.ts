@@ -67,6 +67,10 @@ export type EmailType =
   | "seller_account_submitted"
   | "seller_account_rejected"
   | "seller_account_reopened"
+  // 9F-62 — Ops-only companion to seller_account_submitted: alerts Axiaro
+  // staff that a new application is waiting in the review queue. Self-service
+  // applications only (see sendSellerAccountSubmittedOps for why).
+  | "seller_account_submitted_ops"
   | "seller_profile_submitted"
   | "seller_profile_approved"
   | "seller_profile_rejected"

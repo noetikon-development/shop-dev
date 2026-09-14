@@ -110,6 +110,15 @@ export const EMAIL_TEMPLATES: EmailTemplateDef[] = [
   t("seller_account_reopened", "Seller application reopened", "seller_lifecycle",
     "Sent when a rejected application is reopened for another look. The admin's note is always shown verbatim.",
     ["sellerName", "reason"], { actionButton: false, requiresReason: true }),
+  t("seller_account_submitted_ops", "New seller application (Ops notice)", "seller_lifecycle",
+    "Internal Ops notice when a new self-service seller application is submitted.",
+    ["sellerName", "status", "actionUrl"], { audience: "ops" }),
+  t("seller_account_suspended", "Seller account suspended", "seller_lifecycle",
+    "Sent when a seller account is suspended.",
+    ["sellerName"], { actionButton: false }),
+  t("seller_account_closed", "Seller account closed", "seller_lifecycle",
+    "Sent when a seller account is closed. This is a terminal state.",
+    ["sellerName"], { actionButton: false }),
 
   // ── Product lifecycle ─────────────────────────────────────────────────
   t("seller_product_request_submitted", "Product submission received", "product_lifecycle",

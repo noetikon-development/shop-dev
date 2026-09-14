@@ -52,7 +52,7 @@ import {
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
@@ -3186,6 +3186,8 @@ export async function sendSellerAccountSuspended(
         idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_SUSPENDED:${sellerId}:${auditLogId}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_account_suspended",
+        templateTokens: { sellerName: ctx.sellerName },
       },
       () =>
         renderSellerAccountSuspended({
@@ -3225,6 +3227,8 @@ export async function sendSellerAccountClosed(
         idempotencyKey: opts.idempotencyKey ?? `SELLER_ACCOUNT_CLOSED:${sellerId}:${auditLogId}`,
         retry: opts.retry,
         client: opts.client,
+        templateKey: "seller_account_closed",
+        templateTokens: { sellerName: ctx.sellerName },
       },
       () =>
         renderSellerAccountClosed({
@@ -3292,6 +3296,82 @@ export async function sendSellerAccountSubmitted(
     );
   } catch (err) {
     console.error("[email] sendSellerAccountSubmitted", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * 9F-62 — Ops-only companion to `sendSellerAccountSubmitted`: alerts Axiaro
+ * staff that a new application is waiting in the review queue. A SEPARATE
+ * notification to a SEPARATE recipient — never a change to the applicant's
+ * own acknowledgement above, which keeps going to `Seller.supportEmail`
+ * exactly as before.
+ *
+ * Fired ONLY from the self-service application action
+ * (`submitSellerApplicationAction`), never from the admin-created path
+ * (`createSellerAction`). Deliberate: the business need this closes is
+ * "alert Axiaro when a CUSTOMER applies" — an admin who just typed the
+ * seller in with their own hands already knows about it, so alerting them
+ * about their own action would be pure noise, not a missing signal.
+ *
+ * Recipient is the existing ops/support inbox (`getSupportInboxEmail()`,
+ * `support.inboxEmail`), never a hard-coded address — it falls back to
+ * `SUPPORT_INBOX_FALLBACK` exactly like every other Ops notice already does
+ * when that setting is unset, so a missing setting can never turn into a
+ * `no_recipient` failure here.
+ * Key: SELLER_ACCOUNT_SUBMITTED_OPS:<sellerId> — independent of the
+ * applicant ack's own `SELLER_ACCOUNT_SUBMITTED:<sellerId>` key, so neither
+ * notification's idempotency can collide with or dedupe the other.
+ */
+export async function sendSellerAccountSubmittedOps(
+  sellerId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_ACCOUNT_SUBMITTED_OPS:${sellerId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_account_submitted_ops", idempotencyKey, subject: "New seller application", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const seller = await db.seller.findUnique({
+      where: { id: sellerId },
+      select: { displayName: true, status: true, supportEmail: true, applicantUserId: true },
+    });
+    if (!seller) return failPrep("seller_not_found");
+
+    let applicantEmail: string | null = null;
+    if (seller.applicantUserId) {
+      const applicant = await db.user.findUnique({ where: { id: seller.applicantUserId }, select: { email: true } });
+      applicantEmail = applicant?.email ?? null;
+    }
+
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const adminUrl = `${siteUrl}/admin/sellers/${sellerId}`;
+
+    return renderAndDispatch(
+      {
+        type: "seller_account_submitted_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+        templateKey: "seller_account_submitted_ops",
+        templateTokens: { sellerName: seller.displayName, status: seller.status, actionUrl: adminUrl },
+        templateActionUrl: adminUrl,
+      },
+      () =>
+        renderSellerAccountSubmittedOps({
+          brand,
+          siteUrl,
+          adminUrl,
+          sellerName: seller.displayName,
+          status: seller.status,
+          supportEmail: seller.supportEmail,
+          applicantEmail,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerAccountSubmittedOps", err);
     return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }

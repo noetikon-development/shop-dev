@@ -381,6 +381,57 @@ export function renderReturnRefundCompletedOps(d: RefundOpsBase & { refundRefere
 }
 
 /**
+ * 9F-62 — Ops notice: a new self-service seller application was submitted and
+ * is waiting in the review queue. Companion to the applicant's own
+ * `seller_account_submitted` acknowledgement (unchanged, still
+ * `Seller.supportEmail` only) — that email tells the applicant Axiaro got
+ * their application; this one tells Axiaro. `supportEmail` here is the
+ * SELLER's own contact address (what they typed on the form), never the ops
+ * inbox this message itself is delivered to. `applicantEmail` is the current
+ * Axiaro account email behind the application (null only if somehow missing —
+ * never expected for a self-service submission, since it always has one).
+ */
+export function renderSellerAccountSubmittedOps(d: {
+  brand: string;
+  siteUrl: string;
+  adminUrl: string;
+  sellerName: string;
+  status: string;
+  supportEmail: string;
+  applicantEmail: string | null;
+}) {
+  const subject = `New seller application: ${d.sellerName}`;
+  const rows =
+    kvRow("Seller", d.sellerName) +
+    kvRow("Status", d.status) +
+    kvRow("Support email", d.supportEmail) +
+    kvRow("Applicant account", d.applicantEmail ?? "—", { last: true });
+  const body = `
+    ${heading("A new seller application was submitted")}
+    ${paragraph(`${d.sellerName} applied to sell on ${d.brand} and is now under review.`)}
+    ${infoBox(rows)}
+    ${button("Review the application", d.adminUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "A new seller application was submitted",
+      ``,
+      `${d.sellerName} applied to sell on ${d.brand} and is now under review.`,
+      ``,
+      `Seller: ${d.sellerName}`,
+      `Status: ${d.status}`,
+      `Support email: ${d.supportEmail}`,
+      `Applicant account: ${d.applicantEmail ?? "—"}`,
+      ``,
+      `Review the application: ${d.adminUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
+
+/**
  * 9F-56 — a seller resubmitted a product request that already went through a
  * review cycle (REJECTED → reopened → DRAFT → PENDING again). Distinct from
  * the seller's own "submitted for review" ack, which fires for a first-time
