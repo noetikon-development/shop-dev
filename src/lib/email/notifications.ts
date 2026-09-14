@@ -3115,6 +3115,26 @@ export async function sendSellerAccountApproved(
     const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { action: true } });
     const reactivate = audit?.action === "seller.reactivated";
 
+    // 9F-61 — a first-time self-service seller (never reactivated) has no
+    // SellerUser until they claim their PENDING SellerInvite from
+    // /sell-on-axiaro/status — /seller/login is a real 403 for them until
+    // then (requireSellerSession has no usable membership to resolve).
+    // Route the CTA to the status page ONLY in that exact case: never
+    // reactivated, applicantUserId set, and no ACTIVE SellerUser yet. Every
+    // other case (already-claimed seller, reactivation, admin-created)
+    // keeps the existing portal link unchanged.
+    let actionUrl = ctx.portalUrl;
+    if (!reactivate) {
+      const seller = await db.seller.findUnique({ where: { id: sellerId }, select: { applicantUserId: true } });
+      if (seller?.applicantUserId) {
+        const activeMembership = await db.sellerUser.findFirst({
+          where: { sellerId, status: "ACTIVE" },
+          select: { id: true },
+        });
+        if (!activeMembership) actionUrl = `${ctx.siteUrl}/sell-on-axiaro/status`;
+      }
+    }
+
     return renderAndDispatch(
       {
         type: "seller_account_approved",
@@ -3124,15 +3144,15 @@ export async function sendSellerAccountApproved(
         retry: opts.retry,
         client: opts.client,
         templateKey: "seller_account_approved",
-        templateTokens: { sellerName: ctx.sellerName, actionUrl: ctx.portalUrl },
-        templateActionUrl: ctx.portalUrl,
+        templateTokens: { sellerName: ctx.sellerName, actionUrl },
+        templateActionUrl: actionUrl,
       },
       () =>
         renderSellerAccountApproved({
           brand: ctx.brand,
           siteUrl: ctx.siteUrl,
           sellerName: ctx.sellerName,
-          portalUrl: ctx.portalUrl,
+          portalUrl: actionUrl,
           reactivate,
         }),
     );

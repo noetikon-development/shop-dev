@@ -81,8 +81,8 @@ async function main() {
       !/renderSellerAccountApprovedSelfService|seller_account_approved_self_service/.test(notifSrc));
   ok("static · the reactivate-detection logic (audit.action lookup) is unchanged",
     /const reactivate = audit\?\.action === "seller\.reactivated"/.test(notifSrc));
-  ok("static · sendSellerAccountApproved's actionUrl is unchanged (still ctx.portalUrl, no claim-specific URL)",
-    /templateActionUrl: ctx\.portalUrl/.test(notifSrc));
+  ok("static · sendSellerAccountApproved's actionUrl still DEFAULTS to ctx.portalUrl (9F-61 only overrides it for a first-time unclaimed self-service seller — see test-seller-onboarding-p4d.ts)",
+    /let actionUrl = ctx\.portalUrl;/.test(notifSrc));
 
   // ── DB (rolled back) ─────────────────────────────────────────────────────
   try {
