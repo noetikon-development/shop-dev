@@ -1,6 +1,14 @@
-// Creates the Supabase Storage bucket used by the admin media library.
-// Public read (so <img src> works on the storefront); writes only ever happen
-// server-side with the service-role key. Idempotent.
+// Creates the Supabase Storage buckets this project uses. Idempotent.
+//
+// - "media"               — PUBLIC read, for the admin media library / product
+//                            images / storefront assets. Writes only ever
+//                            happen server-side with the service-role key.
+// - "seller-verification" — PRIVATE (Seller Verification foundation, Phase 1).
+//                            No public read at all — every read must go
+//                            through a server-issued short-lived signed URL
+//                            (see src/lib/seller-verification/storage.ts).
+//                            Government IDs / business documents must NEVER
+//                            land in "media" or get a public URL.
 //
 // Requires SUPABASE_SERVICE_ROLE_KEY.
 // Run:  node --env-file=.env scripts/setup-storage.mjs
@@ -13,40 +21,41 @@ if (!url || !key) {
   process.exit(1);
 }
 
-const BUCKET = "media";
 const supabase = createClient(url, key, { auth: { persistSession: false } });
 
-const { data: existing } = await supabase.storage.getBucket(BUCKET);
-if (existing) {
-  await supabase.storage.updateBucket(BUCKET, {
-    public: true,
-    fileSizeLimit: "8MB",
-    allowedMimeTypes: [
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-      "image/svg+xml",
-      "application/pdf",
-    ],
-  });
-  console.log(`bucket "${BUCKET}" already exists — settings refreshed`);
-} else {
-  const { error } = await supabase.storage.createBucket(BUCKET, {
-    public: true,
-    fileSizeLimit: "8MB",
-    allowedMimeTypes: [
-      "image/png",
-      "image/jpeg",
-      "image/webp",
-      "image/gif",
-      "image/svg+xml",
-      "application/pdf",
-    ],
-  });
-  if (error) {
-    console.error("createBucket failed:", error.message);
-    process.exit(1);
+async function upsertBucket(name, options) {
+  const { data: existing } = await supabase.storage.getBucket(name);
+  if (existing) {
+    await supabase.storage.updateBucket(name, options);
+    console.log(`bucket "${name}" already exists — settings refreshed (public: ${options.public})`);
+  } else {
+    const { error } = await supabase.storage.createBucket(name, options);
+    if (error) {
+      console.error(`createBucket "${name}" failed:`, error.message);
+      process.exit(1);
+    }
+    console.log(`bucket "${name}" created (public: ${options.public}, limit ${options.fileSizeLimit})`);
   }
-  console.log(`bucket "${BUCKET}" created (public read, 8MB limit)`);
 }
+
+await upsertBucket("media", {
+  public: true,
+  fileSizeLimit: "8MB",
+  allowedMimeTypes: [
+    "image/png",
+    "image/jpeg",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+    "application/pdf",
+  ],
+});
+
+// Seller Verification foundation (Phase 1) — schema-only feature so far, no
+// upload path exists yet. This bucket is created ahead of that workflow so
+// the storage side of the foundation is complete and reviewable on its own.
+await upsertBucket("seller-verification", {
+  public: false,
+  fileSizeLimit: "8MB",
+  allowedMimeTypes: ["image/png", "image/jpeg", "image/webp", "application/pdf"],
+});

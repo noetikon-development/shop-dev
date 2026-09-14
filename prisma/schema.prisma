@@ -1314,6 +1314,10 @@ model Seller {
   // created after approval. Back-relation only; not yet written to.
   sellerInvites SellerInvite[]
 
+  // Seller Verification foundation (Phase 1) — back-relation only; not yet
+  // written to by any code path. See SellerVerification below.
+  sellerVerifications SellerVerification[]
+
   @@index([type])
   @@index([status])
   @@index([contentStatus])
@@ -1364,6 +1368,69 @@ model SellerInvite {
 
   @@index([sellerId])
   @@index([email])
+  @@index([status])
+}
+
+// Seller Verification foundation (Phase 1) — schema + private storage only.
+// No application behavior yet: no UI, no required documents, nothing gates
+// approval, SellerInvite creation, OWNER claim, or Seller Portal access on
+// this. Deliberately a SEPARATE model from Seller rather than a growing set
+// of verification columns on it — mirrors the existing Seller.contentStatus
+// moderation shape (status + submittedAt + reviewedAt/By/Note) but is its
+// own independent lifecycle: a store-profile can be APPROVED while identity
+// verification is still PENDING or not started at all, and vice versa. Kept
+// one-to-many (not unique on sellerId) so a rejected verification can be
+// resubmitted as a fresh row later without losing the history of the first
+// attempt — same reasoning as SellerInvite allowing more than one row per
+// seller over time.
+model SellerVerification {
+  id          String    @id @default(cuid())
+  sellerId    String
+  status      String    @default("DRAFT") // DRAFT | PENDING | APPROVED | REJECTED
+  submittedAt DateTime?
+  reviewedAt  DateTime?
+  reviewedBy  String? // admin User.id — plain snapshot, no FK (matches Seller.contentReviewedBy)
+  reviewNote  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  seller    Seller                       @relation(fields: [sellerId], references: [id], onDelete: Cascade)
+  documents SellerVerificationDocument[]
+
+  @@index([sellerId])
+  @@index([status])
+}
+
+// Seller Verification foundation (Phase 1) — metadata ONLY for one uploaded
+// document. `bucket` is always the new PRIVATE "seller-verification" bucket,
+// never the public "media" bucket `MediaAsset` uses — deliberately a
+// completely separate model, not a variant of `MediaAsset`, so a verification
+// document can never accidentally inherit MediaAsset's public-URL behavior.
+// No public URL, no signed URL, and no document content/number are stored
+// here — only enough to locate the private object and track its own
+// (per-document) review state, which is independent of both
+// SellerVerification.status and Seller.contentStatus.
+model SellerVerificationDocument {
+  id                   String    @id @default(cuid())
+  sellerVerificationId String
+  documentType         String // GOVERNMENT_ID_PRIMARY | GOVERNMENT_ID_SECONDARY | BUSINESS_PERMIT | BUSINESS_REGISTRATION | PROOF_OF_ADDRESS | OTHER
+  bucket               String // private Supabase Storage bucket — never "media"
+  storagePath          String // object path within the bucket; no public/signed URL stored
+  mimeType             String
+  sizeBytes            Int
+  status               String    @default("PENDING") // PENDING | APPROVED | REJECTED
+  uploadedAt           DateTime  @default(now())
+  reviewedAt           DateTime?
+  reviewedBy           String? // admin User.id — plain snapshot, no FK
+  reviewNote           String?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  sellerVerification SellerVerification @relation(fields: [sellerVerificationId], references: [id], onDelete: Cascade)
+
+  @@unique([bucket, storagePath])
+  @@index([sellerVerificationId])
+  @@index([documentType])
   @@index([status])
 }
 
