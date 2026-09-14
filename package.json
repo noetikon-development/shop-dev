@@ -122,6 +122,7 @@
     "test:seller-onboarding-p3": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-onboarding-p3.ts",
     "test:seller-onboarding-p4": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-onboarding-p4.ts",
     "test:seller-onboarding-p4b": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-onboarding-p4b.ts",
+    "test:seller-onboarding-p5": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-onboarding-p5.ts",
     "test:9f8c": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c.ts",
     "test:9f8c1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c1.ts",
     "test:9f8d1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8d1.ts",

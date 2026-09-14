@@ -37,7 +37,10 @@ export const FOOTER_DEFAULTS: FooterData = {
   },
   companyColumn: {
     heading: "Company",
-    links: [{ label: "About us", href: "/pages/about", enabled: true }],
+    links: [
+      { label: "About us", href: "/pages/about", enabled: true },
+      { label: "Sell on Axiaro", href: "/sell-on-axiaro", enabled: true },
+    ],
   },
   legalLinks: [
     { label: "Privacy", href: "/pages/privacy", enabled: true },

@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { ArrowRight, Package } from "lucide-react";
+import { ArrowRight, Package, Store } from "lucide-react";
 import { prisma } from "@/lib/prisma";
 import { requireUser } from "@/lib/auth";
 import { getUserOrders } from "@/lib/data";
+import { listSellerMemberships } from "@/lib/seller/session";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import { orderStatusTone } from "@/lib/orders/status";
 import { formatPrice, formatDate } from "@/lib/utils";
@@ -13,11 +14,16 @@ import { EmptyState } from "@/components/ui/empty-state";
 export default async function AccountOverview() {
   const { id: userId } = await requireUser("/account");
 
-  const [orders, addressCount, user] = await Promise.all([
+  const [orders, addressCount, user, sellerMemberships] = await Promise.all([
     getUserOrders(userId),
     prisma.address.count({ where: { userId } }),
     prisma.user.findUnique({ where: { id: userId }, select: { email: true, createdAt: true } }),
+    listSellerMemberships(),
   ]);
+  // Only shown to a customer with no ACTIVE seller membership at all — an
+  // existing seller already has the seller portal for everything this CTA
+  // would offer, so this naturally never shows for them.
+  const showSellerCta = sellerMemberships.length === 0;
 
   const activeOrder = orders.find((o) => !["DELIVERED", "CANCELLED"].includes(o.status));
   const recent = orders.slice(0, 3);
@@ -103,6 +109,25 @@ export default async function AccountOverview() {
           </ul>
         )}
       </section>
+
+      {showSellerCta && (
+        <div className="card-surface flex flex-wrap items-center justify-between gap-4 p-5">
+          <div className="flex items-start gap-3">
+            <span className="mt-0.5 text-ink-faint">
+              <Store size={20} />
+            </span>
+            <div>
+              <p className="font-medium">Sell on Axiaro</p>
+              <p className="mt-0.5 text-sm text-ink-soft">
+                List your own products alongside our catalog and reach more customers.
+              </p>
+            </div>
+          </div>
+          <Link href="/sell-on-axiaro" className={buttonClasses({ variant: "outline", size: "sm" })}>
+            Become a Seller
+          </Link>
+        </div>
+      )}
     </div>
   );
 }
