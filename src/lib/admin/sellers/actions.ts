@@ -27,6 +27,7 @@ import {
   type SellerUserError,
 } from "@/lib/admin/sellers/seller-users";
 import { SELLER_STATUSES, sellerTransitionAction, sellerTransitionRequiresReason } from "@/lib/admin/sellers/lifecycle";
+import { createOwnerInviteIfNeeded } from "@/lib/seller-onboarding/repository";
 
 /**
  * Admin Seller Management server actions — Phase 9F-4b.
@@ -188,6 +189,17 @@ export async function transitionSellerAction(
       } else if (res.to === "PENDING") {
         scheduleEmail(() => sendSellerAccountReopened(res.sellerId, auditLogId));
       }
+    }
+
+    // 9F-59 — a first-time self-service approval (never a SUSPENDED→APPROVED
+    // reactivation, which already has its own SellerUsers from before it was
+    // suspended) gets exactly one PENDING SellerInvite, so the applicant can
+    // use the existing Phase 4 claim flow. Independent of whether the audit
+    // write above succeeded — createOwnerInviteIfNeeded's own idempotency
+    // comes from checking for an existing PENDING invite, not from
+    // auditLogId. A no-op for an admin-created seller (no applicantUserId).
+    if (res.to === "APPROVED" && !res.reactivate) {
+      await createOwnerInviteIfNeeded(res.sellerId, admin.user.id);
     }
   }
 

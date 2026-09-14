@@ -122,8 +122,13 @@ async function main() {
     !/<input/.test(buttonSrc) && !/formData\.get\(/.test(buttonSrc));
   ok("static · the status page never shows a claim URL, invite id, or raw Seller id",
     !/\/claim\//.test(pageSrc) && !/app\.inviteId|app\.sellerId|app\.id\b/.test(pageSrc));
-  ok("static · admin/sellers/actions.ts (transitionSellerAction) is untouched by this phase — no SellerInvite reference",
-    !/SellerInvite/.test(adminSellersActionsSrc));
+  // A later, separate, explicitly-requested task (9F-59) legitimately wired
+  // transitionSellerAction to createOwnerInviteIfNeeded on first-time
+  // approval — this phase's OWN scope (the claim side) never touched that
+  // file, and still doesn't create a SellerUser directly there; that
+  // invariant is still meaningful and still true.
+  ok("static · admin/sellers/actions.ts never creates a SellerUser directly (invite creation, added later, only ever creates a SellerInvite)",
+    !/\.sellerUser\.(create|upsert)\(/.test(adminSellersActionsSrc));
 
   // ── DB (rolled back) ─────────────────────────────────────────────────────
   try {

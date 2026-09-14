@@ -341,3 +341,66 @@ export async function claimSellerOwnerInvite(
     ? { ok: true, code: "SUCCESS", sellerId: result.sellerId }
     : result;
 }
+
+/**
+ * Create the OWNER-claim invite for a Seller when it's approved for the
+ * first time — called ONLY from the admin approval action, never from any
+ * customer-facing code path.
+ *
+ * A no-op (never creates anything) when:
+ *   - the Seller has no `applicantUserId` (admin-created, not self-service);
+ *   - a PENDING SellerInvite for this Seller already exists — reused as-is,
+ *     never duplicated (this is the "defensive duplicate check" layer; the
+ *     caller's own `res.from !== res.to` guard is the first layer, so a
+ *     replayed approval on an already-APPROVED seller never even reaches
+ *     here — but this function is self-sufficient regardless of caller
+ *     discipline).
+ *
+ * `email` is the applicant's CURRENT account email (`User.email`) — read
+ * fresh at invite-creation time, not `Seller.supportEmail` (a plain,
+ * non-identity contact string the applicant could have typed as anything)
+ * and not derived from any other identity source. If the referenced User
+ * row is somehow gone, this is a no-op rather than inventing a fallback
+ * address — an invite with no valid recipient identity would be meaningless
+ * (the claim flow itself never reads this field for authorization anyway;
+ * it exists for display in a future invite email).
+ */
+export type CreateOwnerInviteResult =
+  | { created: true; inviteId: string }
+  | { created: false; inviteId: string | null };
+
+export async function createOwnerInviteIfNeeded(
+  sellerId: string,
+  invitedById: string | null,
+  client: Client = prisma,
+): Promise<CreateOwnerInviteResult> {
+  const seller = await client.seller.findUnique({
+    where: { id: sellerId },
+    select: { applicantUserId: true },
+  });
+  if (!seller?.applicantUserId) return { created: false, inviteId: null };
+
+  const existing = await client.sellerInvite.findFirst({
+    where: { sellerId, status: "PENDING" },
+    select: { id: true },
+  });
+  if (existing) return { created: false, inviteId: existing.id };
+
+  const applicant = await client.user.findUnique({
+    where: { id: seller.applicantUserId },
+    select: { email: true },
+  });
+  if (!applicant) return { created: false, inviteId: null };
+
+  const invite = await client.sellerInvite.create({
+    data: {
+      sellerId,
+      email: applicant.email,
+      status: "PENDING",
+      invitedById,
+    },
+    select: { id: true },
+  });
+
+  return { created: true, inviteId: invite.id };
+}
