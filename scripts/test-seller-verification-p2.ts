@@ -89,8 +89,11 @@ async function main() {
 
   // ── static — draft-only, no auto-transition, no document/email/gating ──
   const repoSrc = read("src/lib/seller-verification/repository.ts");
-  ok("· repository never sets status to anything but DRAFT",
-    (repoSrc.match(/status:\s*"(\w+)"/g) ?? []).every((m) => m === 'status: "DRAFT"'));
+  ok("· SellerVerification.status is never set to anything but DRAFT (narrowed to the verification-row creator specifically — Phase 3 legitimately introduced SellerVerificationDocument.status = PENDING in this same file, a different field entirely)",
+    (() => {
+      const m = repoSrc.match(/async function getOrCreateDraftVerification[\s\S]*?\r?\n\}/);
+      return !!m && (m[0].match(/status:\s*"(\w+)"/g) ?? []).every((s) => s === 'status: "DRAFT"');
+    })());
   ok("· action file never imports an email sender (no verification email yet)",
     !/from "@\/lib\/email\/notifications"/.test(actionSrc));
   ok("· action file never imports SellerInvite/claim logic",

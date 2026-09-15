@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
-import { getSellerVerification } from "@/lib/seller-verification/repository";
+import { getSellerVerification, listSellerVerificationDocuments } from "@/lib/seller-verification/repository";
 import { PageHeader, Card, StatusBadge } from "@/components/seller/ui";
 import { SellerVerificationForm } from "@/components/seller/verification-form";
+import { SellerVerificationDocuments } from "@/components/seller/verification-documents";
 
 export const metadata: Metadata = { title: "Verification" };
 
@@ -29,13 +30,16 @@ const STATUS_TONE: Record<string, "neutral" | "warning" | "success" | "danger"> 
  */
 export default async function SellerVerificationPage() {
   const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
-  const verification = await getSellerVerification(ctx);
+  const [verification, documents] = await Promise.all([
+    getSellerVerification(ctx),
+    listSellerVerificationDocuments(ctx),
+  ]);
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Seller verification"
-        description="Identity and business information Axiaro uses to verify your seller account. Saved as a draft — nothing here is submitted for review yet, and document upload is a later step."
+        description="Identity, business information and supporting documents Axiaro uses to verify your seller account. Saved as a draft — nothing here is submitted for review yet."
         actions={
           <StatusBadge tone={STATUS_TONE[verification?.status ?? "DRAFT"] ?? "neutral"}>
             {verification?.status ?? "Not started"}
@@ -45,6 +49,18 @@ export default async function SellerVerificationPage() {
 
       <Card>
         <SellerVerificationForm verification={verification} />
+      </Card>
+
+      <Card>
+        <h2 className="mb-4 text-sm font-semibold">Supporting documents</h2>
+        <SellerVerificationDocuments
+          documents={documents.map((d) => ({
+            id: d.id,
+            documentType: d.documentType,
+            status: d.status,
+            uploadedAt: d.uploadedAt.toISOString(),
+          }))}
+        />
       </Card>
     </div>
   );

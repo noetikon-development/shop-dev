@@ -79,8 +79,15 @@ function safeFolder(input: string | undefined): string {
     .join("/");
 }
 
-/** Detect the real content type from the first bytes. Returns null if unknown. */
-function sniffMimeType(buf: Buffer): string | null {
+/**
+ * Detect the real content type from the first bytes. Returns null if unknown.
+ * Exported so other private-storage domains (e.g. Seller Verification
+ * documents) reuse the SAME magic-byte detection rather than a second,
+ * potentially-drifting copy — this function has no opinion on which types a
+ * given caller actually accepts; each caller filters the result against its
+ * own allow-list.
+ */
+export function sniffMimeType(buf: Buffer): string | null {
   if (buf.length >= 8 && buf.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) {
     return "image/png";
   }

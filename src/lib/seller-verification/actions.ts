@@ -6,7 +6,13 @@ import { writeAudit } from "@/lib/admin/audit";
 import { cleanUserText } from "@/lib/ugc";
 import { zodFieldErrors } from "@/lib/addresses";
 import { sellerVerificationDraftSchema } from "@/lib/seller-verification/validation";
-import { saveSellerVerificationDraft } from "@/lib/seller-verification/repository";
+import { isSellerVerificationDocumentType } from "@/lib/seller-verification/document-types";
+import {
+  saveSellerVerificationDraft,
+  uploadSellerVerificationDocument,
+  deleteSellerVerificationDocument,
+  getOwnSellerVerificationDocumentSignedUrl,
+} from "@/lib/seller-verification/repository";
 
 /**
  * `/seller/verification` server action (Phase 2).
@@ -100,4 +106,98 @@ export async function saveSellerVerificationDraftAction(
 
   revalidatePath("/seller/verification");
   return { ok: true, message: "Saved as a draft." };
+}
+
+// ---------------------------------------------------------------------------
+// Documents (Phase 3)
+// ---------------------------------------------------------------------------
+
+export type SellerVerificationUploadActionState = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+};
+
+/**
+ * Upload (or replace) one verification document. Same `manage_seller_settings`
+ * gate as the draft-save action above. The file's bytes are read and
+ * validated (size + real magic-byte content) entirely server-side before
+ * anything reaches storage — `uploadSellerVerificationDocument` never trusts
+ * the browser-declared MIME type alone. No PII (and no filename) goes into
+ * the audit row — only the document type and outcome.
+ */
+export async function uploadSellerVerificationDocumentAction(
+  _prev: SellerVerificationUploadActionState,
+  formData: FormData,
+): Promise<SellerVerificationUploadActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
+
+  const documentType = formData.get("documentType");
+  if (typeof documentType !== "string" || !isSellerVerificationDocumentType(documentType)) {
+    return { error: "Invalid document type." };
+  }
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0) {
+    return { error: "Choose a file to upload." };
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const res = await uploadSellerVerificationDocument(ctx, {
+    buffer,
+    sizeBytes: file.size,
+    declaredType: file.type,
+    documentType,
+  });
+  if (!res.ok) return { error: res.error };
+
+  await writeAudit({
+    actorUserId: ctx.userId,
+    action: "seller.verification.document_uploaded",
+    targetType: "seller_verification_document",
+    targetId: res.document.id,
+    summary: `seller ${ctx.sellerName} uploaded a ${documentType.toLowerCase()} document for verification`,
+    meta: { sellerId: ctx.sellerId, sellerVerificationDocumentId: res.document.id, documentType },
+  });
+
+  revalidatePath("/seller/verification");
+  return { ok: true, message: "Document uploaded." };
+}
+
+export async function deleteSellerVerificationDocumentAction(
+  _prev: SellerVerificationUploadActionState,
+  formData: FormData,
+): Promise<SellerVerificationUploadActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
+
+  const documentId = formData.get("documentId");
+  if (typeof documentId !== "string" || !documentId) return { error: "Invalid request." };
+
+  const res = await deleteSellerVerificationDocument(ctx, documentId);
+  if (!res.ok) return { error: res.error };
+
+  await writeAudit({
+    actorUserId: ctx.userId,
+    action: "seller.verification.document_deleted",
+    targetType: "seller_verification_document",
+    targetId: documentId,
+    summary: `seller ${ctx.sellerName} deleted a verification document`,
+    meta: { sellerId: ctx.sellerId, sellerVerificationDocumentId: documentId },
+  });
+
+  revalidatePath("/seller/verification");
+  return { ok: true, message: "Document deleted." };
+}
+
+/**
+ * Server-side only — NEVER call `getSellerVerificationSignedUrl` (or any
+ * Supabase Storage client) from the browser. This action re-derives and
+ * re-checks ownership from `ctx.sellerId` before ever issuing a URL, and the
+ * URL is short-lived (see storage.ts's default TTL) — nothing persists it.
+ */
+export async function getSellerVerificationDocumentSignedUrlAction(
+  documentId: string,
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
+  if (!documentId || typeof documentId !== "string") return { ok: false, error: "Invalid request." };
+  return getOwnSellerVerificationDocumentSignedUrl(ctx, documentId);
 }
