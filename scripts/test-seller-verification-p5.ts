@@ -125,7 +125,9 @@ async function main() {
   ok("· no email sender is imported anywhere in the seller-facing verification actions",
     !/from "@\/lib\/email\/notifications"/.test(actionsSrc));
   ok("S · the page renders the Submit panel ONLY while status is DRAFT",
-    /status === "DRAFT" &&[\s\S]{0,200}SellerVerificationSubmitPanel/.test(pageSrc));
+    // Phase 9 inserted a requirements-checklist block between the condition
+    // and the panel — widened from {0,200}.
+    /status === "DRAFT" &&[\s\S]{0,900}SellerVerificationSubmitPanel/.test(pageSrc));
 
   // ── real, committed fixtures (cleaned up explicitly at the end) ─────────
   const t = Date.now().toString(36);
@@ -161,8 +163,14 @@ async function main() {
       (await prisma.sellerVerification.findUniqueOrThrow({ where: { id: draftC.verification.id } })).status === "DRAFT");
 
     // ── A/B/C — a DRAFT with valid info + one document can submit ─────────
+    // Phase 9 — address must be COMPLETE (addressLine1/city/province/postalCode/
+    // country) to satisfy the new minimum-evidence submission requirement;
+    // pre-Phase-9 fixtures only ever set city+country, which now correctly
+    // fails MISSING_ADDRESS since this test is exercising a SUCCESSFUL submit.
     const draftA = await saveSellerVerificationDraft(ctxA, {
-      ...EMPTY_PATCH, legalName: marker, phone: "09171234567", city: "Quezon City", country: "PH", businessType: "INDIVIDUAL",
+      ...EMPTY_PATCH, legalName: marker, phone: "09171234567",
+      addressLine1: "1 Test St", city: "Quezon City", province: "Metro Manila", postalCode: "1100",
+      country: "PH", businessType: "INDIVIDUAL",
     });
     if (!draftA.ok) throw new Error("fixture draftA failed");
     const verificationId = draftA.verification.id;
@@ -220,7 +228,11 @@ async function main() {
     // EXISTING resubmission pathway is saveSellerVerificationDraft's own
     // unchanged Phase 2 behavior (a fresh DRAFT once the latest row isn't
     // DRAFT), which this phase deliberately does not alter or duplicate ──
-    const draftB = await saveSellerVerificationDraft(ctxB, { ...EMPTY_PATCH, legalName: "Someone Else" });
+    const draftB = await saveSellerVerificationDraft(ctxB, {
+      ...EMPTY_PATCH, legalName: "Someone Else", phone: "09171234567",
+      addressLine1: "1 Test St", city: "Manila", province: "Metro Manila", postalCode: "1000",
+      country: "PH", businessType: "INDIVIDUAL",
+    });
     if (!draftB.ok) throw new Error("fixture draftB failed");
     const uploadB = await uploadSellerVerificationDocument(ctxB, {
       buffer: PNG, sizeBytes: PNG.length, declaredType: "image/png", documentType: "GOVERNMENT_ID_PRIMARY",
@@ -246,12 +258,20 @@ async function main() {
       (await prisma.sellerVerification.count({ where: { sellerId: ctxB.sellerId } })) === 2);
 
     // ── R — concurrent submission: only one transition succeeds ───────────
-    const draftR = await saveSellerVerificationDraft(ctxC, { ...EMPTY_PATCH, legalName: "Concurrent Test" });
+    // Phase 9 — complete data + a real GOVERNMENT_ID_PRIMARY (not OTHER,
+    // which no longer satisfies the INDIVIDUAL minimum-evidence requirement);
+    // this test is about concurrency safety, not document-type policy, so the
+    // fixture just needs to be genuinely submittable.
+    const draftR = await saveSellerVerificationDraft(ctxC, {
+      ...EMPTY_PATCH, legalName: "Concurrent Test", phone: "09171234567",
+      addressLine1: "1 Test St", city: "Manila", province: "Metro Manila", postalCode: "1000",
+      country: "PH", businessType: "INDIVIDUAL",
+    });
     if (!draftR.ok) throw new Error("fixture draftR failed");
     // ctxC already had a zero-document DRAFT from test L — saveSellerVerificationDraft
     // reused that same row (still DRAFT). Give it a document now.
     const uploadR = await uploadSellerVerificationDocument(ctxC, {
-      buffer: PNG, sizeBytes: PNG.length, declaredType: "image/png", documentType: "OTHER",
+      buffer: PNG, sizeBytes: PNG.length, declaredType: "image/png", documentType: "GOVERNMENT_ID_PRIMARY",
     });
     if (!uploadR.ok) throw new Error("fixture uploadR failed");
     const rawDocR = await prisma.sellerVerificationDocument.findUniqueOrThrow({ where: { id: uploadR.document.id } });

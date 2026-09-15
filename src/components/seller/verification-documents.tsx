@@ -12,6 +12,7 @@ import {
   SELLER_VERIFICATION_DOCUMENT_TYPE_LABELS,
   type SellerVerificationDocumentType,
 } from "@/lib/seller-verification/document-types";
+import { requiredDocumentTypesForBusinessType } from "@/lib/seller-verification/validation";
 import { notify, usePersistentAction } from "@/components/seller/ui";
 
 const ACCEPT = "image/png,image/jpeg,image/webp,application/pdf";
@@ -38,27 +39,43 @@ export type SellerVerificationDocumentListItem = {
  * path, never a public or signed URL. Every upload/replace/delete goes
  * through a server action; no Supabase Storage client of any kind runs in
  * this file or anywhere else in the browser for this feature.
+ *
+ * Phase 9 — the Required/Optional marker per type is a UI courtesy computed
+ * from the SAME `requiredDocumentTypesForBusinessType` the server-side
+ * submission gate uses; it never enforces anything here — uploading is still
+ * always allowed regardless, and the authoritative check happens only in
+ * `submitSellerVerificationForReview`.
  */
 export function SellerVerificationDocuments({
   documents,
+  businessType,
   readOnly = false,
 }: {
   documents: SellerVerificationDocumentListItem[];
+  /** Drives which document types show as Required vs Optional (Phase 9) — see validation.ts. `null`/unset resolves to the INDIVIDUAL tier. */
+  businessType?: string | null;
   /** True once the verification is no longer DRAFT (Phase 5) — see verification-form.tsx's same prop. */
   readOnly?: boolean;
 }) {
   const byType = new Map(documents.map((d) => [d.documentType, d]));
+  const required = new Set(requiredDocumentTypesForBusinessType(businessType));
 
   return (
     <div className="space-y-3">
       <p className="text-xs text-ink-faint">
-        PNG, JPG, WEBP or PDF · up to 8 MB. Stored privately — never publicly accessible, and no type here is required yet.
+        PNG, JPG, WEBP or PDF · up to 8 MB. Stored privately — never publicly accessible.
       </p>
       {readOnly && (
         <p className="text-xs text-ink-faint">Documents can no longer be added or changed once submitted.</p>
       )}
       {SELLER_VERIFICATION_DOCUMENT_TYPES.map((type) => (
-        <DocumentSlot key={type} type={type} document={byType.get(type) ?? null} readOnly={readOnly} />
+        <DocumentSlot
+          key={type}
+          type={type}
+          document={byType.get(type) ?? null}
+          required={required.has(type)}
+          readOnly={readOnly}
+        />
       ))}
     </div>
   );
@@ -67,10 +84,12 @@ export function SellerVerificationDocuments({
 function DocumentSlot({
   type,
   document,
+  required,
   readOnly,
 }: {
   type: SellerVerificationDocumentType;
   document: SellerVerificationDocumentListItem | null;
+  required: boolean;
   readOnly: boolean;
 }) {
   const [state, formAction, pending] = useActionState<SellerVerificationUploadActionState, FormData>(
@@ -95,7 +114,14 @@ function DocumentSlot({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-sm border border-line p-3">
       <div>
-        <p className="text-sm font-medium">{SELLER_VERIFICATION_DOCUMENT_TYPE_LABELS[type]}</p>
+        <p className="text-sm font-medium">
+          {SELLER_VERIFICATION_DOCUMENT_TYPE_LABELS[type]}
+          {required ? (
+            <span className="ml-1.5 text-clay">*</span>
+          ) : (
+            <span className="ml-1.5 text-xs font-normal text-ink-faint">(optional)</span>
+          )}
+        </p>
         <p className="text-xs text-ink-faint">
           {document
             ? `${STATUS_LABEL[document.status] ?? document.status} · uploaded ${new Date(document.uploadedAt).toLocaleDateString()}`

@@ -5,7 +5,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSellerVerificationSignedUrl, SELLER_VERIFICATION_BUCKET } from "@/lib/seller-verification/storage";
 import { validateSellerVerificationUpload, buildSellerVerificationStoragePath } from "@/lib/seller-verification/upload-validation";
 import { isSellerVerificationDocumentType } from "@/lib/seller-verification/document-types";
-import { sellerVerificationDraftSchema } from "@/lib/seller-verification/validation";
+import {
+  sellerVerificationDraftSchema,
+  validateSellerVerificationSubmission,
+  SELLER_VERIFICATION_SUBMISSION_FAILURE_MESSAGE,
+  type SellerVerificationSubmissionFailureCode,
+} from "@/lib/seller-verification/validation";
 import type { SellerContext, SellerVerificationGateStatus } from "@/lib/marketplace/types";
 
 /**
@@ -218,22 +223,37 @@ export async function saveSellerVerificationDraft(
 export type SubmitSellerVerificationStatus = "SUCCESS" | "NOT_FOUND" | "ALREADY_SUBMITTED" | "INVALID";
 export type SubmitSellerVerificationResult =
   | { ok: true; status: "SUCCESS"; verification: SellerVerificationView }
-  | { ok: false; status: Exclude<SubmitSellerVerificationStatus, "SUCCESS">; error: string };
+  | {
+      ok: false;
+      status: Exclude<SubmitSellerVerificationStatus, "SUCCESS">;
+      error: string;
+      /**
+       * Phase 9 — set only for the specific "missing evidence" failure mode
+       * (deterministic, machine-readable). Absent for NOT_FOUND,
+       * ALREADY_SUBMITTED, and the pre-existing shape/already-reviewed
+       * INVALID cases, which keep their original plain-`error` shape.
+       */
+      codes?: SellerVerificationSubmissionFailureCode[];
+    };
 
 /**
  * The customer-side DRAFT → PENDING transition (Phase 5). ONE transaction,
  * matching the spec exactly: re-check ownership (`ctx.sellerId`, never a
  * caller-supplied id), confirm status is DRAFT, validate the stored
  * identity/business fields against the SAME Phase 2 schema they were saved
- * under, confirm at least one document exists and every attached document
- * is still PENDING (an already-decided one staying attached would be stale
- * data, not a fresh submission), then a status-guarded `updateMany` (DRAFT →
- * PENDING) so a concurrent double-submit can only ever succeed once. Sets
- * ONLY `status` and `submittedAt` — never `reviewedAt`/`reviewedBy`/
- * `reviewNote` (those stay Admin-review-only, Phase 4) — and never touches
- * any document's own status (document decisions remain exclusively Admin's,
- * per Phase 4). No new document-count/type requirement is invented here:
- * "at least one document, of any type" is the whole rule for this phase.
+ * under, confirm every attached document is still PENDING (an
+ * already-decided one staying attached would be stale data, not a fresh
+ * submission), then a status-guarded `updateMany` (DRAFT → PENDING) so a
+ * concurrent double-submit can only ever succeed once. Sets ONLY `status`
+ * and `submittedAt` — never `reviewedAt`/`reviewedBy`/`reviewNote` (those
+ * stay Admin-review-only, Phase 4) — and never touches any document's own
+ * status (document decisions remain exclusively Admin's, per Phase 4).
+ *
+ * Phase 9 — "at least one document, of any type" (the original Phase 5 rule)
+ * is replaced by `validateSellerVerificationSubmission` (validation.ts): the
+ * actual business-policy minimum-evidence requirement, which differs by
+ * business type. See that function's own doc comment for exactly what is
+ * and isn't enforced.
  */
 export async function submitSellerVerificationForReview(
   ctx: SellerContext,
@@ -280,16 +300,37 @@ export async function submitSellerVerificationForReview(
     // shape here that could ever pull in another verification's document.
     const documents = await tx.sellerVerificationDocument.findMany({
       where: { sellerVerificationId: verification.id },
-      select: { id: true, status: true },
+      select: { id: true, status: true, documentType: true },
     });
-    if (documents.length === 0) {
-      return { ok: false, status: "INVALID", error: "Upload at least one document before submitting." };
-    }
     if (documents.some((d) => d.status !== "PENDING")) {
       return {
         ok: false,
         status: "INVALID",
         error: "One of your documents has already been reviewed. Contact support before resubmitting.",
+      };
+    }
+
+    // Phase 9 — the actual minimum-evidence business policy, replacing the
+    // original "at least one document, of any type" rule.
+    const pendingDocumentTypes = documents.filter((d) => d.status === "PENDING").map((d) => d.documentType);
+    const evidence = validateSellerVerificationSubmission({
+      businessType: verification.businessType,
+      legalName: verification.legalName,
+      phone: verification.phone,
+      addressLine1: verification.addressLine1,
+      city: verification.city,
+      province: verification.province,
+      postalCode: verification.postalCode,
+      country: verification.country,
+      businessName: verification.businessName,
+      documentTypes: pendingDocumentTypes,
+    });
+    if (!evidence.ok) {
+      return {
+        ok: false,
+        status: "INVALID",
+        error: evidence.codes.map((c) => SELLER_VERIFICATION_SUBMISSION_FAILURE_MESSAGE[c]).join(" "),
+        codes: evidence.codes,
       };
     }
 

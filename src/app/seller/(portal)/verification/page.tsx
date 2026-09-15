@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { requireSellerSessionPermission } from "@/lib/seller/session";
 import { getSellerVerification, listSellerVerificationDocuments } from "@/lib/seller-verification/repository";
+import { validateSellerVerificationSubmission, SELLER_VERIFICATION_SUBMISSION_FAILURE_MESSAGE } from "@/lib/seller-verification/validation";
 import { PageHeader, Card, StatusBadge } from "@/components/seller/ui";
 import { SellerVerificationForm } from "@/components/seller/verification-form";
 import { SellerVerificationDocuments } from "@/components/seller/verification-documents";
@@ -17,7 +18,7 @@ const STATUS_TONE: Record<string, "neutral" | "warning" | "success" | "danger"> 
 
 /**
  * Seller Verification — identity/business information, documents, and
- * submission (Phases 2–5).
+ * submission (Phases 2–5, requirements Phase 9).
  *
  * `requireSellerSessionPermission("manage_seller_settings")` is the SAME gate
  * `/seller/settings` uses (OWNER + MANAGER) — the session helper itself
@@ -35,6 +36,11 @@ const STATUS_TONE: Record<string, "neutral" | "warning" | "success" | "danger"> 
  * `<fieldset disabled>` in the form, conditional upload/delete controls in
  * the document list) rather than letting the seller edit data mid-review or
  * accidentally start a second DRAFT verification alongside a PENDING one.
+ *
+ * Phase 9 — the "Requirements" checklist below is a read-only PREVIEW built
+ * from the exact same `validateSellerVerificationSubmission` the submit
+ * server action re-runs authoritatively; it is a courtesy so the seller
+ * knows what's missing before clicking Submit, never the enforcement itself.
  */
 export default async function SellerVerificationPage() {
   const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
@@ -45,6 +51,19 @@ export default async function SellerVerificationPage() {
 
   const status = verification?.status ?? "DRAFT";
   const readOnly = status !== "DRAFT";
+  const pendingDocumentTypes = documents.filter((d) => d.status === "PENDING").map((d) => d.documentType);
+  const requirements = validateSellerVerificationSubmission({
+    businessType: verification?.businessType ?? null,
+    legalName: verification?.legalName ?? null,
+    phone: verification?.phone ?? null,
+    addressLine1: verification?.addressLine1 ?? null,
+    city: verification?.city ?? null,
+    province: verification?.province ?? null,
+    postalCode: verification?.postalCode ?? null,
+    country: verification?.country ?? null,
+    businessName: verification?.businessName ?? null,
+    documentTypes: pendingDocumentTypes,
+  });
 
   return (
     <div className="space-y-6">
@@ -84,6 +103,7 @@ export default async function SellerVerificationPage() {
         <h2 className="mb-4 text-sm font-semibold">Supporting documents</h2>
         <SellerVerificationDocuments
           readOnly={readOnly}
+          businessType={verification?.businessType}
           documents={documents.map((d) => ({
             id: d.id,
             documentType: d.documentType,
@@ -96,6 +116,16 @@ export default async function SellerVerificationPage() {
       {verification && status === "DRAFT" && (
         <Card>
           <h2 className="mb-3 text-sm font-semibold">Submit for review</h2>
+          {!requirements.ok && (
+            <div className="mb-4 rounded-sm bg-surface-sunken px-3 py-2 text-xs text-ink-soft">
+              <p className="font-medium text-ink">Before you submit, you still need to:</p>
+              <ul className="mt-1.5 list-disc space-y-0.5 pl-4">
+                {requirements.codes.map((code) => (
+                  <li key={code}>{SELLER_VERIFICATION_SUBMISSION_FAILURE_MESSAGE[code]}</li>
+                ))}
+              </ul>
+            </div>
+          )}
           <SellerVerificationSubmitPanel />
         </Card>
       )}

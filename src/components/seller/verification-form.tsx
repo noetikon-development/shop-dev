@@ -56,7 +56,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">Your details</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Legal / full name" htmlFor="legalName" error={err("legalName")}>
+          <FormField label="Legal / full name" htmlFor="legalName" error={err("legalName")} required>
             <input
               id="legalName"
               name="legalName"
@@ -65,7 +65,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
               autoComplete="name"
             />
           </FormField>
-          <FormField label="Mobile / contact number" htmlFor="phone" error={err("phone")} hint="Not verified yet.">
+          <FormField label="Mobile / contact number" htmlFor="phone" error={err("phone")} required hint="Not verified yet.">
             <input
               id="phone"
               name="phone"
@@ -81,25 +81,25 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
       <section className="space-y-4 border-t border-line pt-6">
         <h2 className="text-sm font-semibold">Address</h2>
         <div className="grid gap-4 sm:grid-cols-2">
-          <FormField label="Address line 1" htmlFor="addressLine1" error={err("addressLine1")}>
+          <FormField label="Address line 1" htmlFor="addressLine1" error={err("addressLine1")} required>
             <input id="addressLine1" name="addressLine1" defaultValue={verification?.addressLine1 ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="Address line 2" htmlFor="addressLine2" error={err("addressLine2")}>
+          <FormField label="Address line 2" htmlFor="addressLine2" error={err("addressLine2")} hint="Optional.">
             <input id="addressLine2" name="addressLine2" defaultValue={verification?.addressLine2 ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="Barangay" htmlFor="barangay" error={err("barangay")}>
+          <FormField label="Barangay" htmlFor="barangay" error={err("barangay")} hint="Optional.">
             <input id="barangay" name="barangay" defaultValue={verification?.barangay ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="City / municipality" htmlFor="city" error={err("city")}>
+          <FormField label="City / municipality" htmlFor="city" error={err("city")} required>
             <input id="city" name="city" defaultValue={verification?.city ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="Province" htmlFor="province" error={err("province")}>
+          <FormField label="Province" htmlFor="province" error={err("province")} required>
             <input id="province" name="province" defaultValue={verification?.province ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="Postal code" htmlFor="postalCode" error={err("postalCode")}>
+          <FormField label="Postal code" htmlFor="postalCode" error={err("postalCode")} required>
             <input id="postalCode" name="postalCode" defaultValue={verification?.postalCode ?? ""} className="field text-sm" />
           </FormField>
-          <FormField label="Country" htmlFor="country" error={err("country")}>
+          <FormField label="Country" htmlFor="country" error={err("country")} required>
             <Select id="country" name="country" defaultValue={verification?.country ?? DEFAULT_COUNTRY}>
               {COUNTRIES.map((c) => (
                 <option key={c.code} value={c.code}>
@@ -130,7 +130,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
         </FormField>
 
         <div className={showBusinessFields ? "grid gap-4 sm:grid-cols-2" : "hidden"} aria-hidden={!showBusinessFields}>
-          <FormField label="Business / trade name" htmlFor="businessName" error={err("businessName")}>
+          <FormField label="Business / trade name" htmlFor="businessName" error={err("businessName")} required={showBusinessFields}>
             <input id="businessName" name="businessName" defaultValue={verification?.businessName ?? ""} className="field text-sm" />
           </FormField>
         </div>
@@ -143,7 +143,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
             label="Business registration number"
             htmlFor="businessRegistrationNumber"
             error={err("businessRegistrationNumber")}
-            hint="If applicable."
+            hint="Optional — the business registration DOCUMENT below is what's required, not this number."
           >
             <input
               id="businessRegistrationNumber"
@@ -152,7 +152,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
               className="field text-sm"
             />
           </FormField>
-          <FormField label="DTI registration number" htmlFor="dtiRegistrationNumber" error={err("dtiRegistrationNumber")} hint="If applicable.">
+          <FormField label="DTI registration number" htmlFor="dtiRegistrationNumber" error={err("dtiRegistrationNumber")} hint="Optional.">
             <input
               id="dtiRegistrationNumber"
               name="dtiRegistrationNumber"
@@ -160,7 +160,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
               className="field text-sm"
             />
           </FormField>
-          <FormField label="SEC registration number" htmlFor="secRegistrationNumber" error={err("secRegistrationNumber")} hint="If applicable.">
+          <FormField label="SEC registration number" htmlFor="secRegistrationNumber" error={err("secRegistrationNumber")} hint="Optional.">
             <input
               id="secRegistrationNumber"
               name="secRegistrationNumber"
@@ -168,7 +168,7 @@ export function SellerVerificationForm({ verification, readOnly = false }: Props
               className="field text-sm"
             />
           </FormField>
-          <FormField label="TIN" htmlFor="tin" error={err("tin")} hint="If applicable.">
+          <FormField label="TIN" htmlFor="tin" error={err("tin")} hint="Optional.">
             <input id="tin" name="tin" defaultValue={verification?.tin ?? ""} className="field text-sm" />
           </FormField>
         </div>

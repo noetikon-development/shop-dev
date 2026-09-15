@@ -128,7 +128,13 @@ async function main() {
     fixtureUserIds.push(adminUser.id);
 
     // ── A/E — APPROVED seller: direct save-draft call is rejected ─────────
-    const draftA = await saveSellerVerificationDraft(ctxA, { ...EMPTY_PATCH, legalName: "Before Approval" });
+    // Phase 9 — phone + complete address are now required to submit; this
+    // fixture needs a genuinely submittable row, not just a legal name.
+    const draftA = await saveSellerVerificationDraft(ctxA, {
+      ...EMPTY_PATCH, legalName: "Before Approval", phone: "09171234567",
+      addressLine1: "1 Test St", city: "Manila", province: "Metro Manila", postalCode: "1000",
+      country: "PH", businessType: "INDIVIDUAL",
+    });
     if (!draftA.ok) throw new Error("fixture draftA failed");
     const verificationIdA = draftA.verification.id;
     const uploadA = await uploadSellerVerificationDocument(ctxA, {
@@ -186,7 +192,11 @@ async function main() {
     }
 
     // ── C — REJECTED seller: save-draft still creates a new DRAFT ─────────
-    const draftR = await saveSellerVerificationDraft(ctxR, { ...EMPTY_PATCH, legalName: "First Attempt" });
+    const draftR = await saveSellerVerificationDraft(ctxR, {
+      ...EMPTY_PATCH, legalName: "First Attempt", phone: "09171234567",
+      addressLine1: "1 Test St", city: "Manila", province: "Metro Manila", postalCode: "1000",
+      country: "PH", businessType: "INDIVIDUAL",
+    });
     if (!draftR.ok) throw new Error("fixture draftR failed");
     const uploadR = await uploadSellerVerificationDocument(ctxR, {
       buffer: PNG, sizeBytes: PNG.length, declaredType: "image/png", documentType: "GOVERNMENT_ID_PRIMARY",
