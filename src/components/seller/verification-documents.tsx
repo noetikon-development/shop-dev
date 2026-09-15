@@ -39,7 +39,14 @@ export type SellerVerificationDocumentListItem = {
  * through a server action; no Supabase Storage client of any kind runs in
  * this file or anywhere else in the browser for this feature.
  */
-export function SellerVerificationDocuments({ documents }: { documents: SellerVerificationDocumentListItem[] }) {
+export function SellerVerificationDocuments({
+  documents,
+  readOnly = false,
+}: {
+  documents: SellerVerificationDocumentListItem[];
+  /** True once the verification is no longer DRAFT (Phase 5) — see verification-form.tsx's same prop. */
+  readOnly?: boolean;
+}) {
   const byType = new Map(documents.map((d) => [d.documentType, d]));
 
   return (
@@ -47,8 +54,11 @@ export function SellerVerificationDocuments({ documents }: { documents: SellerVe
       <p className="text-xs text-ink-faint">
         PNG, JPG, WEBP or PDF · up to 8 MB. Stored privately — never publicly accessible, and no type here is required yet.
       </p>
+      {readOnly && (
+        <p className="text-xs text-ink-faint">Documents can no longer be added or changed once submitted.</p>
+      )}
       {SELLER_VERIFICATION_DOCUMENT_TYPES.map((type) => (
-        <DocumentSlot key={type} type={type} document={byType.get(type) ?? null} />
+        <DocumentSlot key={type} type={type} document={byType.get(type) ?? null} readOnly={readOnly} />
       ))}
     </div>
   );
@@ -57,9 +67,11 @@ export function SellerVerificationDocuments({ documents }: { documents: SellerVe
 function DocumentSlot({
   type,
   document,
+  readOnly,
 }: {
   type: SellerVerificationDocumentType;
   document: SellerVerificationDocumentListItem | null;
+  readOnly: boolean;
 }) {
   const [state, formAction, pending] = useActionState<SellerVerificationUploadActionState, FormData>(
     uploadSellerVerificationDocumentAction,
@@ -90,33 +102,35 @@ function DocumentSlot({
             : "Not uploaded yet"}
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <form ref={formRef} action={formAction} className="flex items-center gap-2">
-          <input type="hidden" name="documentType" value={type} />
-          <input
-            type="file"
-            name="file"
-            required
-            accept={ACCEPT}
-            className="max-w-[180px] text-xs file:mr-2 file:rounded-sm file:border-0 file:bg-ink file:px-2 file:py-1 file:text-[11px] file:text-paper"
-          />
-          <button type="submit" disabled={pending} className="btn btn-outline py-1.5 text-xs">
-            {pending ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-            {document ? "Replace" : "Upload"}
-          </button>
-        </form>
-        {document && (
-          <form onSubmit={del.onSubmit}>
-            <input type="hidden" name="documentId" value={document.id} />
-            <button
-              type="submit"
-              className="inline-flex items-center gap-1 rounded-sm border border-line px-1.5 py-1 text-[11px] text-ink-soft hover:bg-surface-sunken"
-            >
-              <Trash2 size={11} /> Delete
+      {!readOnly && (
+        <div className="flex flex-wrap items-center gap-2">
+          <form ref={formRef} action={formAction} className="flex items-center gap-2">
+            <input type="hidden" name="documentType" value={type} />
+            <input
+              type="file"
+              name="file"
+              required
+              accept={ACCEPT}
+              className="max-w-[180px] text-xs file:mr-2 file:rounded-sm file:border-0 file:bg-ink file:px-2 file:py-1 file:text-[11px] file:text-paper"
+            />
+            <button type="submit" disabled={pending} className="btn btn-outline py-1.5 text-xs">
+              {pending ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+              {document ? "Replace" : "Upload"}
             </button>
           </form>
-        )}
-      </div>
+          {document && (
+            <form onSubmit={del.onSubmit}>
+              <input type="hidden" name="documentId" value={document.id} />
+              <button
+                type="submit"
+                className="inline-flex items-center gap-1 rounded-sm border border-line px-1.5 py-1 text-[11px] text-ink-soft hover:bg-surface-sunken"
+              >
+                <Trash2 size={11} /> Delete
+              </button>
+            </form>
+          )}
+        </div>
+      )}
     </div>
   );
 }

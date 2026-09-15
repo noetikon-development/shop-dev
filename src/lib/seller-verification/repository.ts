@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getSellerVerificationSignedUrl, SELLER_VERIFICATION_BUCKET } from "@/lib/seller-verification/storage";
 import { validateSellerVerificationUpload, buildSellerVerificationStoragePath } from "@/lib/seller-verification/upload-validation";
 import { isSellerVerificationDocumentType } from "@/lib/seller-verification/document-types";
+import { sellerVerificationDraftSchema } from "@/lib/seller-verification/validation";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -152,6 +153,113 @@ export async function saveSellerVerificationDraft(
   } catch (err) {
     console.error("[seller-verification-repository] saveSellerVerificationDraft failed", err);
     return { ok: false, error: "Could not save your verification details." };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Submit for review (Phase 5)
+// ---------------------------------------------------------------------------
+
+export type SubmitSellerVerificationStatus = "SUCCESS" | "NOT_FOUND" | "ALREADY_SUBMITTED" | "INVALID";
+export type SubmitSellerVerificationResult =
+  | { ok: true; status: "SUCCESS"; verification: SellerVerificationView }
+  | { ok: false; status: Exclude<SubmitSellerVerificationStatus, "SUCCESS">; error: string };
+
+/**
+ * The customer-side DRAFT → PENDING transition (Phase 5). ONE transaction,
+ * matching the spec exactly: re-check ownership (`ctx.sellerId`, never a
+ * caller-supplied id), confirm status is DRAFT, validate the stored
+ * identity/business fields against the SAME Phase 2 schema they were saved
+ * under, confirm at least one document exists and every attached document
+ * is still PENDING (an already-decided one staying attached would be stale
+ * data, not a fresh submission), then a status-guarded `updateMany` (DRAFT →
+ * PENDING) so a concurrent double-submit can only ever succeed once. Sets
+ * ONLY `status` and `submittedAt` — never `reviewedAt`/`reviewedBy`/
+ * `reviewNote` (those stay Admin-review-only, Phase 4) — and never touches
+ * any document's own status (document decisions remain exclusively Admin's,
+ * per Phase 4). No new document-count/type requirement is invented here:
+ * "at least one document, of any type" is the whole rule for this phase.
+ */
+export async function submitSellerVerificationForReview(
+  ctx: SellerContext,
+  externalTx?: Prisma.TransactionClient,
+): Promise<SubmitSellerVerificationResult> {
+  const run = async (tx: Prisma.TransactionClient): Promise<SubmitSellerVerificationResult> => {
+    const verification = await tx.sellerVerification.findFirst({
+      where: { sellerId: ctx.sellerId },
+      orderBy: { createdAt: "desc" },
+    });
+    if (!verification) {
+      return { ok: false, status: "NOT_FOUND", error: "Start your verification before submitting it." };
+    }
+    if (verification.status !== "DRAFT") {
+      return {
+        ok: false,
+        status: "ALREADY_SUBMITTED",
+        error: `This verification is already ${verification.status.toLowerCase()}.`,
+      };
+    }
+
+    const parsed = sellerVerificationDraftSchema.safeParse({
+      legalName: verification.legalName ?? undefined,
+      phone: verification.phone ?? undefined,
+      addressLine1: verification.addressLine1 ?? undefined,
+      addressLine2: verification.addressLine2 ?? undefined,
+      barangay: verification.barangay ?? undefined,
+      city: verification.city ?? undefined,
+      province: verification.province ?? undefined,
+      postalCode: verification.postalCode ?? undefined,
+      country: verification.country ?? undefined,
+      businessType: verification.businessType ?? undefined,
+      businessName: verification.businessName ?? undefined,
+      businessRegistrationNumber: verification.businessRegistrationNumber ?? undefined,
+      dtiRegistrationNumber: verification.dtiRegistrationNumber ?? undefined,
+      secRegistrationNumber: verification.secRegistrationNumber ?? undefined,
+      tin: verification.tin ?? undefined,
+    });
+    if (!parsed.success) {
+      return { ok: false, status: "INVALID", error: "Please fix the highlighted fields before submitting." };
+    }
+
+    // Scoped to THIS verification's id by construction — there is no query
+    // shape here that could ever pull in another verification's document.
+    const documents = await tx.sellerVerificationDocument.findMany({
+      where: { sellerVerificationId: verification.id },
+      select: { id: true, status: true },
+    });
+    if (documents.length === 0) {
+      return { ok: false, status: "INVALID", error: "Upload at least one document before submitting." };
+    }
+    if (documents.some((d) => d.status !== "PENDING")) {
+      return {
+        ok: false,
+        status: "INVALID",
+        error: "One of your documents has already been reviewed. Contact support before resubmitting.",
+      };
+    }
+
+    const updated = await tx.sellerVerification.updateMany({
+      where: { id: verification.id, status: "DRAFT" },
+      data: { status: "PENDING", submittedAt: new Date() },
+    });
+    if (updated.count === 0) {
+      // A concurrent submission won the race between our read and this
+      // write — never a second row, never a silent duplicate.
+      return { ok: false, status: "ALREADY_SUBMITTED", error: "This verification was already submitted." };
+    }
+
+    const fresh = await tx.sellerVerification.findUniqueOrThrow({
+      where: { id: verification.id },
+      select: VERIFICATION_SELECT,
+    });
+    return { ok: true, status: "SUCCESS", verification: fresh };
+  };
+
+  try {
+    return externalTx ? await run(externalTx) : await prisma.$transaction(run);
+  } catch (err) {
+    console.error("[seller-verification-repository] submitSellerVerificationForReview failed", err);
+    return { ok: false, status: "INVALID", error: "Could not submit your verification." };
   }
 }
 
@@ -397,4 +505,206 @@ export async function getSellerVerificationDocumentSignedUrlForAdmin(documentId:
   const url = await getSellerVerificationSignedUrl(doc.storagePath);
   if (!url) return { ok: false, error: "Could not generate a link for this document." };
   return { ok: true, url };
+}
+
+/**
+ * Same as `getSellerVerificationDocumentSignedUrlForAdmin`, but additionally
+ * verifies the FULL ownership chain the admin review page itself is built
+ * around: the document belongs to the stated verification, which belongs to
+ * the stated seller. Used by the actual review page's "View" action so a
+ * forged/mismatched `sellerId`/`verificationId` in the request (even from an
+ * authenticated admin's own browser) can never sign a URL for a document
+ * outside that exact chain. `getSellerVerificationDocumentSignedUrlForAdmin`
+ * above stays as the simpler, already-tested Phase 3 primitive.
+ */
+export async function getSellerVerificationDocumentSignedUrlForAdminScoped(input: {
+  sellerId: string;
+  verificationId: string;
+  documentId: string;
+}): Promise<SignedUrlResult> {
+  const doc = await prisma.sellerVerificationDocument.findUnique({
+    where: { id: input.documentId },
+    select: { storagePath: true, sellerVerificationId: true, sellerVerification: { select: { sellerId: true } } },
+  });
+  if (!doc || doc.sellerVerificationId !== input.verificationId || doc.sellerVerification.sellerId !== input.sellerId) {
+    return { ok: false, error: "Document not found." };
+  }
+  const url = await getSellerVerificationSignedUrl(doc.storagePath);
+  if (!url) return { ok: false, error: "Could not generate a link for this document." };
+  return { ok: true, url };
+}
+
+// ---------------------------------------------------------------------------
+// Admin review (Phase 4)
+// ---------------------------------------------------------------------------
+
+const VERIFICATION_ADMIN_SELECT = {
+  id: true,
+  sellerId: true,
+  status: true,
+  submittedAt: true,
+  reviewedAt: true,
+  reviewedBy: true,
+  reviewNote: true,
+  legalName: true,
+  phone: true,
+  phoneVerifiedAt: true,
+  addressLine1: true,
+  addressLine2: true,
+  barangay: true,
+  city: true,
+  province: true,
+  postalCode: true,
+  country: true,
+  businessType: true,
+  businessName: true,
+  businessRegistrationNumber: true,
+  dtiRegistrationNumber: true,
+  secRegistrationNumber: true,
+  tin: true,
+  createdAt: true,
+  updatedAt: true,
+} as const;
+
+type SellerVerificationAdminRow = Prisma.SellerVerificationGetPayload<{ select: typeof VERIFICATION_ADMIN_SELECT }>;
+export type SellerVerificationAdminView = SellerVerificationAdminRow & { reviewedByEmail: string | null };
+
+/**
+ * The seller's latest verification, for admin review — deliberately NOT
+ * seller-scoped (an authorized admin can view any seller, same as
+ * `/admin/sellers/[id]` itself); the caller is responsible for its own
+ * `requirePermission` check. `reviewedByEmail` is resolved the same way
+ * `getAdminSeller`'s `content.reviewedByEmail` already is (a plain lookup on
+ * the snapshot `reviewedBy` User.id) — never a new pattern.
+ */
+export async function getSellerVerificationForAdmin(sellerId: string): Promise<SellerVerificationAdminView | null> {
+  const verification = await prisma.sellerVerification.findFirst({
+    where: { sellerId },
+    orderBy: { createdAt: "desc" },
+    select: VERIFICATION_ADMIN_SELECT,
+  });
+  if (!verification) return null;
+  const reviewer = verification.reviewedBy
+    ? await prisma.user.findUnique({ where: { id: verification.reviewedBy }, select: { email: true } })
+    : null;
+  return { ...verification, reviewedByEmail: reviewer?.email ?? null };
+}
+
+const DOCUMENT_ADMIN_SELECT = {
+  id: true,
+  documentType: true,
+  status: true,
+  uploadedAt: true,
+  mimeType: true,
+  sizeBytes: true,
+  reviewedAt: true,
+  reviewNote: true,
+} as const;
+
+export type SellerVerificationDocumentAdminView = Prisma.SellerVerificationDocumentGetPayload<{
+  select: typeof DOCUMENT_ADMIN_SELECT;
+}>;
+
+/** Every document on one verification, for admin review. Never bucket/storagePath — see getSellerVerificationDocumentSignedUrlForAdminScoped for viewing. */
+export async function listSellerVerificationDocumentsForAdmin(
+  verificationId: string,
+): Promise<SellerVerificationDocumentAdminView[]> {
+  return prisma.sellerVerificationDocument.findMany({
+    where: { sellerVerificationId: verificationId },
+    orderBy: { documentType: "asc" },
+    select: DOCUMENT_ADMIN_SELECT,
+  });
+}
+
+export type AdminReviewResult =
+  | { ok: true; sellerName: string; documentType?: string }
+  | { ok: false; error: string };
+
+/**
+ * Approve or reject ONE document. Guards (section 10 of the Phase 4 spec):
+ * the document must exist, must belong to the STATED verification, which
+ * must belong to the STATED seller — none of `sellerId` / `verificationId` /
+ * `documentId` is trusted alone, even though the caller is already an
+ * authorized admin (defense in depth against a forged/stale form value).
+ * Only a PENDING document can be decided — an already-finalized one
+ * (APPROVED/REJECTED) is immutable from here, matching the same "no silent
+ * overwrite of history" rule Phase 3 already enforces for seller-side
+ * replace/delete. Status-guarded `updateMany` closes the same race a
+ * concurrent second reviewer could otherwise hit (same pattern as
+ * `approveSellerContentAction`'s `contentStatus: "PENDING"` guard).
+ */
+export async function reviewSellerVerificationDocumentForAdmin(input: {
+  sellerId: string;
+  verificationId: string;
+  documentId: string;
+  status: "APPROVED" | "REJECTED";
+  reviewNote: string | null;
+  reviewedBy: string;
+}): Promise<AdminReviewResult> {
+  const doc = await prisma.sellerVerificationDocument.findUnique({
+    where: { id: input.documentId },
+    select: {
+      id: true,
+      status: true,
+      documentType: true,
+      sellerVerificationId: true,
+      sellerVerification: { select: { sellerId: true, seller: { select: { displayName: true } } } },
+    },
+  });
+  if (!doc || doc.sellerVerificationId !== input.verificationId || doc.sellerVerification.sellerId !== input.sellerId) {
+    return { ok: false, error: "Document not found." };
+  }
+  if (doc.status !== "PENDING") {
+    return { ok: false, error: "This document has already been reviewed." };
+  }
+
+  const updated = await prisma.sellerVerificationDocument.updateMany({
+    where: { id: doc.id, status: "PENDING" },
+    data: { status: input.status, reviewedAt: new Date(), reviewedBy: input.reviewedBy, reviewNote: input.reviewNote },
+  });
+  if (updated.count === 0) {
+    return { ok: false, error: "This document changed while you were reviewing it. Reload and try again." };
+  }
+
+  return { ok: true, sellerName: doc.sellerVerification.seller.displayName, documentType: doc.documentType };
+}
+
+/**
+ * Approve or reject the OVERALL verification (PENDING → APPROVED/REJECTED
+ * only — see the Phase 4 spec's own framing; nothing in Phases 1–3 ever
+ * moves a verification out of DRAFT yet, so this can only act on a row a
+ * test (or a later "submit for review" phase) has explicitly put into
+ * PENDING first). Deliberately does NOT touch `Seller.status`, does NOT
+ * create a `SellerUser`, and does NOT touch `SellerInvite` — those stay
+ * fully separate, exactly as required; nothing below ever calls
+ * `transitionSellerStatus`, `createOwnerInviteIfNeeded`, or any SellerUser
+ * write.
+ */
+export async function reviewSellerVerificationForAdmin(input: {
+  sellerId: string;
+  verificationId: string;
+  status: "APPROVED" | "REJECTED";
+  reviewNote: string | null;
+  reviewedBy: string;
+}): Promise<AdminReviewResult> {
+  const verification = await prisma.sellerVerification.findUnique({
+    where: { id: input.verificationId },
+    select: { id: true, sellerId: true, status: true, seller: { select: { displayName: true } } },
+  });
+  if (!verification || verification.sellerId !== input.sellerId) {
+    return { ok: false, error: "Verification not found." };
+  }
+  if (verification.status !== "PENDING") {
+    return { ok: false, error: `This verification is ${verification.status.toLowerCase()}, not awaiting review.` };
+  }
+
+  const updated = await prisma.sellerVerification.updateMany({
+    where: { id: verification.id, status: "PENDING" },
+    data: { status: input.status, reviewedAt: new Date(), reviewedBy: input.reviewedBy, reviewNote: input.reviewNote },
+  });
+  if (updated.count === 0) {
+    return { ok: false, error: "This verification changed while you were reviewing it. Reload and try again." };
+  }
+
+  return { ok: true, sellerName: verification.seller.displayName };
 }

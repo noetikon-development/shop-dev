@@ -12,6 +12,7 @@ import {
   uploadSellerVerificationDocument,
   deleteSellerVerificationDocument,
   getOwnSellerVerificationDocumentSignedUrl,
+  submitSellerVerificationForReview,
 } from "@/lib/seller-verification/repository";
 
 /**
@@ -200,4 +201,39 @@ export async function getSellerVerificationDocumentSignedUrlAction(
   const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
   if (!documentId || typeof documentId !== "string") return { ok: false, error: "Invalid request." };
   return getOwnSellerVerificationDocumentSignedUrl(ctx, documentId);
+}
+
+// ---------------------------------------------------------------------------
+// Submit for review (Phase 5)
+// ---------------------------------------------------------------------------
+
+/**
+ * The DRAFT → PENDING transition. Same `manage_seller_settings` gate as
+ * every other action here; `ctx.sellerId` (never form data) identifies the
+ * seller. Takes no fields — `formData` is unused on purpose, same
+ * convention as `submitSellerProfileAction`'s pure state transition. No
+ * email is sent (a later phase). The audit `meta` carries only ids — never
+ * legalName/phone/address/TIN/document paths — matching the discipline
+ * every other verification action in this file already follows.
+ */
+export async function submitSellerVerificationForReviewAction(
+  _prev: SellerVerificationActionState,
+  _formData: FormData,
+): Promise<SellerVerificationActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_settings");
+
+  const res = await submitSellerVerificationForReview(ctx);
+  if (!res.ok) return { error: res.error };
+
+  await writeAudit({
+    actorUserId: ctx.userId,
+    action: "seller.verification_submitted",
+    targetType: "seller_verification",
+    targetId: res.verification.id,
+    summary: `seller ${ctx.sellerName} submitted its verification for review`,
+    meta: { sellerId: ctx.sellerId, sellerVerificationId: res.verification.id },
+  });
+
+  revalidatePath("/seller/verification");
+  return { ok: true, message: "Your verification has been submitted and is under review." };
 }

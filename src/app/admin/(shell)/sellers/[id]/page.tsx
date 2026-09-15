@@ -262,6 +262,20 @@ export default async function AdminSellerDetailPage({
             </Card>
           )}
 
+          {canManage && (
+            <Card>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold">Verification</h2>
+                <Link href={`/admin/sellers/${s.id}/verification`} className="text-xs text-clay hover:underline">
+                  Review ↗
+                </Link>
+              </div>
+              <p className="mt-2 text-xs text-ink-faint">
+                Identity/business information and supporting documents, reviewed separately from account status.
+              </p>
+            </Card>
+          )}
+
           <Card>
             <h2 className="mb-2 text-sm font-semibold">Content review</h2>
             {!canReviewContent ? (

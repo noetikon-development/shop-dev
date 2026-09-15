@@ -1,23 +1,190 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { z } from "zod";
 import { requirePermission } from "@/lib/admin/rbac";
-import { getSellerVerificationDocumentSignedUrlForAdmin } from "@/lib/seller-verification/repository";
+import { writeAudit } from "@/lib/admin/audit";
+import { cleanUserText } from "@/lib/ugc";
+import {
+  getSellerVerificationDocumentSignedUrlForAdmin,
+  getSellerVerificationDocumentSignedUrlForAdminScoped,
+  reviewSellerVerificationDocumentForAdmin,
+  reviewSellerVerificationForAdmin,
+} from "@/lib/seller-verification/repository";
 
 /**
- * Admin Seller Verification — authorization boundary ONLY (Phase 3
- * foundation). No admin review UI exists yet and nothing calls this
- * function — it exists so a future review page has a ready, already-correct
- * server action to call, rather than inventing its own authorization at
- * that point.
+ * Admin Seller Verification — review actions (Phase 4).
  *
- * Reuses `manage_settings` — the SAME permission `admin/sellers/actions.ts`
- * already requires for seller lifecycle decisions (approve/suspend/close).
- * No new permission was added, and `scripts/seed-rbac.ts` is untouched.
+ * Every action requires `manage_settings` — the SAME permission
+ * `admin/sellers/actions.ts` already requires for seller lifecycle decisions
+ * (approve/suspend/close) and Phase 3's signed-url action already used. No
+ * new permission was added, `scripts/seed-rbac.ts` is untouched.
+ *
+ * None of these ever touch `Seller.status`, create a `SellerUser`, or touch
+ * `SellerInvite` — verification review is a fully independent decision from
+ * seller activation, exactly as required. No email is sent by any action
+ * here (that is a later phase).
  */
+
+export type SellerVerificationAdminActionState = {
+  ok?: boolean;
+  error?: string;
+  message?: string;
+};
+
 export async function getSellerVerificationDocumentSignedUrlForAdminAction(
   documentId: string,
 ): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
   await requirePermission("manage_settings");
   if (!documentId || typeof documentId !== "string") return { ok: false, error: "Invalid request." };
   return getSellerVerificationDocumentSignedUrlForAdmin(documentId);
+}
+
+const viewSchema = z.object({
+  sellerId: z.string().min(1).max(64),
+  verificationId: z.string().min(1).max(64),
+  documentId: z.string().min(1).max(64),
+});
+
+/**
+ * The action the review page's "View" button actually calls — verifies the
+ * full sellerId → verificationId → documentId chain server-side before ever
+ * issuing a signed URL (see getSellerVerificationDocumentSignedUrlForAdminScoped),
+ * so a stale or tampered form value can never sign a URL outside that chain.
+ */
+export async function getScopedSellerVerificationDocumentSignedUrlAction(
+  input: { sellerId: string; verificationId: string; documentId: string },
+): Promise<{ ok: true; url: string } | { ok: false; error: string }> {
+  await requirePermission("manage_settings");
+  const parsed = viewSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Invalid request." };
+  return getSellerVerificationDocumentSignedUrlForAdminScoped(parsed.data);
+}
+
+const documentReviewSchema = z.object({
+  sellerId: z.string().min(1).max(64),
+  verificationId: z.string().min(1).max(64),
+  documentId: z.string().min(1).max(64),
+  status: z.enum(["APPROVED", "REJECTED"]),
+  reviewNote: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+
+export async function reviewSellerVerificationDocumentAction(
+  _prev: SellerVerificationAdminActionState,
+  formData: FormData,
+): Promise<SellerVerificationAdminActionState> {
+  const admin = await requirePermission("manage_settings");
+
+  const parsed = documentReviewSchema.safeParse({
+    sellerId: formData.get("sellerId"),
+    verificationId: formData.get("verificationId"),
+    documentId: formData.get("documentId"),
+    status: formData.get("status"),
+    reviewNote: formData.get("reviewNote") ?? "",
+  });
+  if (!parsed.success) return { error: "Invalid request." };
+  const { sellerId, verificationId, documentId, status } = parsed.data;
+
+  const reviewNote = parsed.data.reviewNote ? cleanUserText(parsed.data.reviewNote) : "";
+  if (status === "REJECTED" && !reviewNote) {
+    return { error: "Add a reason so the seller knows what to fix." };
+  }
+
+  const res = await reviewSellerVerificationDocumentForAdmin({
+    sellerId,
+    verificationId,
+    documentId,
+    status,
+    reviewNote: reviewNote || null,
+    reviewedBy: admin.user.id,
+  });
+  if (!res.ok) return { error: res.error };
+
+  // No document contents, no PII field values — only ids, the document TYPE
+  // (a category, not personal data) and the admin's own reason text, the
+  // same discipline the seller-lifecycle reject/reopen audits already use
+  // for their `reason`/`note`.
+  await writeAudit({
+    actorUserId: admin.user.id,
+    action: status === "APPROVED" ? "seller.verification_document_approved" : "seller.verification_document_rejected",
+    targetType: "seller_verification_document",
+    targetId: documentId,
+    summary: `${admin.user.email} ${status === "APPROVED" ? "approved" : "rejected"} a ${(res.documentType ?? "").toLowerCase()} document for seller ${res.sellerName}`,
+    meta: {
+      sellerId,
+      sellerVerificationId: verificationId,
+      sellerVerificationDocumentId: documentId,
+      documentType: res.documentType,
+      status,
+      ...(status === "REJECTED" ? { reason: reviewNote } : {}),
+    },
+  });
+
+  revalidatePath(`/admin/sellers/${sellerId}/verification`);
+  return { ok: true, message: status === "APPROVED" ? "Document approved." : "Document rejected." };
+}
+
+const verificationReviewSchema = z.object({
+  sellerId: z.string().min(1).max(64),
+  verificationId: z.string().min(1).max(64),
+  status: z.enum(["APPROVED", "REJECTED"]),
+  reviewNote: z.string().trim().max(2000).optional().or(z.literal("")),
+});
+
+/**
+ * Decide the OVERALL verification. Deliberately does not touch
+ * `Seller.status`, `SellerUser`, or `SellerInvite` — seller activation stays
+ * a fully separate, later decision (Phase 4 spec section 8).
+ */
+export async function reviewSellerVerificationAction(
+  _prev: SellerVerificationAdminActionState,
+  formData: FormData,
+): Promise<SellerVerificationAdminActionState> {
+  const admin = await requirePermission("manage_settings");
+
+  const parsed = verificationReviewSchema.safeParse({
+    sellerId: formData.get("sellerId"),
+    verificationId: formData.get("verificationId"),
+    status: formData.get("status"),
+    reviewNote: formData.get("reviewNote") ?? "",
+  });
+  if (!parsed.success) return { error: "Invalid request." };
+  const { sellerId, verificationId, status } = parsed.data;
+
+  const reviewNote = parsed.data.reviewNote ? cleanUserText(parsed.data.reviewNote) : "";
+  if (status === "REJECTED" && !reviewNote) {
+    return { error: "Add a reason so the seller knows what to fix." };
+  }
+
+  const res = await reviewSellerVerificationForAdmin({
+    sellerId,
+    verificationId,
+    status,
+    reviewNote: reviewNote || null,
+    reviewedBy: admin.user.id,
+  });
+  if (!res.ok) return { error: res.error };
+
+  await writeAudit({
+    actorUserId: admin.user.id,
+    action: status === "APPROVED" ? "seller.verification_approved" : "seller.verification_rejected",
+    targetType: "seller_verification",
+    targetId: verificationId,
+    summary: `${admin.user.email} ${status === "APPROVED" ? "approved" : "rejected"} ${res.sellerName}'s seller verification`,
+    meta: {
+      sellerId,
+      sellerVerificationId: verificationId,
+      status,
+      ...(status === "REJECTED" ? { reason: reviewNote } : {}),
+    },
+  });
+
+  revalidatePath(`/admin/sellers/${sellerId}/verification`);
+  return {
+    ok: true,
+    message:
+      status === "APPROVED"
+        ? "Verification approved. This does not change the seller's account status."
+        : "Verification rejected.",
+  };
 }

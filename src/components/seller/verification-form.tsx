@@ -14,6 +14,15 @@ import type { SellerVerificationView } from "@/lib/seller-verification/repositor
 
 type Props = {
   verification: SellerVerificationView | null;
+  /**
+   * True once the verification is no longer DRAFT (Phase 5). The whole form
+   * is wrapped in a native `<fieldset disabled>` — every input/select/button
+   * inside becomes non-interactive in one place, matching the repository's
+   * own guard (`saveSellerVerificationDraft` would otherwise happily start a
+   * brand-new DRAFT row once the current one is PENDING/APPROVED/REJECTED,
+   * which this prop exists specifically to prevent from the UI side).
+   */
+  readOnly?: boolean;
 };
 
 /**
@@ -24,7 +33,7 @@ type Props = {
  * lose anything already typed (the hidden inputs stay mounted, just visually
  * collapsed, so their values are still part of the submitted FormData).
  */
-export function SellerVerificationForm({ verification }: Props) {
+export function SellerVerificationForm({ verification, readOnly = false }: Props) {
   const { state, onSubmit, pending } = usePersistentAction<SellerVerificationActionState>(
     saveSellerVerificationDraftAction,
     {},
@@ -43,6 +52,7 @@ export function SellerVerificationForm({ verification }: Props) {
 
   return (
     <form onSubmit={onSubmit} className="space-y-8">
+      <fieldset disabled={readOnly} className="space-y-8">
       <section className="space-y-4">
         <h2 className="text-sm font-semibold">Your details</h2>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -167,11 +177,17 @@ export function SellerVerificationForm({ verification }: Props) {
       {state.error && !state.fieldErrors && <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{state.error}</p>}
 
       <div className="border-t border-line pt-6">
-        <button type="submit" disabled={pending} className="btn btn-primary py-2 text-sm">
+        <button type="submit" disabled={pending || readOnly} className="btn btn-primary py-2 text-sm">
           {pending && <Loader2 size={14} className="animate-spin" />}
           Save draft
         </button>
+        {readOnly && (
+          <p className="mt-2 text-xs text-ink-faint">
+            This information has been submitted and can no longer be edited here.
+          </p>
+        )}
       </div>
+      </fieldset>
     </form>
   );
 }
