@@ -51,6 +51,8 @@ import {
   renderSellerProfileApproved,
   renderSellerProfileRejected,
   renderSellerProfileSubmitted,
+  renderSellerVerificationApproved,
+  renderSellerVerificationRejected,
 } from "@/lib/email/templates/seller-lifecycle";
 import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps } from "@/lib/email/templates/ops-notifications";
 import {
@@ -3553,6 +3555,119 @@ export async function sendSellerProfileRejected(
   } catch (err) {
     console.error("[email] sendSellerProfileRejected", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Seller Verification review outcomes (Phase 7)
+//
+// Recipient resolution reuses `loadSellerLifecycleEmailContext` unchanged —
+// Seller Verification only ever applies to a seller that ALREADY cleared
+// Seller.status APPROVED (Phase 6's gate is scoped to marketplace-selling
+// capability, not portal access), so an ACTIVE OWNER/MANAGER SellerUser
+// always exists by the time a verification can even reach PENDING; this is
+// "the seller's current account email" resolved fresh from `User` at send
+// time, never a stored snapshot — the exact pattern Seller Onboarding's own
+// account/profile lifecycle emails already use (9F-6b).
+//
+// Neither function is CMS-overridable (no `templateKey`) — mirrors
+// `sendSellerProfileApproved`/`sendSellerProfileRejected` (a review-outcome
+// pair with the same shape) rather than the account-lifecycle emails that do
+// support a CMS override; can be added later if wanted.
+// ---------------------------------------------------------------------------
+
+/**
+ * Seller — Seller Verification approved (PENDING → APPROVED). This is the
+ * moment the Phase 6 gate opens: the seller can now create and publish
+ * marketplace listings. Keyed on the verification row id + the specific
+ * `adminAuditLog` row this transition wrote, so a later, unrelated re-review
+ * cycle (a fresh DRAFT → PENDING → decision) can send again but a retry of
+ * THIS decision cannot.
+ * Key: SELLER_VERIFICATION_APPROVED:<verificationId>:<auditLogId>.
+ */
+export async function sendSellerVerificationApproved(
+  sellerId: string,
+  verificationId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_VERIFICATION_APPROVED:${verificationId}:${auditLogId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_verification_approved", idempotencyKey, subject: "Seller verification approved", error, retry: opts.retry, client: opts.client });
+  try {
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return failPrep("no_recipient");
+
+    return renderAndDispatch(
+      {
+        type: "seller_verification_approved",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerVerificationApproved({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          portalUrl: ctx.portalUrl,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerVerificationApproved", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Seller — Seller Verification rejected (PENDING → REJECTED). `reason` is
+ * read back off the triggering `adminAuditLog` row's own `meta.reason` field
+ * at send time — never a caller-supplied string — the exact same discipline
+ * `sendSellerAccountRejected` already applies; a missing/blank reason fails
+ * safe rather than inventing text. Carries no government-ID numbers, no
+ * document URLs, no document contents — only the admin's own note.
+ * Key: SELLER_VERIFICATION_REJECTED:<verificationId>:<auditLogId>.
+ */
+export async function sendSellerVerificationRejected(
+  sellerId: string,
+  verificationId: string,
+  auditLogId: string,
+  opts: SellerLifecycleEmailOpts = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = opts.idempotencyKey ?? `SELLER_VERIFICATION_REJECTED:${verificationId}:${auditLogId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "seller_verification_rejected", idempotencyKey, subject: "Seller verification rejected", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const ctx = await loadSellerLifecycleEmailContext(sellerId, opts.client);
+    if (!ctx) return failPrep("no_recipient");
+    const audit = await db.adminAuditLog.findUnique({ where: { id: auditLogId }, select: { meta: true } });
+    const reason = safeParse<{ reason?: unknown }>(audit?.meta, {}).reason;
+    if (typeof reason !== "string" || !reason.trim()) return failPrep("missing_reason_on_audit_row");
+
+    return renderAndDispatch(
+      {
+        type: "seller_verification_rejected",
+        to: ctx.recipients,
+        from: SECURITY_FROM,
+        idempotencyKey,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderSellerVerificationRejected({
+          brand: ctx.brand,
+          siteUrl: ctx.siteUrl,
+          sellerName: ctx.sellerName,
+          verificationUrl: `${ctx.siteUrl}/seller/verification`,
+          reason: reason.trim(),
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendSellerVerificationRejected", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

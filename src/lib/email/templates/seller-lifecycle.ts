@@ -258,6 +258,69 @@ export function renderSellerProfileRejected(d: SellerBase & { reviewNote: string
   };
 }
 
+// ---------------------------------------------------------------------------
+// Seller Verification review outcomes (Phase 7)
+//
+// Deliberately carries NO government-ID numbers, document URLs, or document
+// contents — only the seller's own display name and (for rejection) the
+// admin's own reviewNote text, the exact same discipline `renderSellerAccountRejected`
+// already applies to a seller-application rejection reason.
+// ---------------------------------------------------------------------------
+
+/** Verification approved — the Phase 6 marketplace-selling gate is now open. */
+export function renderSellerVerificationApproved(d: { brand: string; siteUrl: string; sellerName: string; portalUrl: string }) {
+  const subject = `Your ${d.brand} seller verification was approved`;
+  const body = `
+    ${heading("Your seller verification was approved")}
+    ${paragraph(`Good news — Axiaro reviewed and approved ${d.sellerName}'s seller verification.`)}
+    ${paragraph("You can now create and publish listings on the Axiaro marketplace.")}
+    ${button("Go to the seller portal", d.portalUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: sellerReason(d.brand) }),
+    text: textBody([
+      "Your seller verification was approved",
+      ``,
+      `Good news — Axiaro reviewed and approved ${d.sellerName}'s seller verification.`,
+      ``,
+      "You can now create and publish listings on the Axiaro marketplace.",
+      ``,
+      `Seller portal: ${d.portalUrl}`,
+      ...textFooter(d.brand, d.siteUrl, sellerReason(d.brand)),
+    ]),
+  };
+}
+
+/** Verification rejected — carries the admin's own reviewNote verbatim, never a fabricated reason. */
+export function renderSellerVerificationRejected(d: { brand: string; siteUrl: string; sellerName: string; verificationUrl: string; reason: string }) {
+  const subject = `Your ${d.brand} seller verification was not approved`;
+  const reasonHtml = `<p style="margin:0 0 16px;color:#5b564f;font-size:14px;line-height:1.7;">${esc(d.reason).replace(/\n/g, "<br>")}</p>`;
+  const body = `
+    ${heading("Your seller verification was not approved")}
+    ${paragraph(`Axiaro reviewed ${d.sellerName}'s seller verification and it was not approved this time.`)}
+    ${reasonHtml}
+    ${paragraph("Review the note above, update your information or documents, and submit again.")}
+    ${button("Review your verification", d.verificationUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: sellerReason(d.brand) }),
+    text: textBody([
+      "Your seller verification was not approved",
+      ``,
+      `Axiaro reviewed ${d.sellerName}'s seller verification and it was not approved this time.`,
+      ``,
+      d.reason,
+      ``,
+      "Review the note above, update your information or documents, and submit again.",
+      ``,
+      `Seller verification: ${d.verificationUrl}`,
+      ...textFooter(d.brand, d.siteUrl, sellerReason(d.brand)),
+    ]),
+  };
+}
+
 /** Ops-inbox notice — a seller's store profile is waiting on review. NOT a seller-facing email. */
 export function renderSellerProfileSubmitted(d: { brand: string; siteUrl: string; sellerName: string; reviewUrl: string }) {
   const subject = `Seller profile ready for review: ${d.sellerName}`;

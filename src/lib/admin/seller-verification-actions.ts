@@ -5,6 +5,8 @@ import { z } from "zod";
 import { requirePermission } from "@/lib/admin/rbac";
 import { writeAudit } from "@/lib/admin/audit";
 import { cleanUserText } from "@/lib/ugc";
+import { scheduleEmail } from "@/lib/email/schedule";
+import { sendSellerVerificationApproved, sendSellerVerificationRejected } from "@/lib/email/notifications";
 import {
   getSellerVerificationDocumentSignedUrlForAdmin,
   getSellerVerificationDocumentSignedUrlForAdminScoped,
@@ -22,8 +24,15 @@ import {
  *
  * None of these ever touch `Seller.status`, create a `SellerUser`, or touch
  * `SellerInvite` — verification review is a fully independent decision from
- * seller activation, exactly as required. No email is sent by any action
- * here (that is a later phase).
+ * seller activation, exactly as required.
+ *
+ * Phase 7 — `reviewSellerVerificationAction`'s overall PENDING→APPROVED/
+ * REJECTED decision (never the per-document review) additionally schedules
+ * one outcome email, AFTER the DB transition and audit write have both
+ * already committed — mirroring `transitionSellerAction`'s exact placement
+ * (`src/lib/admin/sellers/actions.ts`). `scheduleEmail` defers the actual
+ * send past the response via `after()`, so SMTP delivery (or its failure)
+ * can never affect the review decision that already succeeded.
  */
 
 export type SellerVerificationAdminActionState = {
@@ -165,7 +174,7 @@ export async function reviewSellerVerificationAction(
   });
   if (!res.ok) return { error: res.error };
 
-  await writeAudit({
+  const auditLogId = await writeAudit({
     actorUserId: admin.user.id,
     action: status === "APPROVED" ? "seller.verification_approved" : "seller.verification_rejected",
     targetType: "seller_verification",
@@ -178,6 +187,18 @@ export async function reviewSellerVerificationAction(
       ...(status === "REJECTED" ? { reason: reviewNote } : {}),
     },
   });
+
+  // Phase 7 — notify the seller, never blocking the response on SMTP delivery.
+  // The audit row's own id anchors the idempotency key (never Seller/verification
+  // `updatedAt`, which an unrelated edit could also bump) — mirrors
+  // `transitionSellerAction`'s exact placement and pattern.
+  if (auditLogId) {
+    if (status === "APPROVED") {
+      scheduleEmail(() => sendSellerVerificationApproved(sellerId, verificationId, auditLogId));
+    } else {
+      scheduleEmail(() => sendSellerVerificationRejected(sellerId, verificationId, auditLogId));
+    }
+  }
 
   revalidatePath(`/admin/sellers/${sellerId}/verification`);
   return {

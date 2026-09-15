@@ -107,8 +107,17 @@ async function main() {
   ok("L · verification rejection requires a reason before calling the repository",
     (adminActionsSrc.match(/status === "REJECTED" && !reviewNote/g) ?? []).length >= 2);
 
-  ok("W · no email sender is imported anywhere in the admin verification actions",
-    !/from "@\/lib\/email\/notifications"/.test(adminActionsSrc));
+  // Phase 7 intentionally ended this "not yet" — reviewSellerVerificationAction
+  // now schedules an outcome email AFTER the DB transition + audit write both
+  // succeed. Confirm it's wired correctly rather than merely absent: present
+  // in the overall-verification action, but NOT in the per-document review
+  // action (reviewSellerVerificationDocumentAction never sends an email).
+  ok("W · an email sender IS imported (Phase 7) but ONLY used by the overall verification review, never the per-document one",
+    /from "@\/lib\/email\/notifications"/.test(adminActionsSrc) &&
+    (() => {
+      const doc = adminActionsSrc.match(/export async function reviewSellerVerificationDocumentAction[\s\S]*?\n\}/);
+      return !!doc && !/scheduleEmail|sendSellerVerification/.test(doc[0]);
+    })());
   ok("X · getPublicUrl() is never called in the repository", !/\.getPublicUrl\(/.test(repoSrc));
   ok("· the review UI never renders a bucket name or storage path",
     !/storagePath/.test(reviewUiSrc) && !/\.bucket\b|bucket:/i.test(reviewUiSrc));

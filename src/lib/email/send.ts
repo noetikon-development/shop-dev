@@ -114,6 +114,11 @@ export type EmailType =
   | "seller_settlement_recorded"
   | "return_refund_initiated_ops"
   | "return_refund_completed_ops"
+  // Phase 7 — Seller Verification (Phase 4/6) review outcomes. PENDING→APPROVED
+  // unlocks marketplace-selling capability (the Phase 6 gate); PENDING→REJECTED
+  // carries the admin's own reviewNote, same discipline as seller_account_rejected.
+  | "seller_verification_approved"
+  | "seller_verification_rejected"
   // 9F-18 — Ops alert raised when another transactional email FAILED / SKIPPED.
   | "email_failure_alert_ops";
 
