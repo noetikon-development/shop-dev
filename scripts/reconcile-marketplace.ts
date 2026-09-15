@@ -24,6 +24,22 @@
  *      no Shipment lags a PROCESSED DELIVERED event. Manual shipments (provider
  *      NULL / "MANUAL") are exempt — this rule passes cleanly today (0 events).
  *
+ * Multi-seller checkout — Phase C — cross-seller AGGREGATION rules, ALSO in
+ * `state-reconcile.ts` (`evaluateOrderAggregation`), operating per-ORDER
+ * (across all its SellerOrders) rather than per-(Order, SellerOrder) pair:
+ *   I  Σ SellerOrder.merchandiseSubtotal == Order.subtotal
+ *   J  Σ SellerOrder.shippingFee == Order.shippingFee
+ *   K  Σ SellerOrder.discountAllocated == Order.discountTotal
+ *   L  Σ SellerOrder.total == Order.grandTotal
+ *   M  per SellerOrder: Σ linked OrderItem.lineTotal == SellerOrder.merchandiseSubtotal
+ *   N  SellerOrder-count / distinct-seller partition integrity (no duplicate,
+ *      missing, or unexpected-extra seller partition)
+ * These are unconditional on Order/SellerOrder status (including CANCELLED) —
+ * the fields they sum are historical snapshots no later action ever mutates,
+ * exactly like existing rule E. Today's Production orders are all
+ * single-seller, so I–N hold trivially (sum of one term); they exist as a
+ * standing safeguard for when a real multi-seller order is created.
+ *
  * Output: [PASS] / [WARN] / [FAIL] with order number, seller-order id, the
  * invariant, current value(s) and expected value(s). Exit code is non-zero ONLY
  * for a true FAIL. There are NO grandfathered exceptions — the two historical
@@ -36,6 +52,7 @@
 import { PrismaClient } from "@prisma/client";
 import {
   evaluateSellerOrder,
+  evaluateOrderAggregation,
   RETURN_VALUE_STATUSES_44B,
   type ConsistencyFinding,
 } from "../src/lib/marketplace/state-reconcile";
@@ -69,9 +86,14 @@ async function run() {
     select: {
       orderNumber: true,
       status: true,
+      subtotal: true,
+      shippingFee: true,
+      discountTotal: true,
+      grandTotal: true,
       sellerOrders: {
         select: {
           id: true,
+          sellerId: true,
           sellerType: true,
           status: true,
           settlementStatus: true,
@@ -85,6 +107,9 @@ async function run() {
           total: true,
         },
       },
+      items: {
+        select: { sellerOrderId: true, sellerId: true, lineTotal: true },
+      },
       returnRequests: {
         select: {
           status: true,
@@ -94,7 +119,7 @@ async function run() {
     },
   });
 
-  const perRule: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+  const perRule: Record<string, number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, I: 0, J: 0, K: 0, L: 0, M: 0, N: 0 };
   let sellerOrderCount = 0;
 
   for (const o of orders) {
@@ -121,6 +146,17 @@ async function run() {
       for (const rule of ["A", "B", "C", "D", "E", "F"]) if (!rulesHit.has(rule as ConsistencyFinding["rule"])) perRule[rule]++;
       for (const f of findings) emit(o.orderNumber, so.id, f);
     }
+
+    // ── I–N · cross-seller aggregation (Phase C) — once per Order, across
+    //     ALL its SellerOrders/OrderItems, not per-(Order, SellerOrder) pair.
+    const aggFindings = evaluateOrderAggregation(
+      { subtotal: o.subtotal, shippingFee: o.shippingFee, discountTotal: o.discountTotal, grandTotal: o.grandTotal },
+      o.sellerOrders,
+      o.items,
+    );
+    const aggRulesHit = new Set(aggFindings.map((f) => f.rule));
+    for (const rule of ["I", "J", "K", "L", "M", "N"]) if (!aggRulesHit.has(rule as ConsistencyFinding["rule"])) perRule[rule]++;
+    for (const f of aggFindings) emit(o.orderNumber, f.sellerOrderId, f);
   }
 
   console.log("");
@@ -132,6 +168,15 @@ async function run() {
   console.log(`  E total = merch − disc + ship             — ${perRule.E} clean`);
   console.log(`  F return refund ≤ SellerOrder.total       — ${perRule.F} clean`);
   pass += perRule.A + perRule.B + perRule.C + perRule.D + perRule.E + perRule.F;
+
+  console.log("\n  I–N · cross-seller aggregation (Phase C, per Order):");
+  console.log(`  I  Σ merchandiseSubtotal == Order.subtotal — ${perRule.I} clean`);
+  console.log(`  J  Σ shippingFee == Order.shippingFee     — ${perRule.J} clean`);
+  console.log(`  K  Σ discountAllocated == Order.discountTotal — ${perRule.K} clean`);
+  console.log(`  L  Σ total == Order.grandTotal            — ${perRule.L} clean`);
+  console.log(`  M  Σ OrderItem.lineTotal == SellerOrder.merchandiseSubtotal — ${perRule.M} clean`);
+  console.log(`  N  SellerOrder-count / seller-partition integrity — ${perRule.N} clean`);
+  pass += perRule.I + perRule.J + perRule.K + perRule.L + perRule.M + perRule.N;
 
   // ── G · 3P OfferInventory chain (extends reconcile:9e3d, not a competing calc) ─
   console.log("\n  G · THIRD_PARTY OfferInventory chain (inventory authority = reconcile:9e3d; this only extends it to 3P):");
