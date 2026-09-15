@@ -131,10 +131,11 @@ export async function resolveSellerVerificationGateStatus(
  * Save a draft. Creates a new row (status DRAFT) the FIRST time this seller
  * explicitly saves — never automatically, never on merely viewing the page.
  * On every later save, updates that same row in place as long as it is still
- * DRAFT. If the seller's latest row has already moved past DRAFT (a later
- * phase's PENDING/APPROVED/REJECTED — unreachable in this phase, but handled
- * correctly for when it is), a fresh DRAFT row is created instead of
- * mutating a submitted/reviewed one out from under a reviewer.
+ * DRAFT. If the seller's latest row is PENDING or REJECTED, a fresh DRAFT
+ * row is created instead of mutating a submitted/reviewed one out from
+ * under a reviewer. If the latest row is APPROVED, no new row is created at
+ * all — see `getOrCreateDraftVerification` (Phase 8) — the call fails safely
+ * instead of silently reopening an approved decision.
  */
 async function findLatestVerification(tx: Prisma.TransactionClient, sellerId: string) {
   return tx.sellerVerification.findFirst({
@@ -150,6 +151,21 @@ async function findLatestVerification(tx: Prisma.TransactionClient, sellerId: st
  * has already moved past DRAFT. Shared by the draft-save path (Phase 2) and
  * the document-upload path (Phase 3) — both count as "the seller explicitly
  * started verification", so both use the exact same creation rule.
+ *
+ * Phase 8 — an APPROVED verification is the one status this never reopens:
+ * the existing row is returned AS-IS (status "APPROVED") instead of creating
+ * a new DRAFT. Every caller already checks (or now checks, see
+ * `saveSellerVerificationDraft` below) `status !== "DRAFT"` and fails safely
+ * rather than silently starting a new cycle that would immediately re-block
+ * an already-approved THIRD_PARTY seller's Phase 6 marketplace gate (the
+ * latest row drives that gate). This exists specifically because both
+ * callers are real server actions, reachable directly regardless of the
+ * read-only UI a non-DRAFT status otherwise renders.
+ *
+ * PENDING and REJECTED are UNCHANGED from prior behavior — still fall
+ * through to creating a fresh DRAFT row exactly as before. REJECTED needs
+ * this (it's the seller's only resubmission path); PENDING's identical
+ * behavior predates this phase and is preserved as-is, out of scope here.
  */
 async function getOrCreateDraftVerification(
   tx: Prisma.TransactionClient,
@@ -157,6 +173,7 @@ async function getOrCreateDraftVerification(
 ): Promise<{ id: string; status: string }> {
   const existing = await findLatestVerification(tx, ctx.sellerId);
   if (existing && existing.status === "DRAFT") return existing;
+  if (existing && existing.status === "APPROVED") return existing;
   const created = await tx.sellerVerification.create({
     data: { sellerId: ctx.sellerId, status: "DRAFT" },
     select: { id: true, status: true },
@@ -171,6 +188,13 @@ export async function saveSellerVerificationDraft(
 ): Promise<SellerVerificationResult> {
   const run = async (tx: Prisma.TransactionClient): Promise<SellerVerificationResult> => {
     const target = await getOrCreateDraftVerification(tx, ctx);
+    // Phase 8 — mirrors the same guard uploadSellerVerificationDocument
+    // already has. Only reachable for APPROVED today (see
+    // getOrCreateDraftVerification above); a direct call to this action
+    // while APPROVED fails safely instead of reopening a decided row.
+    if (target.status !== "DRAFT") {
+      return { ok: false, error: "This verification is no longer editable." };
+    }
     const verification = await tx.sellerVerification.update({
       where: { id: target.id },
       data: patch,
@@ -357,10 +381,11 @@ export type UploadSellerVerificationDocumentResult =
  * instead, since nothing would ever reference it.
  *
  * Never replaces a document that has already been reviewed (status
- * APPROVED/REJECTED) or belongs to a verification that is no longer DRAFT —
- * unreachable in this phase (nothing yet moves either status away from
- * PENDING/DRAFT), but enforced now so it is already correct once a review
- * phase exists.
+ * APPROVED/REJECTED) or belongs to a verification that is no longer DRAFT.
+ * The latter is genuinely reachable once a verification is APPROVED —
+ * `getOrCreateDraftVerification` (Phase 8) returns that row as-is instead of
+ * starting a new DRAFT, so this check now actually fires rather than being
+ * unreachable.
  */
 export async function uploadSellerVerificationDocument(
   ctx: SellerContext,
