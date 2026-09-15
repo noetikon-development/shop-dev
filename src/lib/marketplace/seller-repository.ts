@@ -3,6 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getStoreSetting } from "@/lib/marketplace/marketplace-settings";
 import { OFFER_CONDITIONS, type OfferCondition } from "@/lib/marketplace/conditions";
+import { resolveSellerVerificationGateStatus } from "@/lib/seller-verification/repository";
 import type { SellerContext } from "@/lib/marketplace/types";
 
 /**
@@ -63,6 +64,7 @@ type OfferStatus = (typeof OFFER_STATUSES)[number];
 export type OfferPublishBlocker =
   | "ARCHIVED"
   | "SELLER_NOT_APPROVED"
+  | "SELLER_NOT_VERIFIED"
   | "MARKETPLACE_CLOSED"
   | "PRODUCT_NOT_ACTIVE"
   | "VARIANT_NOT_ACTIVE"
@@ -71,6 +73,8 @@ export type OfferPublishBlocker =
 export const OFFER_PUBLISH_BLOCKER_MESSAGE: Record<OfferPublishBlocker, string> = {
   ARCHIVED: "This listing is archived and can’t be published.",
   SELLER_NOT_APPROVED: "Your seller account isn’t approved to publish listings.",
+  // Phase 6 — THIRD_PARTY only; FIRST_PARTY resolves "EXEMPT" and never sees this.
+  SELLER_NOT_VERIFIED: "Complete seller verification before publishing listings.",
   // Keep this exact wording — it was the pre-9F-24A gate message.
   MARKETPLACE_CLOSED: "Offers can’t be published yet — the marketplace isn’t open to buyers.",
   PRODUCT_NOT_ACTIVE: "Axiaro hasn’t made this product live in the catalog yet.",
@@ -78,9 +82,18 @@ export const OFFER_PUBLISH_BLOCKER_MESSAGE: Record<OfferPublishBlocker, string> 
   NO_STOCK: "Add stock first — a live listing needs at least one unit available.",
 };
 
+/**
+ * Phase 6 — `verificationStatus` is the ALREADY-RESOLVED gate status
+ * (`resolveSellerVerificationGateStatus`): `"EXEMPT"` for FIRST_PARTY,
+ * otherwise the seller's LATEST SellerVerification row's status (never "any
+ * row ever approved"), or `"NONE"` with no row. This function itself stays a
+ * pure string check — it doesn't know or care about seller TYPE, only the
+ * already-resolved status, matching every other blocker in this list.
+ */
 export function offerPublishBlockers(input: {
   offerStatus: string;
   sellerStatus: string;
+  verificationStatus: string;
   marketplaceOpen: boolean;
   productStatus: string;
   variantStatus: string;
@@ -89,6 +102,9 @@ export function offerPublishBlockers(input: {
   const out: OfferPublishBlocker[] = [];
   if (input.offerStatus === "ARCHIVED") out.push("ARCHIVED");
   if (input.sellerStatus !== "APPROVED") out.push("SELLER_NOT_APPROVED");
+  if (input.verificationStatus !== "EXEMPT" && input.verificationStatus !== "APPROVED") {
+    out.push("SELLER_NOT_VERIFIED");
+  }
   if (!input.marketplaceOpen) out.push("MARKETPLACE_CLOSED");
   if (input.productStatus !== "ACTIVE") out.push("PRODUCT_NOT_ACTIVE");
   if (input.variantStatus !== "ACTIVE") out.push("VARIANT_NOT_ACTIVE");
@@ -279,6 +295,18 @@ function validateOfferCommercials(input: {
  * Create a new Offer for this seller against a catalog Variant, plus its
  * OfferInventory row (+ an opening `OfferAdjustment`). Always created
  * `status = "DRAFT"` — a seller offer never starts customer-visible.
+ *
+ * Phase 6 — the verification gate for a THIRD_PARTY seller's OWN, self-service
+ * creation lives in the caller, `createOfferAction`
+ * (`requireVerifiedSellerSession`), NOT here — this function is also the
+ * sanctioned path `seedSellerDraftOffers` (admin plane) uses with a synthetic
+ * `SellerContext` to seed DRAFT offers once an admin approves a seller's
+ * product request. That seeding is an admin decision, not seller self-service,
+ * and the seeded offer stays DRAFT (never customer-visible) until the seller
+ * independently activates it — which the `→ ACTIVE` gate in
+ * `offerPublishBlockers` always covers, regardless of how the DRAFT row
+ * originated. Gating creation here would incorrectly block that unrelated,
+ * pre-existing admin workflow too.
  */
 export async function createSellerOffer(
   ctx: SellerContext,
@@ -508,6 +536,12 @@ export async function updateSellerOffer(
  * Variant must both be ACTIVE, and the OfferInventory must have at least one
  * unit available. Any failure returns `FORBIDDEN` with the reason(s) and
  * writes nothing.
+ *
+ * Phase 6 — the same blocker list also requires a THIRD_PARTY seller's LATEST
+ * SellerVerification row to be APPROVED (`SELLER_NOT_VERIFIED` otherwise).
+ * FIRST_PARTY sellers are exempt. Only the `→ ACTIVE` transition is gated —
+ * DRAFT ↔ INACTIVE and any `→ ARCHIVED` move are unaffected, so an unverified
+ * seller can still pull a listing down or archive it.
  */
 export async function setSellerOfferStatus(
   ctx: SellerContext,
@@ -535,7 +569,7 @@ export async function setSellerOfferStatus(
       select: {
         id: true,
         status: true,
-        seller: { select: { status: true } },
+        seller: { select: { status: true, type: true } },
         variant: {
           select: {
             id: true,
@@ -579,9 +613,17 @@ export async function setSellerOfferStatus(
     // the time we're here for an ACTIVE target `marketplaceOpen` is true.
     if (next === "ACTIVE") {
       const available = Math.max(0, (offer.inventory?.quantity ?? 0) - (offer.inventory?.reserved ?? 0));
+      // Phase 6 — fresh read inside this same transaction, matching how
+      // `offer.seller.status` above is also read fresh rather than trusted
+      // from `ctx` (established earlier in the request, possibly stale).
+      const verificationStatus = await resolveSellerVerificationGateStatus(
+        { id: ctx.sellerId, type: offer.seller.type },
+        tx,
+      );
       const blockers = offerPublishBlockers({
         offerStatus: offer.status,
         sellerStatus: offer.seller.status,
+        verificationStatus,
         marketplaceOpen: true,
         productStatus: offer.variant.product.status,
         variantStatus: offer.variant.status,

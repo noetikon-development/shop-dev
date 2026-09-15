@@ -6,6 +6,7 @@ import {
   OFFER_PUBLISH_BLOCKER_MESSAGE,
 } from "@/lib/marketplace/seller-repository";
 import { isMultiSellerCheckoutEnabled } from "@/lib/marketplace/marketplace-settings";
+import { resolveSellerVerificationGateStatus } from "@/lib/seller-verification/repository";
 
 /**
  * Admin cross-seller Offer read layer (Phase 9F-8d.1).
@@ -169,12 +170,14 @@ export async function getAdminOfferDetail(offerId: string): Promise<AdminOfferDe
   const reserved = o.inventory?.reserved ?? 0;
   const available = Math.max(0, quantity - reserved);
   const marketplaceOpen = await isMultiSellerCheckoutEnabled();
+  const verificationStatus = await resolveSellerVerificationGateStatus({ id: o.sellerId, type: o.seller.type });
   const publishBlockers =
     o.status === "ACTIVE"
       ? []
       : offerPublishBlockers({
           offerStatus: o.status,
           sellerStatus: o.seller.status,
+          verificationStatus,
           marketplaceOpen,
           productStatus: o.variant.product.status,
           variantStatus: o.variant.status,

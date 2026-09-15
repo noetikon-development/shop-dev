@@ -63,7 +63,10 @@ function staticTests() {
   ok("repo · transition map unchanged (DRAFT/INACTIVE→ACTIVE, ACTIVE→INACTIVE/ARCHIVED, no ARCHIVED row)",
     /DRAFT: \["INACTIVE", "ARCHIVED", "ACTIVE"\],\s*\n\s*INACTIVE: \["DRAFT", "ARCHIVED", "ACTIVE"\],\s*\n\s*ACTIVE: \["INACTIVE", "ARCHIVED"\],/.test(repo));
   ok("repo · readiness check runs inside the tx, only for next === ACTIVE",
-    /if \(next === "ACTIVE"\) \{[\s\S]{0,400}offerPublishBlockers\(\{[\s\S]{0,300}\}\);\s*\n\s*if \(blockers\.length > 0\)/.test(repo));
+    // Phase 6 inserted a fresh resolveSellerVerificationGateStatus() read
+    // between the ACTIVE guard and the offerPublishBlockers() call — widened
+    // budgets accommodate that without weakening what this actually checks.
+    /if \(next === "ACTIVE"\) \{[\s\S]{0,700}offerPublishBlockers\(\{[\s\S]{0,400}\}\);\s*\n\s*if \(blockers\.length > 0\)/.test(repo));
   ok("repo · ARCHIVED still rejected before the readiness check",
     /if \(offer\.status === "ARCHIVED"\) \{\s*\n\s*return \{ ok: false, code: "VALIDATION", error: "An archived offer can't be reactivated\." \};/.test(repo));
   ok("component · Publish listing button submits ACTIVE",
@@ -71,7 +74,9 @@ function staticTests() {
   ok("component · blockers list shown when canPublish is false", /const canPublish = blockers\.length === 0;/.test(controls));
   ok("component · ARCHIVED remains terminal", /if \(status === "ARCHIVED"\) \{\s*\n\s*return <p[^>]*>This listing is archived and can’t be changed\.<\/p>;/.test(controls));
   ok("page · computes the same publish blockers + passes them to the control",
-    /offerPublishBlockers\(\{[\s\S]{0,300}\}\)\.map\(\(b\) => OFFER_PUBLISH_BLOCKER_MESSAGE\[b\]\)/.test(page) &&
+    // Phase 6 added a verificationStatus field (+ a short comment) to this
+    // object literal — widened from {0,300}.
+    /offerPublishBlockers\(\{[\s\S]{0,900}\}\)\.map\(\(b\) => OFFER_PUBLISH_BLOCKER_MESSAGE\[b\]\)/.test(page) &&
     /blockers=\{publishBlockerMessages\}/.test(page));
   ok("page · stale 'opens in a later marketplace phase' copy removed",
     !/opens in a later marketplace phase/.test(page));
@@ -89,7 +94,9 @@ function staticTests() {
 // ── pure blocker fn ──────────────────────────────────────────────────────
 function blockerUnitTests() {
   console.log("\n── offerPublishBlockers ──");
-  const base = { offerStatus: "DRAFT", sellerStatus: "APPROVED", marketplaceOpen: true, productStatus: "ACTIVE", variantStatus: "ACTIVE", available: 5 };
+  // Phase 6 added `verificationStatus` to offerPublishBlockers' input — "APPROVED"
+  // here keeps this pre-existing "all gates pass" fixture fully passing.
+  const base = { offerStatus: "DRAFT", sellerStatus: "APPROVED", verificationStatus: "APPROVED", marketplaceOpen: true, productStatus: "ACTIVE", variantStatus: "ACTIVE", available: 5 };
   ok("all gates pass → no blockers", offerPublishBlockers(base).length === 0);
   ok("seller not APPROVED → SELLER_NOT_APPROVED", offerPublishBlockers({ ...base, sellerStatus: "SUSPENDED" }).includes("SELLER_NOT_APPROVED"));
   ok("marketplace closed → MARKETPLACE_CLOSED", offerPublishBlockers({ ...base, marketplaceOpen: false }).includes("MARKETPLACE_CLOSED"));
@@ -117,6 +124,11 @@ async function dbTests() {
       data: { type: "THIRD_PARTY", status: o.sellerStatus ?? "APPROVED", displayName: `T ${sfx}`, slug: `t-${sfx}-${Math.random().toString(36).slice(2, 7)}`, supportEmail: "t@t.test" },
       select: { id: true },
     });
+    // Phase 6 — this file tests the OTHER publish-readiness gates in
+    // isolation, not the new verification gate, so every THIRD_PARTY fixture
+    // here gets a pre-APPROVED SellerVerification by default (kept out of
+    // this rolled-back transaction, never committed).
+    await tx.sellerVerification.create({ data: { sellerId: seller.id, status: "APPROVED" } });
     const product = await tx.product.create({
       data: { name: `P ${sfx}`, slug: `p-${sfx}-${Math.random().toString(36).slice(2, 7)}`, shortDescription: "s", description: "d", categoryId: category!.id, status: o.productStatus ?? "ACTIVE", price: 1000 },
       select: { id: true },

@@ -6,6 +6,7 @@ import {
   offerPublishBlockers,
   OFFER_PUBLISH_BLOCKER_MESSAGE,
 } from "@/lib/marketplace/seller-repository";
+import { resolveSellerVerificationGateStatus } from "@/lib/seller-verification/repository";
 
 /**
  * Admin (cross-seller) Offer status control — Phase 9F-24D (P1-4).
@@ -25,7 +26,9 @@ import {
  *   - the transition map is the same (DRAFT/INACTIVE ↔ each other + ACTIVE,
  *     ACTIVE → INACTIVE/ARCHIVED, ARCHIVED terminal);
  *   - `→ ACTIVE` keeps the double-lock (marketplace flag + transition map) AND
- *     runs the same `offerPublishBlockers` readiness check.
+ *     runs the same `offerPublishBlockers` readiness check — Phase 6 included:
+ *     a THIRD_PARTY seller's offer can't be force-activated through this admin
+ *     door either while their latest verification isn't APPROVED.
  * It touches ONLY `Offer.status` — never OfferInventory, price, condition,
  * Product, Variant, or Seller.
  */
@@ -122,9 +125,16 @@ export async function adminSetOfferStatus(
     // Double-lock, part 2 — publish-readiness, same check the seller path runs.
     if (next === "ACTIVE") {
       const available = Math.max(0, (offer.inventory?.quantity ?? 0) - (offer.inventory?.reserved ?? 0));
+      // Phase 6 — same fresh, in-transaction read as the seller path, so this
+      // "second door" stays truly identical rather than a quiet bypass.
+      const verificationStatus = await resolveSellerVerificationGateStatus(
+        { id: offer.sellerId, type: offer.seller.type },
+        tx,
+      );
       const blockers = offerPublishBlockers({
         offerStatus: offer.status,
         sellerStatus: offer.seller.status,
+        verificationStatus,
         marketplaceOpen: true, // the flag gate above already passed
         productStatus: offer.variant.product.status,
         variantStatus: offer.variant.status,

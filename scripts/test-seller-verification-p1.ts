@@ -113,8 +113,13 @@ async function main() {
     !/SellerVerification/.test(repoSrc));
   ok("I · admin/sellers/actions.ts does not reference SellerVerification yet",
     !/SellerVerification/.test(adminActionsSrc));
-  ok("I · the Seller Portal session gate does not reference SellerVerification yet (not gated)",
-    !/SellerVerification/.test(sessionSrc));
+  // Phase 6 intentionally ended this "not yet" — the session gate now resolves
+  // (but does not itself enforce) SellerContext.verificationStatus, so specific
+  // gated actions elsewhere (createOfferAction, setSellerOfferStatus) can use
+  // it. session.ts still never REJECTS a request based on it — see Phase 6's
+  // own test-seller-verification-p6.ts for that boundary.
+  ok("I · the Seller Portal session gate resolves (Phase 6) but still never itself enforces SellerVerification",
+    /SellerVerification/.test(sessionSrc) && !/if \([^)]*verificationStatus[^)]*\)\s*(forbidden|redirect)/.test(sessionSrc));
 
   // ── J/K — bucket configuration, read directly from Supabase Storage ────
   const supabase = createAdminClient();

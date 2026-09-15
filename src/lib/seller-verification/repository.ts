@@ -6,7 +6,7 @@ import { getSellerVerificationSignedUrl, SELLER_VERIFICATION_BUCKET } from "@/li
 import { validateSellerVerificationUpload, buildSellerVerificationStoragePath } from "@/lib/seller-verification/upload-validation";
 import { isSellerVerificationDocumentType } from "@/lib/seller-verification/document-types";
 import { sellerVerificationDraftSchema } from "@/lib/seller-verification/validation";
-import type { SellerContext } from "@/lib/marketplace/types";
+import type { SellerContext, SellerVerificationGateStatus } from "@/lib/marketplace/types";
 
 /**
  * Seller Verification — identity/business draft + document repository
@@ -94,6 +94,37 @@ export async function getSellerVerification(
     orderBy: { createdAt: "desc" },
     select: VERIFICATION_SELECT,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Verification gate status (Phase 6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the verification-gate status for one seller. FIRST_PARTY sellers
+ * are always `"EXEMPT"` — Axiaro's own store has no third-party KYC concept
+ * to satisfy, and this resolves without requiring any `SellerVerification`
+ * row to exist. THIRD_PARTY sellers resolve to their LATEST row's status
+ * (`orderBy: createdAt desc` — the SAME query every other verification read
+ * in this file uses), or `"NONE"` when no row exists yet. Never "any row
+ * ever APPROVED": a seller who was APPROVED and later resubmitted is judged
+ * on their newest row only.
+ *
+ * Callers needing a fresh, race-safe read inside their own write transaction
+ * (e.g. `setSellerOfferStatus`'s publish-readiness check) pass that
+ * transaction's client; callers just resolving a session context omit it.
+ */
+export async function resolveSellerVerificationGateStatus(
+  seller: { id: string; type: string },
+  client: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<SellerVerificationGateStatus> {
+  if (seller.type === "FIRST_PARTY") return "EXEMPT";
+  const latest = await client.sellerVerification.findFirst({
+    where: { sellerId: seller.id },
+    orderBy: { createdAt: "desc" },
+    select: { status: true },
+  });
+  return (latest?.status as SellerVerificationGateStatus | undefined) ?? "NONE";
 }
 
 /**

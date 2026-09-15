@@ -36,6 +36,11 @@ export default async function SellerOfferDetailPage({ params }: PageProps<"/sell
       : offerPublishBlockers({
           offerStatus: offer.status,
           sellerStatus: offer.sellerStatus,
+          // Phase 6 — this offer is always the caller's own (getSellerOfferDetail
+          // scopes to ctx.sellerId), so ctx's already-resolved status applies
+          // directly; the `?? "NONE"` is just a type-level fallback (fails
+          // closed) for the field's optionality — a real session always sets it.
+          verificationStatus: ctx.verificationStatus ?? "NONE",
           marketplaceOpen,
           productStatus: offer.productStatus,
           variantStatus: offer.variantStatus,

@@ -13,7 +13,7 @@
  * if sellers need finer-grained control.
  */
 
-import type { SellerUserRole } from "@/lib/marketplace/types";
+import type { SellerContext, SellerUserRole } from "@/lib/marketplace/types";
 
 export const SELLER_PERMISSIONS = [
   "view_offers",
@@ -47,4 +47,23 @@ export const SELLER_ROLE_PERMISSIONS: Record<SellerUserRole, SellerPermission[]>
 
 export function permissionsForSellerRole(role: SellerUserRole): Set<string> {
   return new Set(SELLER_ROLE_PERMISSIONS[role] ?? []);
+}
+
+/**
+ * Phase 6 — the pure decision behind `requireVerifiedSellerSession`
+ * (src/lib/seller/session.ts). Lives in this framework-free module (no
+ * `next/navigation` / `next/headers` imports) specifically so it can be
+ * unit-tested by directly importing and calling it from a plain script,
+ * matching how `permissionsForSellerRole` above is also tested directly —
+ * `session.ts` and `seller-context.ts` pull in real Next.js request APIs
+ * that crash outside a live request, so every prior phase's tests only ever
+ * exercise THOSE modules' logic via static source checks, never a direct
+ * import. `EXEMPT` (FIRST_PARTY) and `APPROVED` pass; `"NONE"`, `"DRAFT"`,
+ * `"PENDING"`, `"REJECTED"`, and `undefined` (a `SellerContext` that never
+ * resolved this field) all fail closed.
+ */
+export function sellerVerificationSatisfiesGate(
+  status: SellerContext["verificationStatus"],
+): boolean {
+  return status === "EXEMPT" || status === "APPROVED";
 }

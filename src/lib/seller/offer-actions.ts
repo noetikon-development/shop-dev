@@ -4,7 +4,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { OFFER_CONDITIONS } from "@/lib/marketplace/conditions";
-import { requireSellerSessionPermission } from "@/lib/seller/session";
+import { requireSellerSessionPermission, requireVerifiedSellerSession } from "@/lib/seller/session";
 import { writeAudit } from "@/lib/admin/audit";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendSellerOfferPublishedOps } from "@/lib/email/notifications";
@@ -34,6 +34,13 @@ import {
  * `adminAuditLog` row ("who moved which listing from X to Y, when"), and a
  * `→ ACTIVE` publish also queues one ops notification so Axiaro knows a 3P
  * listing went live. Both are best-effort and never block the seller's action.
+ *
+ * Phase 6: `createOfferAction` additionally requires a THIRD_PARTY seller's
+ * verification to be APPROVED (`requireVerifiedSellerSession`); FIRST_PARTY is
+ * exempt. The `→ ACTIVE` publish transition's own verification check lives
+ * inside `setSellerOfferStatus`/`offerPublishBlockers` instead, alongside the
+ * existing `SELLER_NOT_APPROVED` check — every other status change
+ * (DRAFT ↔ INACTIVE, → ARCHIVED) stays ungated by verification.
  */
 
 export type SellerActionState = {
@@ -73,7 +80,13 @@ export async function createOfferAction(
   _prev: SellerActionState,
   formData: FormData,
 ): Promise<SellerActionState> {
-  const { ctx } = await requireSellerSessionPermission("manage_offers");
+  // Phase 6 — a THIRD_PARTY seller's LATEST SellerVerification row must be
+  // APPROVED before they can create a new listing. FIRST_PARTY is exempt.
+  const gate = await requireVerifiedSellerSession("manage_offers");
+  if (!gate.ok) {
+    return { error: "Complete seller verification before creating a new listing." };
+  }
+  const { ctx } = gate.session;
 
   const price = parsePesosToCentavos(formData.get("price"));
   const compareRaw = formData.get("compareAtPrice");

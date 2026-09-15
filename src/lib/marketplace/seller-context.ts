@@ -4,6 +4,7 @@ import { forbidden } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { getCurrentUser } from "@/lib/auth";
 import { permissionsForSellerRole } from "@/lib/marketplace/seller-permissions";
+import { resolveSellerVerificationGateStatus } from "@/lib/seller-verification/repository";
 import type { SellerContext, SellerUserRole } from "@/lib/marketplace/types";
 
 /**
@@ -27,6 +28,16 @@ import type { SellerContext, SellerUserRole } from "@/lib/marketplace/types";
  *   3. an ACTIVE SellerUser row links that user to that seller.
  * Being merely authenticated is never enough — a SellerUser for Seller B can
  * never resolve a context for Seller C.
+ *
+ * Phase 6 additionally resolves `ctx.verificationStatus` here (Seller
+ * Verification gate status) as a fourth, READ-ONLY piece of context — it does
+ * NOT change the pass/fail outcome above. A DRAFT/PENDING/REJECTED/no-row
+ * THIRD_PARTY seller still gets a valid context and can still reach the
+ * portal, Settings, and Verification itself; only specific gated actions
+ * (`requireVerifiedSellerSession`, `offerPublishBlockers`) reject on this
+ * value. Do not add a verification check to this function's own pass/fail
+ * logic — that would also lock an unverified seller out of Settings and
+ * Verification, which is exactly what must stay reachable.
  */
 
 export const getCurrentSellerContext = cache(
@@ -39,7 +50,7 @@ export const getCurrentSellerContext = cache(
 
     const seller = await prisma.seller.findFirst({
       where: { OR: [{ id: key }, { slug: key }] },
-      select: { id: true, status: true, displayName: true },
+      select: { id: true, status: true, type: true, displayName: true },
     });
     if (!seller || seller.status !== "APPROVED") return null;
 
@@ -50,6 +61,7 @@ export const getCurrentSellerContext = cache(
     if (!membership || membership.status !== "ACTIVE") return null;
 
     const role = membership.role as SellerUserRole;
+    const verificationStatus = await resolveSellerVerificationGateStatus(seller);
     return {
       sellerId: seller.id,
       sellerName: seller.displayName,
@@ -57,6 +69,7 @@ export const getCurrentSellerContext = cache(
       userId: user.id,
       role,
       permissions: permissionsForSellerRole(role),
+      verificationStatus,
     };
   },
 );

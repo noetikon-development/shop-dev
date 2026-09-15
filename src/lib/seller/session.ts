@@ -8,7 +8,10 @@ import {
   getCurrentSellerContext,
   sellerCan,
 } from "@/lib/marketplace/seller-context";
+import { sellerVerificationSatisfiesGate } from "@/lib/marketplace/seller-permissions";
 import type { SellerContext, SellerMembership, SellerUserRole } from "@/lib/marketplace/types";
+
+export { sellerVerificationSatisfiesGate };
 
 /**
  * Portal session resolution for `/seller`.
@@ -112,4 +115,46 @@ export async function requireSellerSessionPermission(
   const session = await requireSellerSession();
   if (!sellerCan(session.ctx, permission)) forbidden();
   return session;
+}
+
+/** Machine-readable reason `requireVerifiedSellerSession` fails with. */
+export type SellerVerificationGateFailureReason = "SELLER_NOT_VERIFIED";
+
+export type VerifiedSellerSessionResult =
+  | { ok: true; session: SellerSession }
+  | { ok: false; reason: SellerVerificationGateFailureReason };
+
+/**
+ * Require a seller session AND permission — exactly `requireSellerSessionPermission`
+ * — AND, for THIRD_PARTY sellers only, that the seller's LATEST
+ * SellerVerification row is APPROVED (Phase 6). FIRST_PARTY sellers
+ * (`ctx.verificationStatus === "EXEMPT"`) always pass this extra check.
+ *
+ * Unlike every other seller session helper, a failed verification check does
+ * NOT raise the Next.js `forbidden()` interrupt — `forbidden()` takes no
+ * argument (`(): never`) and cannot carry a reason, and this failure is a
+ * normal, recoverable business state (the seller can fix it by finishing
+ * verification), not an authorization violation. Callers get back a typed,
+ * machine-readable `{ ok: false, reason: "SELLER_NOT_VERIFIED" }` instead, so
+ * a server action can turn it into an inline form message the same way it
+ * already handles any other domain-level `SellerRepoError` — and a test can
+ * assert on `reason` directly, without a live Next.js request, proving this
+ * is a server-side gate rather than UI hiding.
+ *
+ * Authentication and permission failures still behave exactly as before
+ * (redirect to `/seller/login`, or the `forbidden()` interrupt) — this
+ * function only adds the verification check on top, and ONLY for the specific
+ * actions that call it. It is deliberately NOT used by the portal layout or
+ * by `getCurrentSellerContext` itself — Settings, Verification, Dashboard,
+ * and every view-only page must stay reachable regardless of verification
+ * status.
+ */
+export async function requireVerifiedSellerSession(
+  permission: string,
+): Promise<VerifiedSellerSessionResult> {
+  const session = await requireSellerSessionPermission(permission);
+  if (sellerVerificationSatisfiesGate(session.ctx.verificationStatus)) {
+    return { ok: true, session };
+  }
+  return { ok: false, reason: "SELLER_NOT_VERIFIED" };
 }

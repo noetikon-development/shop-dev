@@ -196,6 +196,16 @@ export type VariantAvailability = {
 export type OfferResolutionContext = Record<string, never>;
 
 /**
+ * Resolved Seller Verification gate status (Phase 6). The LATEST
+ * `SellerVerification` row's status for this seller — never "any row ever
+ * approved" — or `"NONE"` when no row exists yet. `"EXEMPT"` is reserved for
+ * sellers the verification gate does not apply to at all (FIRST_PARTY —
+ * Axiaro's own store has no third-party KYC concept to satisfy), resolved
+ * without requiring a verification row to exist.
+ */
+export type SellerVerificationGateStatus = "EXEMPT" | "NONE" | "DRAFT" | "PENDING" | "APPROVED" | "REJECTED";
+
+/**
  * Seller-scoped request context. Established once, server-side, at the top of
  * every future /seller request / server action (there are none in Phase 9C).
  * Mirrors the shape of `AdminContext` in src/lib/admin/rbac.ts.
@@ -210,6 +220,21 @@ export type SellerContext = {
   role: SellerUserRole;
   /** union of seller-scoped permission keys granted by `role` */
   permissions: Set<string>;
+  /**
+   * Phase 6 — resolved by `getCurrentSellerContext()` for every REAL session,
+   * from the same "latest row by createdAt DESC" query every verification
+   * read already uses. Optional on the type (not every `SellerContext` in
+   * this codebase is built by `getCurrentSellerContext` — e.g. the admin
+   * plane's synthetic context for seeding draft offers, or a pre-Phase-6 test
+   * fixture) so adding this field never forces an unrelated call site to
+   * change just to keep compiling. `requireVerifiedSellerSession` only ever
+   * reads this off a real, freshly-resolved session, so it never sees
+   * `undefined` in practice; `offerPublishBlockers`'s own verification check
+   * is driven by a fresh DB read inside its own transaction, not by this
+   * field, precisely so activation can never be bypassed by a ctx that
+   * happens to omit it.
+   */
+  verificationStatus?: SellerVerificationGateStatus;
 };
 
 /**
