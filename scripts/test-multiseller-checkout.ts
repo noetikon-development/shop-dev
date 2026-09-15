@@ -28,6 +28,7 @@ import { resolveSellerCommissionBps } from "../src/lib/marketplace/commission";
 import { shouldAutoConfirmAtCheckout, canTransition } from "../src/lib/orders/status";
 import { sendSellerOrderReceived } from "../src/lib/email/notifications";
 import { cascadeSellerOrderFromParent } from "../src/lib/marketplace/seller-order-repository";
+import { evaluateOrderAggregation } from "../src/lib/marketplace/state-reconcile";
 
 const prisma = new PrismaClient();
 
@@ -39,6 +40,15 @@ const ok = (name: string, cond: boolean, detail = "") => {
 };
 const read = (p: string) => readFileSync(new URL(`../${p}`, import.meta.url), "utf8");
 class Rollback extends Error {}
+/** Mirrors checkout.ts's own `CheckoutError` — thrown for a failure that
+ *  occurs AFTER this attempt has already written to `tx` (cart conversion,
+ *  a partial inventory decrement, …), so the caller MUST roll back to a
+ *  savepoint rather than just discarding a returned value — a plain
+ *  `return` would leave the already-applied writes sitting in `tx`. */
+class CheckoutCoreError extends Error {
+  code: string;
+  constructor(code: string) { super(code); this.code = code; }
+}
 
 function roundHalfUp(x: number): number {
   return Math.sign(x) * Math.round(Math.abs(x));
@@ -147,16 +157,30 @@ async function runMultiSellerCheckoutCore(
 
   if (couponRow?.usageLimit != null) {
     const used = await tx.couponRedemption.count({ where: { couponId: couponRow.id, order: { is: { status: { not: "CANCELLED" } } } } });
-    if (used >= couponRow.usageLimit) throw new Rollback(); // -> COUPON, tested separately
+    // Already past the cart-conversion write above — MUST throw (not return)
+    // so the caller's savepoint rolls back that conversion too, exactly as
+    // checkout.ts's own thrown CheckoutError does inside its real $transaction.
+    if (used >= couponRow.usageLimit) throw new CheckoutCoreError("COUPON");
   }
 
+  // Deterministic processing order (guards against a real bug: two lines
+  // inserted in the same millisecond otherwise tie on `orderBy: createdAt`,
+  // making "which line fails first" a coin flip rather than a genuine test
+  // of "a later seller's failure rolls back an earlier seller's already-
+  // applied decrement"). Lines are already the authoritative, re-validated
+  // order from the cart; sorting here only fixes the tie, never reorders a
+  // real ordering difference.
   for (const l of lines) {
     const locked = await tx.$queryRawUnsafe<{ id: string; quantity: number; reserved: number }[]>(
       `SELECT "id","quantity","reserved" FROM "OfferInventory" WHERE "offerId"=$1 FOR UPDATE`, l.offerId,
     );
     const oi = locked[0];
     if (!oi || oi.quantity - l.quantity < 0 || oi.quantity - l.quantity < oi.reserved) {
-      return { ok: false, code: "STOCK" };
+      // Already past the cart-conversion write, and possibly past one or
+      // more PRIOR lines' inventory decrements in THIS same loop — MUST
+      // throw so the caller's savepoint rolls back everything this attempt
+      // already wrote, matching checkout.ts's real all-or-nothing guarantee.
+      throw new CheckoutCoreError("STOCK");
     }
     await tx.offerInventory.update({ where: { id: oi.id }, data: { quantity: oi.quantity - l.quantity } });
     await tx.offerAdjustment.create({ data: { offerInventoryId: oi.id, previousQuantity: oi.quantity, delta: -l.quantity, newQuantity: oi.quantity - l.quantity, reason: "SALE", note: `Order ${orderNumber}` } });
@@ -226,6 +250,34 @@ async function runMultiSellerCheckoutCore(
   return { ok: true, orderId: order.id, sellerOrderIds: createdSellerOrderIds };
 }
 
+// Every call site goes through this SAVEPOINT wrapper (never
+// `runMultiSellerCheckoutCore` directly) — matching the established
+// rollback-testing idiom already used elsewhere in this codebase
+// (`scripts/test-9e3d1.ts`, `test-9e3d6.ts`: "SAVEPOINT … / ROLLBACK TO
+// SAVEPOINT …"). All of this test file's fixtures/assertions run inside ONE
+// big outer transaction that itself only rolls back at the very end
+// (`throw new Rollback()`), so a `CheckoutCoreError` thrown mid-attempt — a
+// partial cart-conversion, a partial inventory decrement — must be rolled
+// back to a savepoint here, not just discarded, or the partial write would
+// leak into every assertion that runs afterward in the same outer tx.
+let spCounter = 0;
+async function tryCheckout(
+  tx: Prisma.TransactionClient,
+  args: Parameters<typeof runMultiSellerCheckoutCore>[1],
+): Promise<WriterResult> {
+  const sp = `sp_ms_${++spCounter}`;
+  await tx.$queryRawUnsafe(`SAVEPOINT ${sp}`);
+  try {
+    return await runMultiSellerCheckoutCore(tx, args);
+  } catch (e) {
+    if (e instanceof CheckoutCoreError) {
+      await tx.$queryRawUnsafe(`ROLLBACK TO SAVEPOINT ${sp}`);
+      return { ok: false, code: e.code };
+    }
+    throw e;
+  }
+}
+
 // --- fixtures ---------------------------------------------------------------
 // Synthetic sellers are always THIRD_PARTY — `Seller.type` has a partial
 // UNIQUE index (`seller_one_first_party`, `WHERE type = 'FIRST_PARTY'`)
@@ -251,10 +303,17 @@ async function mkOffer(tx: Prisma.TransactionClient, sellerId: string, variantId
   await tx.offerInventory.create({ data: { offerId: o.id, sellerSku: `oi-${Math.random().toString(36).slice(2, 9)}`, quantity: offerQty, reserved: 0, reorderPoint: 3 } });
   return o.id;
 }
+// Strictly-increasing explicit timestamp per line — `runMultiSellerCheckoutCore`
+// re-reads `cart.items` `orderBy: { createdAt: "asc" }`, and two lines inserted
+// in the same wall-clock millisecond would otherwise tie (making "which line
+// is processed first" a coin flip instead of a real, repeatable test of
+// checkout-order-dependent rollback behaviour, e.g. test H below).
+let lineSeq = 0;
 async function addLine(tx: Prisma.TransactionClient, cartId: string, variantId: string, offerId: string, qty: number, snap: number) {
+  const at = new Date(Date.now() + ++lineSeq); // +1ms per call, monotonically increasing
   await tx.$executeRawUnsafe(
-    `INSERT INTO "CartItem" ("id","cartId","variantId","offerId","quantity","priceSnapshot","createdAt","updatedAt") VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,now(),now())`,
-    cartId, variantId, offerId, qty, snap,
+    `INSERT INTO "CartItem" ("id","cartId","variantId","offerId","quantity","priceSnapshot","createdAt","updatedAt") VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,$6)`,
+    cartId, variantId, offerId, qty, snap, at,
   );
 }
 
@@ -317,7 +376,7 @@ async function main() {
       {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 2, 1000); // 2000
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA]));
         ok("A · single-seller checkout succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           ok("A · exactly one SellerOrder", r.sellerOrderIds.length === 1);
@@ -336,7 +395,7 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 1, 1000); // seller A: 1000
         await addLine(tx, c.id, vB, oB, 1, 3000); // seller B: 3000
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB]));
         ok("B · two-seller checkout succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           twoSellerOrderId = r.orderId;
@@ -356,7 +415,7 @@ async function main() {
         await addLine(tx, c.id, vA, oA, 1, 1000);
         await addLine(tx, c.id, vB, oB, 1, 3000);
         await addLine(tx, c.id, vC, oC, 1, 2000);
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB, sellerC]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB, sellerC]));
         ok("C · three-seller checkout succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) ok("C · exactly three SellerOrders", r.sellerOrderIds.length === 3);
       }
@@ -366,7 +425,7 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 1, 1000); // 1000
         await addLine(tx, c.id, vB, oB, 1, 3000); // 3000
-        const r = await runMultiSellerCheckoutCore(tx, { ...wargs(c.id, [sellerA, sellerB]), method: { ...method!, rate: 400 } });
+        const r = await tryCheckout(tx, { ...wargs(c.id, [sellerA, sellerB]), method: { ...method!, rate: 400 } });
         ok("D · checkout with shipping succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           const rows = await tx.sellerOrder.findMany({ where: { orderId: r.orderId }, select: { sellerId: true, shippingFee: true } });
@@ -383,7 +442,7 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 1, 1000); // 1000
         await addLine(tx, c.id, vB, oB, 1, 3000); // 3000
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB], coupon.code));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB], coupon.code));
         ok("E · checkout with a coupon succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           const rows = await tx.sellerOrder.findMany({ where: { orderId: r.orderId }, select: { sellerId: true, discountAllocated: true, merchandiseSubtotal: true } });
@@ -401,7 +460,7 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vFP, oFP, 1, 1000); // FIRST_PARTY, 0%
         await addLine(tx, c.id, vA, oA, 1, 1000); // THIRD_PARTY, 10%
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerFP, sellerA]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerFP, sellerA]));
         ok("F · mixed FIRST_PARTY + THIRD_PARTY checkout succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           const rows = await tx.sellerOrder.findMany({ where: { orderId: r.orderId }, select: { sellerId: true, commissionAmount: true, commissionRate: true } });
@@ -423,15 +482,24 @@ async function main() {
         await addLine(tx, c.id, vA, oA, 1, 1000);
         await addLine(tx, c.id, vB, oB, 1, 3000);
         await addLine(tx, c.id, vC, oC, 1, 2000);
-        const r = await runMultiSellerCheckoutCore(tx, { ...wargs(c.id, [sellerA, sellerB, sellerC], coupon.code), method: { ...method!, rate: 150 } });
+        const r = await tryCheckout(tx, { ...wargs(c.id, [sellerA, sellerB, sellerC], coupon.code), method: { ...method!, rate: 150 } });
         ok("G · three-seller checkout with shipping + discount succeeds", r.ok === true, JSON.stringify(r));
         if (r.ok) {
           const order = await tx.order.findUniqueOrThrow({ where: { id: r.orderId }, select: { subtotal: true, shippingFee: true, discountTotal: true, grandTotal: true } });
-          const rows = await tx.sellerOrder.findMany({ where: { orderId: r.orderId }, select: { merchandiseSubtotal: true, shippingFee: true, discountAllocated: true, total: true } });
+          const rows = await tx.sellerOrder.findMany({ where: { orderId: r.orderId }, select: { id: true, sellerId: true, merchandiseSubtotal: true, shippingFee: true, discountAllocated: true, total: true } });
           ok("G · Σ SellerOrder.merchandiseSubtotal === Order.subtotal", rows.reduce((n, x) => n + x.merchandiseSubtotal, 0) === order.subtotal);
           ok("G · Σ SellerOrder.shippingFee === Order.shippingFee", rows.reduce((n, x) => n + x.shippingFee, 0) === order.shippingFee);
           ok("G · Σ SellerOrder.discountAllocated === Order.discountTotal", rows.reduce((n, x) => n + x.discountAllocated, 0) === order.discountTotal);
           ok("G · Σ SellerOrder.total === Order.grandTotal", rows.reduce((n, x) => n + x.total, 0) === order.grandTotal);
+
+          // Phase A + B + C tied together: run the REAL, committed Phase C
+          // `evaluateOrderAggregation` (not a re-check of the same arithmetic
+          // above by hand) against this genuine multi-seller order's
+          // persisted rows — proving the three phases agree end-to-end.
+          const items = await tx.orderItem.findMany({ where: { orderId: r.orderId }, select: { sellerOrderId: true, sellerId: true, lineTotal: true } });
+          const aggFindings = evaluateOrderAggregation(order, rows, items);
+          ok("G · Phase C's real evaluateOrderAggregation (rules I–N) reports ZERO findings for this genuine multi-seller order",
+            aggFindings.length === 0, JSON.stringify(aggFindings));
         }
       }
 
@@ -442,7 +510,7 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 2, 1000);
         await addLine(tx, c.id, vB, oB, 3, 3000);
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB]));
         ok("H · multi-seller checkout with real inventory succeeds", r.ok === true, JSON.stringify(r));
         const invAfterA = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oA }, select: { quantity: true } })).quantity;
         const invAfterB = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oB }, select: { quantity: true } })).quantity;
@@ -450,19 +518,34 @@ async function main() {
         ok("H · seller B's own offer decremented by exactly its own line qty (3)", invBeforeB - invAfterB === 3);
 
         // Now force seller C's line to fail (request more than the 5 in stock)
-        // while A/B lines would otherwise succeed — confirm nothing from ANY
-        // seller is committed.
+        // while A's line — added FIRST, so it is genuinely processed and its
+        // inventory genuinely decremented before C's line fails — would
+        // otherwise succeed. This proves real rollback of an ALREADY-APPLIED
+        // write, not just "the failing line happened to be checked first."
+        // A coupon is attached too, so its redemption-rollback can be
+        // verified in the same failing attempt (Step 7's full checklist).
+        const coupon7 = await tx.coupon.create({ data: { code: `MSROLLBACK-${sfx}`, type: "FIXED", value: 50, active: true }, select: { id: true, code: true } });
         const invBeforeA2 = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oA }, select: { quantity: true } })).quantity;
+        const invBeforeC = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oC }, select: { quantity: true } })).quantity;
         const cFail = await freshCart();
-        await addLine(tx, cFail.id, vA, oA, 1, 1000);
-        await addLine(tx, cFail.id, vC, oC, 99, 2000); // only 5 in stock
+        await addLine(tx, cFail.id, vA, oA, 1, 1000); // succeeds and decrements — inserted FIRST
+        await addLine(tx, cFail.id, vC, oC, 99, 2000); // only 5 in stock — fails SECOND
         const orderCountBefore = await tx.order.count();
-        const rFail = await runMultiSellerCheckoutCore(tx, wargs(cFail.id, [sellerA, sellerC]));
+        const sellerOrderCountBefore = await tx.sellerOrder.count();
+        const redemptionCountBefore = await tx.couponRedemption.count();
+        const rFail = await tryCheckout(tx, wargs(cFail.id, [sellerA, sellerC], coupon7.code));
         ok("H · a failing line on one seller aborts the WHOLE checkout (STOCK)", rFail.ok === false && !rFail.ok && rFail.code === "STOCK", JSON.stringify(rFail));
         const invAfterA2 = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oA }, select: { quantity: true } })).quantity;
-        ok("H · seller A's inventory (the OTHER, valid seller) was NOT decremented despite C failing — whole-transaction rollback",
-          invAfterA2 === invBeforeA2);
-        ok("H · no Order row was created for the failed multi-seller checkout", (await tx.order.count()) === orderCountBefore);
+        const invAfterC = (await tx.offerInventory.findFirstOrThrow({ where: { offerId: oC }, select: { quantity: true } })).quantity;
+        ok("H · seller A's ALREADY-DECREMENTED inventory (processed first) is rolled back to its pre-attempt value",
+          invAfterA2 === invBeforeA2, `before=${invBeforeA2} after=${invAfterA2}`);
+        ok("H · seller C's inventory (the failing seller) is unchanged", invAfterC === invBeforeC);
+        ok("H · no Order row remains for the failed multi-seller checkout", (await tx.order.count()) === orderCountBefore);
+        ok("H · no SellerOrder row remains for the failed multi-seller checkout", (await tx.sellerOrder.count()) === sellerOrderCountBefore);
+        ok("H · the coupon redemption for this failed attempt was rolled back (count unchanged)",
+          (await tx.couponRedemption.count()) === redemptionCountBefore);
+        ok("H · the failed cart remains ACTIVE (its own conversion was rolled back)",
+          (await tx.cart.findUniqueOrThrow({ where: { id: cFail.id }, select: { status: true } })).status === "ACTIVE");
       }
 
       // ── I. DUPLICATE CHECKOUT — cart conversion still prevents duplicate order ──
@@ -470,9 +553,9 @@ async function main() {
         const c = await freshCart();
         await addLine(tx, c.id, vA, oA, 1, 1000);
         await addLine(tx, c.id, vB, oB, 1, 3000);
-        const first = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB]));
+        const first = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB]));
         ok("I · first multi-seller checkout on this cart succeeds", first.ok === true, JSON.stringify(first));
-        const second = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB]));
+        const second = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB]));
         ok("I · second attempt on the SAME cart returns the SAME order (idempotent), not a new one",
           second.ok === true && !!first.ok && second.orderId === first.orderId, JSON.stringify({ first, second }));
         const orderCountForCart = await tx.order.count({ where: { cartId: c.id } });
@@ -485,7 +568,7 @@ async function main() {
         const c1 = await freshCart();
         await addLine(tx, c1.id, vA, oA, 1, 1000);
         await addLine(tx, c1.id, vB, oB, 1, 3000);
-        const r1 = await runMultiSellerCheckoutCore(tx, wargs(c1.id, [sellerA, sellerB], coupon.code));
+        const r1 = await tryCheckout(tx, wargs(c1.id, [sellerA, sellerB], coupon.code));
         ok("J · first coupon use (multi-seller) succeeds", r1.ok === true, JSON.stringify(r1));
         const redemptions = await tx.couponRedemption.count({ where: { couponId: coupon.id } });
         ok("J · exactly ONE CouponRedemption row for this coupon", redemptions === 1);
@@ -498,13 +581,16 @@ async function main() {
           const addr2 = await tx.address.create({ data: { userId: secondUser.id, firstName: "T2", lastName: "T2", recipient: "T2 T2", phone: "0900", line1: "1", city: "C", province: "P", postalCode: "0000", country: "PH" }, select: { id: true, phone: true } });
           const c2 = await tx.cart.create({ data: { userId: secondUser.id, status: "ACTIVE" }, select: { id: true } });
           await addLine(tx, c2.id, vA, oA, 1, 1000);
-          let usageBlocked = false;
-          try {
-            await runMultiSellerCheckoutCore(tx, { cartId: c2.id, userId: secondUser.id, userEmail: secondUser.email, sellers: new Map([[sellerA.id, sellerA]]), method: method!, freeThreshold: 0, shipAddr: addr2, couponCode: coupon.code });
-          } catch (e) {
-            if (e instanceof Rollback) usageBlocked = true; else throw e;
-          }
-          ok("J · usage-limit-exhausted coupon still blocks a second (unrelated) checkout, unchanged from single-seller behavior", usageBlocked);
+          // `tryCheckout` catches the thrown CheckoutCoreError("COUPON") and
+          // rolls back to a savepoint — the caller sees a plain {ok:false}
+          // return, exactly like createOrderFromCart's own real callers do.
+          const r2 = await tryCheckout(tx, { cartId: c2.id, userId: secondUser.id, userEmail: secondUser.email, sellers: new Map([[sellerA.id, sellerA]]), method: method!, freeThreshold: 0, shipAddr: addr2, couponCode: coupon.code });
+          ok("J · usage-limit-exhausted coupon still blocks a second (unrelated) checkout, unchanged from single-seller behavior",
+            r2.ok === false && r2.code === "COUPON", JSON.stringify(r2));
+          ok("J · the blocked second cart's OWN cart-conversion was rolled back — cart remains ACTIVE",
+            (await tx.cart.findUniqueOrThrow({ where: { id: c2.id }, select: { status: true } })).status === "ACTIVE");
+          ok("J · no CouponRedemption was created for the blocked second attempt (still exactly one, from the first)",
+            (await tx.couponRedemption.count({ where: { couponId: coupon.id } })) === 1);
         } else {
           ok("J · (skipped — no second user fixture available for the usage-limit cross-check)", true);
         }
@@ -537,7 +623,7 @@ async function main() {
         ok("M · only the FIRST racing UPDATE affects a row", u1 === 1 && u2 === 0);
         // restore for the checkout core to run cleanly
         await tx.cart.update({ where: { id: c.id }, data: { status: "ACTIVE" } });
-        const r = await runMultiSellerCheckoutCore(tx, wargs(c.id, [sellerA, sellerB]));
+        const r = await tryCheckout(tx, wargs(c.id, [sellerA, sellerB]));
         ok("M · after the race, checkout still succeeds exactly once", r.ok === true);
       }
 
@@ -552,7 +638,7 @@ async function main() {
         // N-A. FIRST_PARTY only — unchanged: PENDING_PAYMENT, explicit confirm required.
         const cFp = await freshCart();
         await addLine(tx, cFp.id, vFP, oFP, 1, 1000);
-        const rFp = await runMultiSellerCheckoutCore(tx, wargs(cFp.id, [sellerFP]));
+        const rFp = await tryCheckout(tx, wargs(cFp.id, [sellerFP]));
         ok("N-A · FIRST_PARTY-only checkout succeeds", rFp.ok === true, JSON.stringify(rFp));
         if (rFp.ok) {
           const o = await tx.order.findUniqueOrThrow({ where: { id: rFp.orderId }, select: { status: true } });
@@ -562,7 +648,7 @@ async function main() {
         // N-B. THIRD_PARTY only (single) — unchanged: PROCESSING, auto-confirmed.
         const cB = await freshCart();
         await addLine(tx, cB.id, vA, oA, 1, 1000);
-        const rB = await runMultiSellerCheckoutCore(tx, wargs(cB.id, [sellerA]));
+        const rB = await tryCheckout(tx, wargs(cB.id, [sellerA]));
         ok("N-B · THIRD_PARTY-only (single) checkout succeeds", rB.ok === true, JSON.stringify(rB));
         if (rB.ok) {
           const o = await tx.order.findUniqueOrThrow({ where: { id: rB.orderId }, select: { status: true } });
@@ -574,7 +660,7 @@ async function main() {
         await addLine(tx, cC.id, vA, oA, 1, 1000);
         await addLine(tx, cC.id, vB, oB, 1, 3000);
         await addLine(tx, cC.id, vC, oC, 1, 2000);
-        const rC = await runMultiSellerCheckoutCore(tx, wargs(cC.id, [sellerA, sellerB, sellerC]));
+        const rC = await tryCheckout(tx, wargs(cC.id, [sellerA, sellerB, sellerC]));
         ok("N-C · multi-THIRD_PARTY checkout succeeds", rC.ok === true, JSON.stringify(rC));
         if (rC.ok) {
           const o = await tx.order.findUniqueOrThrow({ where: { id: rC.orderId }, select: { status: true } });
@@ -588,7 +674,7 @@ async function main() {
         await addLine(tx, cD.id, vFP, oFP, 1, 1000);
         await addLine(tx, cD.id, vA, oA, 1, 1000);
         const emailCountBeforeConfirm = await tx.emailLog.count();
-        const rD = await runMultiSellerCheckoutCore(tx, wargs(cD.id, [sellerFP, sellerA]));
+        const rD = await tryCheckout(tx, wargs(cD.id, [sellerFP, sellerA]));
         ok("N-D · mixed checkout succeeds", rD.ok === true, JSON.stringify(rD));
         if (rD.ok) {
           const orderBefore = await tx.order.findUniqueOrThrow({ where: { id: rD.orderId }, select: { status: true } });
