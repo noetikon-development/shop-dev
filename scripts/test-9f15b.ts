@@ -60,7 +60,18 @@ function staticTests() {
   const orderActions = read("src/lib/admin/order-actions.ts");
 
   ok("checkout imports the pure gate from orders/status", /import \{ shouldAutoConfirmAtCheckout \} from "@\/lib\/orders\/status";/.test(checkout));
-  ok("autoConfirmParent gated on THIRD_PARTY + COD (paymentMethod NONE)", /const autoConfirmParent = shouldAutoConfirmAtCheckout\(\{\s*\n?\s*sellerType: soSeller\.type,\s*\n?\s*paymentMethod: "NONE",\s*\n?\s*\}\);/.test(checkout));
+  // Multi-seller order creation (Phase B) generalized this from "the one
+  // seller" to "EVERY seller in the cart" — `.every(...)`, each still checked
+  // via the SAME pure `shouldAutoConfirmAtCheckout` gate with the SAME
+  // hardcoded `paymentMethod: "NONE"`. With exactly one seller this reduces to
+  // the exact same boolean as before. (Corrected from an initial `.some(...)`
+  // draft, which incorrectly let a single THIRD_PARTY seller auto-confirm a
+  // cart that also contained a FIRST_PARTY seller — silently bypassing
+  // Axiaro's own mandatory admin "Confirm order" checkpoint. `.every(...)`
+  // requires ALL sellers to qualify, so a mixed cart correctly stays
+  // PENDING_PAYMENT.)
+  ok("autoConfirmParent gated on THIRD_PARTY + COD (paymentMethod NONE), requires EVERY seller to qualify (Phase B, mixed-cart fix)",
+    /const autoConfirmParent = sellerGroupList\.every\(\(g\) =>\s*\n\s*shouldAutoConfirmAtCheckout\(\{ sellerType: g\.seller\.type, paymentMethod: "NONE" \}\),\s*\n\s*\);/.test(checkout));
   ok("Order.status is conditional on autoConfirmParent", /status: autoConfirmParent \? "PROCESSING" : "PENDING_PAYMENT",/.test(checkout));
   ok("paymentMethod / paymentStatus are UNCHANGED (still NONE / PENDING literals)", /paymentMethod: "NONE",\s*\n\s*paymentStatus: "PENDING",/.test(checkout));
   ok("a PROCESSING OrderEvent is added only when autoConfirmParent", /\.\.\.\(autoConfirmParent\s*\n?\s*\? \[\s*\n?\s*\{\s*\n?\s*status: "PROCESSING",\s*\n?\s*title: "Preparing your order",\s*\n?\s*detail: ORDER_STATUS_META\.PROCESSING\?\.description \?\? null,/.test(checkout));

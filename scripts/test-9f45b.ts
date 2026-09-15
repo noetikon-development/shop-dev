@@ -72,25 +72,30 @@ function reconcilerTests() {
 }
 
 // ---------------------------------------------------------------------------
-// C · multi-seller checkout gate is unconditional
+// C · multi-seller checkout (Phase B superseded the single-seller-only gate
+//     this section originally asserted — see the block comment below)
 // ---------------------------------------------------------------------------
 
 function multiSellerTests() {
-  console.log("\nC · multi-seller checkout stays blocked (flag-independent)");
+  console.log("\nC · multi-seller checkout order creation (Phase B)");
   const checkout = read("src/lib/checkout.ts");
-  // The abort is unconditional — it does NOT read the flag near the gate.
-  ok("C · checkout aborts a multi-seller cart: `if (sellerIds.size !== 1)` → code \"SELLER\"",
-    /if \(sellerIds\.size !== 1\) \{\s*\n\s*return \{ ok: false, code: "SELLER"/.test(checkout));
-  const gateRegion = checkout.slice(
-    Math.max(0, checkout.indexOf("if (sellerIds.size !== 1)") - 600),
-    checkout.indexOf("if (sellerIds.size !== 1)") + 200,
-  );
-  ok("C · the abort does NOT read marketplace.multiSellerCheckout (unconditional)",
-    !/getStoreSetting\("marketplace\.multiSellerCheckout"\)/.test(gateRegion) && !/multiSellerCheckout.*===.*"true"/.test(gateRegion));
-  ok("C · checkout comment reflects the pilot meaning (flag = 3P offer visibility only, gate is permanent)",
-    /PERMANENT gate/.test(checkout) && /only controls\s*\n?\s*\*\s*whether THIRD_PARTY offers may go ACTIVE/.test(checkout));
-  ok("C · the SELLER error message stays generic (no seller identity leaked)",
-    /GENERIC_SELLER_ERROR =\s*\n?\s*"[^"]*"/.test(checkout) && !/GENERIC_SELLER_ERROR = `[^`]*\$\{/.test(checkout));
+  // Multi-seller order creation (Phase B) replaced the old unconditional
+  // "sellerIds.size !== 1 -> SELLER" abort this section used to assert with
+  // one SellerOrder PER distinct seller (an EMPTY seller set is still
+  // rejected, as EMPTY — not SELLER). `GENERIC_SELLER_ERROR` and the
+  // single-seller gate are both gone; assert their absence instead of their
+  // (now removed) presence, and confirm the new seller-grouping logic is
+  // still independent of `marketplace.multiSellerCheckout` (that flag only
+  // ever governed 3P offer visibility, never checkout order creation, and
+  // still does not — there is no gate left for it to have controlled).
+  ok("C · the old single-seller-only abort (`sellerIds.size !== 1` -> \"SELLER\") is gone",
+    !/if \(sellerIds\.size !== 1\)/.test(checkout) && !/GENERIC_SELLER_ERROR/.test(checkout));
+  ok("C · checkout groups cart lines by seller and rejects only an EMPTY seller set",
+    /sellerGroups\.size === 0/.test(checkout) && /code: "EMPTY"/.test(checkout));
+  ok("C · seller grouping does NOT read marketplace.multiSellerCheckout (still flag-independent)",
+    !/getStoreSetting\("marketplace\.multiSellerCheckout"\)/.test(checkout) && !/multiSellerCheckout.*===.*"true"/.test(checkout));
+  ok("C · checkout comment documents the new multi-seller architecture (Phase B)",
+    /Multi-seller order creation \(Phase B\)/.test(checkout) && /one `SellerOrder` is created per distinct seller/.test(checkout));
 
   // stale test assertions updated: no live test still asserts the flag is "false"
   const staleFalse = [

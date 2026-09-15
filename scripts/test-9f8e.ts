@@ -188,8 +188,12 @@ function staticTests() {
   // Seller isolation
   ok("isolation · seller repo scopes every query on ctx.sellerId", (sellerRepo.match(/ctx\.sellerId/g) ?? []).length >= 3);
 
-  // Scope guards
-  ok("scope · checkout.ts commission base + rounding untouched by this phase (9F-39B swapped the rate source only)", /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(read("src/lib/checkout.ts")) && /resolveSellerCommissionBps\(soSeller\)/.test(read("src/lib/checkout.ts")) && !/9F-8e/.test(read("src/lib/checkout.ts")));
+  // Scope guards. Multi-seller order creation (Phase B, later than this
+  // phase) moved the commission computation inside a per-seller loop —
+  // `group.merchandiseSubtotal` / `group.seller` replace the old bare
+  // `subtotal` / `soSeller` — but the rounding/rate-resolution behavior this
+  // phase actually cares about (9F-39B's rate-source swap) is unchanged.
+  ok("scope · checkout.ts commission base + rounding untouched by this phase (9F-39B swapped the rate source only)", /const sellerCommissionAmount = roundHalfUp\(\s*\n\s*\(group\.merchandiseSubtotal \* commissionRateBps\) \/ 10000,\s*\n\s*\);/.test(read("src/lib/checkout.ts")) && /resolveSellerCommissionBps\(group\.seller\)/.test(read("src/lib/checkout.ts")) && !/9F-8e/.test(read("src/lib/checkout.ts")));
   ok("scope · no multiSellerCheckout / PayMongo write in the new code", ![settlement, adminRepo, adminActions, sellerRepo].some((f) => /multiSellerCheckout.*=.*"true"|PAYMONGO_/.test(f)));
   ok("scope · seller-repository.ts (offer activation) not touched by this phase", !/9F-8e/.test(read("src/lib/marketplace/seller-repository.ts")));
   ok("scope · admin/seller detail pages label as bookkeeping-only, not a real transfer", /no automatic transfer/i.test(adminDetailPage) && /outside the platform/i.test(sellerDetailPage));

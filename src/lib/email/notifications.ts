@@ -863,7 +863,21 @@ function paymentMethodLabel(method: string): string {
 
 export async function sendSellerOrderReceived(
   orderId: string,
-  opts: { retry?: boolean; idempotencyKey?: string; client?: Prisma.TransactionClient } = {},
+  opts: {
+    retry?: boolean;
+    idempotencyKey?: string;
+    client?: Prisma.TransactionClient;
+    /**
+     * Phase B (multi-seller checkout): which SellerOrder on this Order to
+     * notify about. Omitted = today's exact default, `sellerOrders[0]` —
+     * correct and unchanged for the (still overwhelmingly common)
+     * single-seller order. A multi-seller order's checkout caller passes this
+     * once per THIRD_PARTY SellerOrder (each with its own `idempotencyKey`,
+     * since the default key below is keyed by `orderId` and would otherwise
+     * collide across sellers on the same order).
+     */
+    sellerOrderId?: string;
+  } = {},
 ): Promise<DispatchResult> {
   const idempotencyKey = opts.idempotencyKey ?? `SELLER_ORDER_RECEIVED:${orderId}`;
   // 9F-45B — any failure BEFORE renderAndDispatch/failNoRecipient still leaves a
@@ -904,7 +918,9 @@ export async function sendSellerOrderReceived(
       },
     });
     if (!order) return failPrep("order_not_found");
-    const so = order.sellerOrders[0];
+    const so = opts.sellerOrderId
+      ? order.sellerOrders.find((s) => s.id === opts.sellerOrderId)
+      : order.sellerOrders[0];
     if (!so) return failPrep("seller_order_not_found");
     // 1P (Axiaro-fulfilled) orders: Axiaro already got `order_received_ops`.
     // Genuinely nothing to send — SKIPPED, no row (not a delivery failure).

@@ -121,9 +121,15 @@ function staticTests() {
     const region = checkout.slice(i - 4000, i);
     return !/resolveWinningOfferView\(|pickWinningOffer\(/.test(region);
   })());
-  ok("checkout · commission basis unchanged — roundHalfUp((subtotal * <rate bps>) / 10000), subtotal from unitPrice (9F-39B: rate via resolveSellerCommissionBps, base/rounding identical)",
-    /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(checkout) &&
-    /const commissionRateBps = resolveSellerCommissionBps\(soSeller\);/.test(checkout) &&
+  // Multi-seller order creation (Phase B) moved this computation inside a
+  // per-seller loop — the base is that seller's OWN `merchandiseSubtotal`
+  // (from `unitPrice × quantity` summed over just that seller's own lines),
+  // never the whole order's, but the rate resolution and rounding are
+  // unchanged. With exactly one seller this is numerically identical to the
+  // old whole-order `subtotal`.
+  ok("checkout · commission basis unchanged — roundHalfUp((seller's own subtotal * <rate bps>) / 10000), subtotal from unitPrice (9F-39B: rate via resolveSellerCommissionBps, base/rounding identical)",
+    /const sellerCommissionAmount = roundHalfUp\(\s*\n\s*\(group\.merchandiseSubtotal \* commissionRateBps\) \/ 10000,\s*\n\s*\);/.test(checkout) &&
+    /const commissionRateBps = resolveSellerCommissionBps\(group\.seller\);/.test(checkout) &&
     !/compareAtPrice[\s\S]{0,80}commission/i.test(checkoutCode));
 
   // D — order detail (customer)

@@ -376,8 +376,17 @@ function staticChecks() {
   ok("S  checkout price is the bound offer price (o.price)", /unitPrice:\s*o\.price/.test(code) && /o\.price\s*\*\s*item\.quantity/.test(code));
   ok("S  checkout does NOT call resolveWinningOfferView / re-pick the offer", !/resolveWinningOfferView\s*\(|pickWinningOffer\s*\(|getWinningOffer\s*\(|from ["']@\/lib\/marketplace\/(buy-box|offer-resolver)/.test(code));
   ok("S  9E-3D-5: checkout commits OfferInventory ONLY — commitOfferStockForSale, NO adjustStock / Inventory mirror", /commitOfferStockForSale\s*\(/.test(code) && !/adjustStock\s*\(/.test(code) && !/from ["']@\/lib\/inventory["']/.test(checkout));
-  ok("S  single-seller gate present (sellerIds.size !== 1 -> SELLER)", /sellerIds\.size !== 1/.test(code) && /code: "SELLER"/.test(code));
-  ok("S  exactly one SellerOrder asserted before commit", /soCount !== 1/.test(code));
+  // Multi-seller order creation (Phase B) replaced the single-seller
+  // "sellerIds.size !== 1 -> SELLER" abort with one SellerOrder per distinct
+  // seller (empty seller set still rejected, as EMPTY) and replaced the old
+  // "exactly one SellerOrder" belt-and-braces assert with the post-write
+  // invariants A-F (sum-preservation across N SellerOrders). The "SELLER"
+  // PlaceOrderCode itself is kept (unreachable from this function now, but
+  // still type/UI-compatible) — see checkout.ts's own comment on the type.
+  ok("S  checkout creates one SellerOrder per distinct seller (Phase B) — no single-seller cap remains",
+    !/sellerIds\.size !== 1/.test(code) && /sellerGroups\.size === 0/.test(code));
+  ok("S  post-write invariants replace the old single-SellerOrder assert (sum-of-SellerOrder checks, not soCount !== 1)",
+    !/soCount !== 1/.test(code) && /persistedSellerOrders\.length !== sellerGroupList\.length/.test(code));
   ok("S  checkout-flow treats SELLER like STOCK (back to bag)", /res\.code === "SELLER"/.test(flow));
   ok("S  offer-inventory writer touches OfferInventory only (no Inventory / Variant.stock)", !/tx\.inventory\.|prisma\.inventory\.|(FROM|UPDATE|INTO)\s+"Inventory"|"Variant"\s+SET/i.test(oiCode));
   ok("S  marketplace.multiSellerCheckout still NOT in SETTINGS_REGISTRY", !/marketplace\.multiSellerCheckout/.test(registry));

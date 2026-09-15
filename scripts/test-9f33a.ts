@@ -95,12 +95,24 @@ function staticTests() {
     /status: autoConfirmParent \? "PROCESSING" : "PENDING_PAYMENT",/.test(checkout));
   ok("checkout · COD invariants untouched — paymentMethod NONE, paymentStatus PENDING",
     /paymentMethod: "NONE",\s*\n\s*paymentStatus: "PENDING",/.test(checkout));
-  ok("checkout · 9F-33A pre-write invariant: a THIRD_PARTY order that would NOT auto-confirm is refused",
-    /if \(soSeller\.type === "THIRD_PARTY" && !autoConfirmParent\) \{[\s\S]{0,400}return \{\s*\n\s*ok: false,\s*\n\s*code: "VALIDATION",/.test(checkout));
+  // Multi-seller order creation (Phase B) generalized both the 9F-33A guard
+  // and the `autoConfirmParent` construction from "the one seller" to "EVERY
+  // seller in the cart" — corrected from an initial `.some(...)` draft that
+  // let a lone THIRD_PARTY seller auto-confirm a cart that also contained a
+  // FIRST_PARTY seller (bypassing Axiaro's own mandatory admin "Confirm
+  // order" checkpoint). With `.every(...)`, `autoConfirmParent` is `true`
+  // only when EVERY seller qualifies, so the guard now checks "every seller
+  // is THIRD_PARTY" (`allSellersThirdParty`) rather than "any seller is
+  // THIRD_PARTY" — the scenario it protects (an all-THIRD_PARTY cart stuck at
+  // PENDING_PAYMENT) is unchanged; a MIXED cart intentionally staying at
+  // PENDING_PAYMENT is now correct behaviour, not a violation.
+  ok("checkout · 9F-33A pre-write invariant: an all-THIRD_PARTY cart that would NOT auto-confirm is refused",
+    /const allSellersThirdParty = sellerGroupList\.every\(\(g\) => g\.seller\.type === "THIRD_PARTY"\);\s*\n\s*if \(allSellersThirdParty && !autoConfirmParent\) \{[\s\S]{0,400}return \{\s*\n\s*ok: false,\s*\n\s*code: "VALIDATION",/.test(checkout));
   ok("checkout · that invariant fires BEFORE prisma.$transaction (a violation writes nothing)",
-    checkout.indexOf('soSeller.type === "THIRD_PARTY" && !autoConfirmParent') < checkout.indexOf("await prisma.$transaction"));
-  ok("checkout · shouldAutoConfirmAtCheckout call unchanged (still THIRD_PARTY + paymentMethod NONE)",
-    /const autoConfirmParent = shouldAutoConfirmAtCheckout\(\{\s*\n\s*sellerType: soSeller\.type,\s*\n\s*paymentMethod: "NONE",\s*\n\s*\}\);/.test(checkout));
+    checkout.indexOf("const allSellersThirdParty = sellerGroupList.every(") >= 0 &&
+    checkout.indexOf("const allSellersThirdParty = sellerGroupList.every(") < checkout.indexOf("await prisma.$transaction"));
+  ok("checkout · shouldAutoConfirmAtCheckout call unchanged (still THIRD_PARTY + paymentMethod NONE), requires EVERY seller to qualify (mixed-cart fix)",
+    /const autoConfirmParent = sellerGroupList\.every\(\(g\) =>\s*\n\s*shouldAutoConfirmAtCheckout\(\{ sellerType: g\.seller\.type, paymentMethod: "NONE" \}\),\s*\n\s*\);/.test(checkout));
   ok("orders/status · shouldAutoConfirmAtCheckout unchanged (THIRD_PARTY ∧ COD)",
     /return opts\.sellerType === "THIRD_PARTY" && cod;/.test(status));
 

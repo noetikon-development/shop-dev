@@ -145,10 +145,14 @@ function staticTests() {
     /if \(seller\.type === "FIRST_PARTY"\) return 0;/.test(commissionMod) &&
     /const own = seller\.commissionRate;/.test(commissionMod));
 
-  // F/G — checkout
-  ok("F/G · checkout resolves via resolveSellerCommissionBps(soSeller) and freezes it",
-    /const commissionRateBps = resolveSellerCommissionBps\(soSeller\);/.test(checkoutCode) &&
-    /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(checkoutCode));
+  // F/G — checkout. Multi-seller order creation (Phase B) moved this inside a
+  // per-seller loop — `group.seller` / `group.merchandiseSubtotal` replace the
+  // old bare `soSeller` / `subtotal`, but it's still resolved and frozen the
+  // exact same way, per seller, and reduces to the identical value when there
+  // is exactly one seller (that seller's own subtotal IS the order's).
+  ok("F/G · checkout resolves via resolveSellerCommissionBps(group.seller) per seller group and freezes it",
+    /const commissionRateBps = resolveSellerCommissionBps\(group\.seller\);/.test(checkoutCode) &&
+    /const sellerCommissionAmount = roundHalfUp\(\s*\n\s*\(group\.merchandiseSubtotal \* commissionRateBps\) \/ 10000,\s*\n\s*\);/.test(checkoutCode));
   ok("F/G · SellerOrder.create + OrderItem.createMany snapshot commissionRate: commissionRateBps",
     (checkoutCode.match(/commissionRate: commissionRateBps,/g) ?? []).length === 2 &&
     !/commissionRate: soSeller\.commissionRate/.test(checkoutCode));

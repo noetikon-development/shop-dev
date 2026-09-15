@@ -117,14 +117,20 @@ function staticTests() {
 
   // 8 — checkout's commission BASE + ROUNDING are untouched. (9F-39B swapped the
   // rate SOURCE — `soSeller.commissionRate` → `resolveSellerCommissionBps(soSeller)`
-  // — but the base (`subtotal`), the divisor (10000) and `roundHalfUp` are
-  // identical, and the value is the same for every existing seller.)
+  // — but the divisor (10000) and `roundHalfUp` are identical, and the value is
+  // the same for every existing seller. Multi-seller order creation (Phase B)
+  // moved this computation inside a per-seller loop — the base is now that
+  // seller's OWN `merchandiseSubtotal` rather than the bare whole-order
+  // `subtotal`, which is the correct generalization: with exactly one seller
+  // that seller's own subtotal already equals the whole order's, so the value
+  // is unchanged for every existing (single-seller) order.)
   ok(
-    "8 · checkout.ts commission = roundHalfUp((subtotal * <resolved bps>) / 10000), base + rounding unchanged",
-    /const commissionRateBps = resolveSellerCommissionBps\(soSeller\);/.test(checkout) &&
-      /const sellerCommissionAmount = roundHalfUp\(\(subtotal \* commissionRateBps\) \/ 10000\);/.test(checkout),
+    "8 · checkout.ts commission = roundHalfUp((<seller's own subtotal> * <resolved bps>) / 10000), base + rounding unchanged",
+    /const commissionRateBps = resolveSellerCommissionBps\(group\.seller\);/.test(checkout) &&
+      /const sellerCommissionAmount = roundHalfUp\(\s*\n\s*\(group\.merchandiseSubtotal \* commissionRateBps\) \/ 10000,\s*\n\s*\);/.test(checkout),
   );
-  ok("8 · checkout.ts's single-seller gate untouched", /if \(sellerIds\.size !== 1\)/.test(checkout));
+  ok("8 · checkout.ts creates one SellerOrder per distinct seller (Phase B) — the single-seller-only gate is gone",
+    !/if \(sellerIds\.size !== 1\)/.test(checkout) && /for \(const group of sellerGroupList\)/.test(checkout));
   ok("8 · checkout.ts was not touched to export anything new for this phase", !/export function roundHalfUp/.test(checkout) && !/export const roundHalfUp/.test(checkout));
 
   // scope

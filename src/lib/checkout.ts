@@ -19,6 +19,7 @@ import { getPaymentsConfig } from "@/lib/payments/config";
 import { writeAudit } from "@/lib/admin/audit";
 import { shouldAutoConfirmAtCheckout } from "@/lib/orders/status";
 import { ORDER_STATUS_META } from "@/lib/constants";
+import { allocateShippingFee, allocateDiscount } from "@/lib/marketplace/order-allocation";
 import {
   getActiveShippingMethods,
   getFreeShippingThreshold,
@@ -31,7 +32,7 @@ import {
 
 /**
  * Checkout + order creation (Step 9, shipping added in Step 11; offer-native
- * writer in Phase 9E-3C-2).
+ * writer in Phase 9E-3C-2; multi-seller order creation, Phase B).
  *
  * The order is created ONLY here, server-side. The browser never sends items,
  * prices, shipping amounts or totals — `createOrderFromCart` re-reads the
@@ -39,25 +40,39 @@ import {
  * variant / OFFER / OfferInventory / price, LOADS the chosen shipping method
  * and its rate from the database, recalculates the total, and does the whole
  * thing (cart -> CONVERTED, OfferInventory SALE commit, Parent Order + one
- * SellerOrder + OrderItems) inside one transaction. Payment is a later step:
- * orders are created PENDING_PAYMENT and are never marked paid here.
+ * SellerOrder per distinct seller + that seller's OrderItems) inside one
+ * transaction. Payment is a later step: orders are created PENDING_PAYMENT
+ * and are never marked paid here.
  *
- * Phase 9E-3C-2 — marketplace-native, still single-seller:
+ * Phase 9E-3C-2 — marketplace-native pricing/availability (unchanged by the
+ * multi-seller work below):
  *   - the checkout PRICE is the bound `CartItem.offer.price` (9E-2). It is
  *     NEVER re-picked with `resolveWinningOfferView`; `CartItem.offerId` is
  *     authoritative for this checkout attempt. `Variant.price` is no longer
  *     read for checkout pricing and there is no fallback to it.
  *   - availability is `OfferInventory` (quantity - reserved), never
  *     `Variant.stock`.
- *   - a cart must resolve to exactly ONE distinct Seller. Two sellers ->
- *     the whole checkout aborts before any write. This is a PERMANENT gate,
- *     NOT the `marketplace.multiSellerCheckout` flag: that flag only controls
- *     whether THIRD_PARTY offers may go ACTIVE / appear on the storefront (it
- *     is `"true"` for the 3P pilot). Real multi-seller checkout (multiple
- *     SellerOrders per Order) is a future phase; until it ships, this
- *     `sellerIds.size !== 1` abort is unconditional.
- *   - every new order gets exactly one `SellerOrder`; every `OrderItem` is
- *     linked to it and snapshots `offerId` / `sellerId` / `commissionRate`.
+ *
+ * Multi-seller order creation (Phase B): a cart's lines are grouped by their
+ * bound Offer's seller (never a client-supplied value — the seller always
+ * comes from the re-validated, server-loaded Offer). An empty seller set
+ * (no purchasable lines) is still rejected (`EMPTY`), but there is no longer
+ * a maximum — one `SellerOrder` is created per distinct seller, and every
+ * `OrderItem` links to the `SellerOrder` belonging to ITS OWN line's seller
+ * (grouped in memory before any write, never by array position or
+ * `sellerOrders[0]`). The order-wide shipping fee and discount are still
+ * computed exactly as before (one flat rate, one coupon, both evaluated
+ * against the WHOLE cart) and then *allocated* across sellers by the pure
+ * `allocateShippingFee` / `allocateDiscount` functions
+ * (`marketplace/order-allocation.ts`) — proportional to each seller's own
+ * merchandise subtotal, with an exact-sum guarantee. Commission is computed
+ * independently per seller, on that seller's own subtotal (never the whole
+ * order's), using the exact same rate-resolution and rounding as before.
+ * With exactly one seller this reduces to today's numbers precisely: the
+ * allocation functions return 100% of the total to the sole seller, and that
+ * seller's own subtotal already equals the whole-cart subtotal — there is no
+ * separate "single-seller" code path, the general loop already produces the
+ * identical result.
  *
  * Phase 9E-3D-5 — offer-chain inventory: the SALE stock commit is
  * `OfferInventory` ONLY (`commitOfferStockForSale` + `OfferAdjustment(SALE)`).
@@ -278,7 +293,7 @@ export type PlaceOrderCode =
   | "SHIPPING"
   | "COUPON"
   | "STOCK"
-  | "SELLER" // cart resolves to != 1 distinct seller, or a bound offer/seller is no longer eligible
+  | "SELLER" // Phase B: unreachable from createOrderFromCart (the single-seller cap that used to return this code was removed — an empty seller set is EMPTY, not SELLER). Kept for type/UI compatibility (checkout-flow.tsx still handles it defensively).
   | "ALREADY_ORDERED";
 
 export type PlaceOrderResult =
@@ -475,23 +490,18 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   // 3. Re-validate every line against authoritative data — the BOUND Offer
   //    (`CartItem.offerId`, 9E-2), its Seller and its OfferInventory. The Offer
   //    is NEVER re-picked; `resolveWinningOfferView` is not called here. Build
-  //    order lines at the bound Offer's price.
-  const GENERIC_SELLER_ERROR =
-    "We couldn’t complete your order. Please review your cart and try again.";
-
-  const problems: string[] = [];
-  const sellerIds = new Set<string>();
-  let seller:
-    | {
-        id: string;
-        displayName: string;
-        type: string;
-        status: string;
-        supportEmail: string;
-        commissionRate: number;
-      }
-    | null = null;
-  const lines: {
+  //    order lines at the bound Offer's price, and group them by their bound
+  //    Offer's seller (Phase B) — the seller is always read from the
+  //    server-loaded Offer, never trusted from the client.
+  type SellerInfo = {
+    id: string;
+    displayName: string;
+    type: string;
+    status: string;
+    supportEmail: string;
+    commissionRate: number;
+  };
+  type OrderLine = {
     productId: string;
     variantId: string;
     offerId: string;
@@ -507,7 +517,19 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     // 9F-38B: the bound Offer's compare-at ("was") price snapshot, or null when
     // the Offer has no compare-at. Display/history only — never enters a total.
     originalUnitPrice: number | null;
-  }[] = [];
+  };
+  type SellerGroup = {
+    seller: SellerInfo;
+    lines: OrderLine[];
+    /** Σ this seller's own lines' `lineTotal` — this seller's own merchandise subtotal. */
+    merchandiseSubtotal: number;
+  };
+
+  const problems: string[] = [];
+  const lines: OrderLine[] = [];
+  // Keyed by sellerId; built in the same pass as `lines` so grouping can
+  // never drift from the authoritative, re-validated line data above it.
+  const sellerGroups = new Map<string, SellerGroup>();
 
   for (const item of cart.items) {
     const v = item.variant;
@@ -539,16 +561,13 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       continue;
     }
 
-    sellerIds.add(o.seller.id);
-    seller = o.seller;
-
     const optionSummary = v.optionValues
       .slice()
       .sort((a, b) => a.optionValue.option.sortOrder - b.optionValue.option.sortOrder)
       .map((ov) => ov.optionValue.value)
       .join(" · ");
 
-    lines.push({
+    const line: OrderLine = {
       productId: p.id,
       variantId: v.id,
       offerId: o.id,
@@ -570,7 +589,16 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       // time. Already loaded on `o` (never re-picked). Null when the Offer had no
       // compare-at. Display/history only; never summed into a total.
       originalUnitPrice: o.compareAtPrice ?? null,
-    });
+    };
+    lines.push(line);
+
+    let group = sellerGroups.get(o.seller.id);
+    if (!group) {
+      group = { seller: o.seller, lines: [], merchandiseSubtotal: 0 };
+      sellerGroups.set(o.seller.id, group);
+    }
+    group.lines.push(line);
+    group.merchandiseSubtotal += line.lineTotal;
   }
 
   if (problems.length > 0) {
@@ -580,53 +608,61 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       error: `${problems.join(" ")} Update your cart and try again.`,
     };
   }
-  if (lines.length === 0 || !seller) {
+  if (lines.length === 0 || sellerGroups.size === 0) {
     return { ok: false, code: "EMPTY", error: "Your cart has nothing available to order." };
   }
-
-  // 3b. Single-seller gate (9E-3C-2). This is UNCONDITIONAL — it does NOT read
-  //     `marketplace.multiSellerCheckout` (that flag only governs 3P offer
-  //     visibility, and is `"true"` for the pilot). Real multi-seller checkout
-  //     is a future phase; until it ships, a cart MUST resolve to exactly one
-  //     distinct Seller or the whole checkout aborts before any write. The
-  //     customer-facing message is deliberately generic.
-  if (sellerIds.size !== 1) {
-    return { ok: false, code: "SELLER", error: GENERIC_SELLER_ERROR };
-  }
-  // `seller` is non-null here (set for every line; `lines` is non-empty). A
-  // `const` alias so the closure below keeps the narrowing.
-  const soSeller = seller;
+  const sellerGroupList = [...sellerGroups.values()];
 
   // 9F-15B: a THIRD_PARTY pay-on-delivery order has no payment step to clear —
   // auto-confirm the parent Order at checkout (PENDING_PAYMENT → PROCESSING) so
-  // the seller can Accept it straight away. Every order this function creates is
+  // its seller(s) can Accept straight away. Every order this function creates is
   // COD (`paymentMethod` "NONE"); a future online order confirms via its payment
-  // webhook. FIRST_PARTY orders keep the manual admin "Confirm order" flow.
-  const autoConfirmParent = shouldAutoConfirmAtCheckout({
-    sellerType: soSeller.type,
-    paymentMethod: "NONE",
-  });
+  // webhook. FIRST_PARTY-only orders keep the manual admin "Confirm order" flow.
+  //
+  // Phase B — corrected: with N sellers this is ONE order-level decision (there
+  // is still no `PARTIALLY_*` Order.status — see `seller-order-status.ts`'s
+  // "all-or-nothing" rollup design, deliberately unchanged here), so auto-
+  // confirm requires EVERY seller on the order to individually qualify, not
+  // just one. A mixed FIRST_PARTY + THIRD_PARTY cart must NOT auto-confirm:
+  // doing so would silently remove Axiaro's existing, mandatory admin
+  // "Confirm order" checkpoint (`confirmOrderAction`'s own 9F-35B "assisted
+  // acceptance" cascade) just because a THIRD_PARTY seller happened to share
+  // the cart — a real behavioural regression, not merely an implementation
+  // detail (see the design review that identified this). With `.every(...)`:
+  //   - exactly one seller: reduces to the exact same boolean as before.
+  //   - all sellers THIRD_PARTY (one or many): still auto-confirms, unchanged.
+  //   - any FIRST_PARTY seller present (alone or mixed with THIRD_PARTY):
+  //     never auto-confirms — Order stays PENDING_PAYMENT, `confirmOrderAction`
+  //     stays reachable, and its cascade advances EVERY SellerOrder on the
+  //     order (1P and 3P alike) together, exactly as it already does today.
+  const autoConfirmParent = sellerGroupList.every((g) =>
+    shouldAutoConfirmAtCheckout({ sellerType: g.seller.type, paymentMethod: "NONE" }),
+  );
 
-  // 9F-33A — invariant. `createOrderFromCart` only ever creates a COD
-  // (`paymentMethod: "NONE"`) order, so a THIRD_PARTY order MUST auto-confirm:
-  // `shouldAutoConfirmAtCheckout({ sellerType: "THIRD_PARTY", paymentMethod: "NONE" })`
-  // is `true` by construction. Before 9F-15B, a 3P COD order was created at
-  // `PENDING_PAYMENT` (like a 1P COD order) and relied on an admin clicking
-  // "Confirm order"; if nobody did, the order had NO forward path — the seller
-  // can't Accept while the parent isn't fulfillable (`canTransitionSellerOrder`
-  // requires `isParentOrderFulfillable`). That state is now structurally
-  // unreachable; this belt-and-braces check (a sibling of the "4c-iv" one-seller
-  // safety assert below) keeps it unreachable even if `shouldAutoConfirmAtCheckout`
-  // is later changed. It fires BEFORE any write, so a violation is a clean no-op.
+  // 9F-33A — invariant, re-derived for the `.every()` rule above. The scenario
+  // this guards against is unchanged from the original: a cart where EVERY
+  // seller is THIRD_PARTY (COD, by construction — this function only ever
+  // creates COD orders) must never end up at `PENDING_PAYMENT` with no
+  // automatic forward path, because a THIRD_PARTY seller can't Accept while
+  // the parent isn't fulfillable (`canTransitionSellerOrder` requires
+  // `isParentOrderFulfillable`). A MIXED cart intentionally staying at
+  // `PENDING_PAYMENT` is correct new behaviour (above), not a violation — the
+  // admin's `confirmOrderAction` remains reachable for it, so nothing is
+  // "stuck." This is unreachable today by construction (`autoConfirmParent`
+  // is defined as exactly this same `.every(...)` predicate), kept as a
+  // belt-and-braces guard against `shouldAutoConfirmAtCheckout` itself
+  // changing in a way that would otherwise silently reintroduce the pre-9F-15B
+  // stuck-order bug for an all-THIRD_PARTY cart.
   //
   // NOTE: when online payment for 3P sellers lands (PayMongo 6D), a paid-online
   // 3P order legitimately stays `PENDING_PAYMENT` until its verified webhook —
   // this guard must be re-scoped to the COD case then (it already is, implicitly,
   // because this function only creates COD orders).
-  if (soSeller.type === "THIRD_PARTY" && !autoConfirmParent) {
+  const allSellersThirdParty = sellerGroupList.every((g) => g.seller.type === "THIRD_PARTY");
+  if (allSellersThirdParty && !autoConfirmParent) {
     console.error(
-      "[checkout] 9F-33A invariant violation: a THIRD_PARTY COD order would be created at PENDING_PAYMENT with no forward path — refusing.",
-      { sellerId: soSeller.id },
+      "[checkout] 9F-33A invariant violation: an all-THIRD_PARTY COD order would be created at PENDING_PAYMENT with no forward path — refusing.",
+      { sellerIds: sellerGroupList.map((g) => g.seller.id) },
     );
     return {
       ok: false,
@@ -699,19 +735,29 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
 
   const grandTotal = Math.max(0, subtotal + shippingFee - discountTotal);
 
-  // SellerOrder money (9E-3B). One seller this phase, so it carries the whole
-  // order: merchandise = subtotal, discountAllocated = the full discount,
-  // shippingFee = the whole order's shipping. total must equal grandTotal.
-  //
-  // 9F-39B: resolve the commission rate for THIS new order. FIRST_PARTY → 0;
-  // THIRD_PARTY → the seller's own stored `Seller.commissionRate` (unchanged
-  // behaviour — the CMS global default only seeds a new seller's rate, it never
-  // re-prices an existing seller or a historical order). The resolved value is
-  // frozen onto SellerOrder / OrderItem below; nothing here reads the CMS
-  // setting, and no historical order is ever revisited.
-  const commissionRateBps = resolveSellerCommissionBps(soSeller);
-  const sellerCommissionAmount = roundHalfUp((subtotal * commissionRateBps) / 10000);
-  const sellerOrderTotal = subtotal - discountTotal + shippingFee;
+  // SellerOrder money (9E-3B; multi-seller allocation, Phase B). The
+  // order-wide `shippingFee` and `discountTotal` above are unchanged — one
+  // flat rate, one coupon, both still evaluated against the whole cart — and
+  // are now *allocated* across sellers by the pure, exact-sum-guaranteed
+  // `allocateShippingFee` / `allocateDiscount` (`marketplace/order-allocation`),
+  // proportional to each seller's own `merchandiseSubtotal`. With exactly one
+  // seller each returns 100% of its total to that seller — identical to the
+  // single-seller passthrough this replaces. Commission (9F-39B: FIRST_PARTY →
+  // 0; THIRD_PARTY → the seller's own stored `Seller.commissionRate`, never the
+  // CMS default, never re-priced later) is resolved and computed PER SELLER,
+  // against that seller's own subtotal — never the whole order's — inside the
+  // per-seller loop below, using the exact same `resolveSellerCommissionBps` /
+  // `roundHalfUp` this codebase already uses elsewhere.
+  const sellerSubtotalsForAllocation = sellerGroupList.map((g) => ({
+    sellerId: g.seller.id,
+    merchandiseSubtotal: g.merchandiseSubtotal,
+  }));
+  const shippingBySeller = new Map(
+    allocateShippingFee(sellerSubtotalsForAllocation, shippingFee).map((a) => [a.sellerId, a.amount]),
+  );
+  const discountBySeller = new Map(
+    allocateDiscount(sellerSubtotalsForAllocation, discountTotal).map((a) => [a.sellerId, a.amount]),
+  );
 
   const orderNumber = await nextOrderNumber();
   const sameAddress = input.shippingAddressId === input.billingAddressId;
@@ -719,7 +765,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   const billingJson = sameAddress ? null : JSON.stringify(addressSnapshot(billAddr));
 
   try {
-    const created = await prisma.$transaction(async (tx) => {
+    const { order: created, sellerOrders: createdSellerOrders } = await prisma.$transaction(async (tx) => {
       // 4a. Atomic ACTIVE -> CONVERTED. This is the double-submission /
       //     concurrency gate: a second request finds 0 rows and aborts.
       const converted = await tx.$executeRaw`
@@ -835,71 +881,137 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         select: { id: true, orderNumber: true },
       });
 
-      // 4c-ii. Exactly ONE SellerOrder (9E-3C-2). Its money comes from THIS
-      //     checkout's calculated values — never a recomputation of history.
-      const sellerOrder = await tx.sellerOrder.create({
-        data: {
-          orderId: order.id,
-          sellerId: soSeller.id,
-          sellerName: soSeller.displayName,
-          sellerType: soSeller.type,
-          supportEmail: soSeller.supportEmail,
-          commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
-          shippingMethodCode: method.code,
-          shippingMethodName: method.name,
-          shippingFee,
-          platformShippingSubsidy: 0,
-          freeShippingApplied,
-          merchandiseSubtotal: subtotal,
-          discountAllocated: discountTotal,
-          discountFundedBy: "PLATFORM",
-          commissionAmount: sellerCommissionAmount,
-          total: sellerOrderTotal,
-          status: "PENDING_PAYMENT",
-          settlementStatus: "PENDING_CAPTURE",
-        },
-        select: { id: true },
-      });
+      // 4c-ii. One SellerOrder PER DISTINCT SELLER (Phase B — replaces the old
+      //     "exactly one SellerOrder" 9E-3C-2 write). Each seller's own money
+      //     comes from THIS checkout's calculated values for THAT seller only
+      //     — never a recomputation of history, never another seller's figures.
+      //     Every OrderItem is created immediately after its own seller's
+      //     SellerOrder, in the SAME loop iteration, and linked by the just-
+      //     created `sellerOrder.id` — never by array position or `[0]`.
+      const createdSellerOrderIds: { sellerId: string; sellerOrderId: string; sellerType: string }[] = [];
+      for (const group of sellerGroupList) {
+        // 9F-39B: resolve the commission rate for THIS seller. FIRST_PARTY → 0;
+        // THIRD_PARTY → the seller's own stored `Seller.commissionRate`
+        // (unchanged behaviour — the CMS global default only seeds a new
+        // seller's rate, it never re-prices an existing seller or a historical
+        // order). Computed against THIS seller's own `merchandiseSubtotal` —
+        // never the whole order's — exactly as the single-seller formula did
+        // when there was only ever one seller to compute it for.
+        const commissionRateBps = resolveSellerCommissionBps(group.seller);
+        const sellerShippingFee = shippingBySeller.get(group.seller.id) ?? 0;
+        const sellerDiscountAllocated = discountBySeller.get(group.seller.id) ?? 0;
+        const sellerCommissionAmount = roundHalfUp(
+          (group.merchandiseSubtotal * commissionRateBps) / 10000,
+        );
+        const sellerOrderTotal = group.merchandiseSubtotal - sellerDiscountAllocated + sellerShippingFee;
 
-      // 4c-iii. OrderItems — linked to BOTH the Order and its one SellerOrder,
-      //     snapshotting the bound Offer / Seller / commission rate. `unitPrice`
-      //     is the bound Offer price (set when `lines` was built).
-      await tx.orderItem.createMany({
-        data: lines.map((l) => ({
-          orderId: order.id,
+        const sellerOrder = await tx.sellerOrder.create({
+          data: {
+            orderId: order.id,
+            sellerId: group.seller.id,
+            sellerName: group.seller.displayName,
+            sellerType: group.seller.type,
+            supportEmail: group.seller.supportEmail,
+            commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
+            shippingMethodCode: method.code,
+            shippingMethodName: method.name,
+            shippingFee: sellerShippingFee,
+            platformShippingSubsidy: 0,
+            freeShippingApplied,
+            merchandiseSubtotal: group.merchandiseSubtotal,
+            discountAllocated: sellerDiscountAllocated,
+            discountFundedBy: "PLATFORM",
+            commissionAmount: sellerCommissionAmount,
+            total: sellerOrderTotal,
+            status: "PENDING_PAYMENT",
+            settlementStatus: "PENDING_CAPTURE",
+          },
+          select: { id: true },
+        });
+        createdSellerOrderIds.push({
+          sellerId: group.seller.id,
           sellerOrderId: sellerOrder.id,
-          productId: l.productId,
-          variantId: l.variantId,
-          offerId: l.offerId,
-          sellerId: l.sellerId,
-          commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
-          name: l.name,
-          variantLabel: l.variantLabel,
-          sku: l.sku,
-          imageUrl: l.imageUrl,
-          unitPrice: l.unitPrice,
-          quantity: l.quantity,
-          lineTotal: l.lineTotal,
-          // 9F-22: faithful snapshot of the bound Offer's condition at purchase
-          // time (incl. "NEW"). Display code shows a condition line only when this
-          // is a non-NEW value; nothing re-picks the offer.
-          condition: l.condition,
-          // 9F-38B: the bound Offer's compare-at ("was") price snapshot (null when
-          // the Offer had no compare-at). Historical/display only — the customer
-          // pays `unitPrice`; this value is never added to any total.
-          originalUnitPrice: l.originalUnitPrice,
-        })),
-      });
+          sellerType: group.seller.type,
+        });
 
-      // 4c-iv. One-seller safety (9E-3C-2 §20). Belt-and-braces: we created
-      //     exactly one SellerOrder above; assert it and that every line links
-      //     to it before the transaction commits.
-      const soCount = await tx.sellerOrder.count({ where: { orderId: order.id } });
-      const linkedItems = await tx.orderItem.count({
-        where: { orderId: order.id, sellerOrderId: sellerOrder.id, sellerId: soSeller.id },
-      });
-      if (soCount !== 1 || linkedItems !== lines.length) {
+        // 4c-iii. OrderItems — linked to BOTH the Order and THIS SellerOrder,
+        //     snapshotting the bound Offer / Seller / commission rate.
+        //     `unitPrice` is the bound Offer price (set when `lines` was
+        //     built). Only this seller's own lines — never another seller's.
+        await tx.orderItem.createMany({
+          data: group.lines.map((l) => ({
+            orderId: order.id,
+            sellerOrderId: sellerOrder.id,
+            productId: l.productId,
+            variantId: l.variantId,
+            offerId: l.offerId,
+            sellerId: l.sellerId,
+            commissionRate: commissionRateBps, // 9F-39B: the resolved rate, frozen
+            name: l.name,
+            variantLabel: l.variantLabel,
+            sku: l.sku,
+            imageUrl: l.imageUrl,
+            unitPrice: l.unitPrice,
+            quantity: l.quantity,
+            lineTotal: l.lineTotal,
+            // 9F-22: faithful snapshot of the bound Offer's condition at purchase
+            // time (incl. "NEW"). Display code shows a condition line only when this
+            // is a non-NEW value; nothing re-picks the offer.
+            condition: l.condition,
+            // 9F-38B: the bound Offer's compare-at ("was") price snapshot (null when
+            // the Offer had no compare-at). Historical/display only — the customer
+            // pays `unitPrice`; this value is never added to any total.
+            originalUnitPrice: l.originalUnitPrice,
+          })),
+        });
+      }
+
+      // 4c-iv. Post-write invariants (Phase B — replaces the old "exactly one
+      //     SellerOrder" belt-and-braces assert). Re-reads what was ACTUALLY
+      //     persisted — not just the in-memory numbers used to write it — so a
+      //     bug in the Prisma calls above is caught here, not downstream. Any
+      //     failure throws and rolls back the ENTIRE transaction.
+      const invariantFail = (label: string): never => {
+        console.error(`[checkout] Phase B post-write invariant ${label} failed — rolling back.`, {
+          orderId: order.id,
+        });
         throw new CheckoutError("VALIDATION", "We couldn’t complete your order. Please try again.");
+      };
+      const persistedSellerOrders = await tx.sellerOrder.findMany({
+        where: { orderId: order.id },
+        select: { id: true, merchandiseSubtotal: true, shippingFee: true, discountAllocated: true, total: true },
+      });
+      const persistedItems = await tx.orderItem.findMany({
+        where: { orderId: order.id },
+        select: { sellerOrderId: true, lineTotal: true },
+      });
+      // A. number of SellerOrders === number of distinct sellerIds.
+      if (persistedSellerOrders.length !== sellerGroupList.length) invariantFail("A (SellerOrder count)");
+      // B. sum(SellerOrder.merchandiseSubtotal) === Order.subtotal.
+      if (persistedSellerOrders.reduce((n, s) => n + s.merchandiseSubtotal, 0) !== subtotal) {
+        invariantFail("B (merchandiseSubtotal sum)");
+      }
+      // C. sum(SellerOrder.shippingFee) === Order.shippingFee.
+      if (persistedSellerOrders.reduce((n, s) => n + s.shippingFee, 0) !== shippingFee) {
+        invariantFail("C (shippingFee sum)");
+      }
+      // D. sum(SellerOrder.discountAllocated) === Order.discountTotal.
+      if (persistedSellerOrders.reduce((n, s) => n + s.discountAllocated, 0) !== discountTotal) {
+        invariantFail("D (discountAllocated sum)");
+      }
+      // E. sum(SellerOrder.total) === Order.grandTotal.
+      if (persistedSellerOrders.reduce((n, s) => n + s.total, 0) !== grandTotal) {
+        invariantFail("E (SellerOrder.total sum)");
+      }
+      // F. for every SellerOrder: sum(linked OrderItem.lineTotal) === that
+      //    SellerOrder.merchandiseSubtotal. Also confirms every persisted item
+      //    links to a SellerOrder from THIS order (no stray/unlinked item).
+      if (persistedItems.length !== lines.length) invariantFail("F (item count)");
+      for (const so of persistedSellerOrders) {
+        const itemSum = persistedItems
+          .filter((i) => i.sellerOrderId === so.id)
+          .reduce((n, i) => n + i.lineTotal, 0);
+        if (itemSum !== so.merchandiseSubtotal) invariantFail("F (item↔SellerOrder linkage)");
       }
 
       // 4d. Record the coupon redemption (authoritative for usage limits) and
@@ -929,7 +1041,7 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
         });
       }
 
-      return order;
+      return { order, sellerOrders: createdSellerOrderIds };
     });
 
     revalidatePath("/account/orders");
@@ -943,10 +1055,29 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
     // Axiaro Operations companion notice (9F-7b) — same idempotency guarantee,
     // its own key (ORDER_RECEIVED_OPS:<orderId>), goes to the ops inbox only.
     scheduleEmail(() => sendOrderReceivedOps(created.id));
-    // Seller new-order notification (9F-14) — for a THIRD_PARTY order only, to
-    // the seller's own mailbox(es); a no-op for a FIRST_PARTY (Axiaro) order.
-    // Key SELLER_ORDER_RECEIVED:<orderId> → exactly one per order.
-    scheduleEmail(() => sendSellerOrderReceived(created.id));
+    // Seller new-order notification (9F-14) — for a THIRD_PARTY SellerOrder
+    // only, to that seller's own mailbox(es); a no-op for a FIRST_PARTY
+    // (Axiaro) SellerOrder. Key SELLER_ORDER_RECEIVED:<orderId> → exactly one
+    // per order — correct as-is for the single-seller case (unchanged call,
+    // below). Phase B: `sendSellerOrderReceived` resolves `order.sellerOrders[0]`
+    // by default, which would silently notify only the FIRST seller (by query
+    // order) on a multi-seller order and skip every other one — so with more
+    // than one seller each gets its OWN call, targeting its OWN SellerOrder via
+    // `sellerOrderId`, with its OWN idempotency key (keyed by sellerOrderId, not
+    // orderId) so N seller notifications for the same order can never collide
+    // under the EmailLog idempotency-key UNIQUE constraint.
+    if (createdSellerOrders.length === 1) {
+      scheduleEmail(() => sendSellerOrderReceived(created.id));
+    } else {
+      for (const so of createdSellerOrders) {
+        scheduleEmail(() =>
+          sendSellerOrderReceived(created.id, {
+            sellerOrderId: so.sellerOrderId,
+            idempotencyKey: `SELLER_ORDER_RECEIVED:${so.sellerOrderId}`,
+          }),
+        );
+      }
+    }
 
     // 9F-15B: a THIRD_PARTY COD order was auto-confirmed above — record the
     // `order.confirmed` audit row (system actor, best-effort — same posture as
@@ -973,7 +1104,11 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
           to: "PROCESSING",
           paymentMethod: "NONE",
           trigger: "checkout_3p_cod_autoconfirm",
-          sellerId: soSeller.id,
+          // Phase B: every seller on this order (not just "the" seller) — the
+          // THIRD_PARTY one(s) are why this fired; a FIRST_PARTY seller sharing
+          // the order rides along with it (see the module doc comment's note on
+          // the mixed-seller auto-confirm decision).
+          sellerIds: createdSellerOrders.map((s) => s.sellerId),
         },
       });
     }

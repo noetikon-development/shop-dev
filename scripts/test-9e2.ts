@@ -382,10 +382,14 @@ function staticChecks() {
   // accessors) must not leak into checkout — `offerId` alone is legitimate
   // there since 9E-3C-2 (the bound-offer checkout writer).
   ok("L  checkout.ts has no cart-uniqueness-key coupling", !/cartId_variantId|cartId_offerId/.test(checkout));
-  // 9E-3C-2: the checkout writer is offer-native and single-seller — it prices
-  // from the bound Offer and creates exactly one SellerOrder.
+  // 9E-3C-2: the checkout writer is offer-native — it prices from the bound
+  // Offer. Multi-seller order creation (Phase B) replaced the old
+  // "sellerIds.size !== 1" single-seller abort with one SellerOrder PER
+  // distinct seller (still rejecting an EMPTY seller set) — assert the new
+  // gate instead of the removed one.
   ok("L  checkout writer prices from the bound Offer (o.price), not v.price", /unitPrice:\s*o\.price/.test(checkout) && !/unitPrice:\s*v\.price/.test(checkout));
-  ok("L  checkout writer is single-seller (sellerIds.size !== 1 gate)", /sellerIds\.size !== 1/.test(checkout));
+  ok("L  checkout writer creates one SellerOrder per distinct seller (Phase B), no single-seller cap",
+    /sellerGroups\.size === 0/.test(checkout) && !/sellerIds\.size !== 1/.test(checkout));
   ok("L  coupon stays order-wide (Cart.couponCode, one CouponRedemption per order)", /couponCode\s+String\?/.test(schema) && /orderId\s+String\s+@unique/.test(schema));
 }
 
