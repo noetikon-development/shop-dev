@@ -137,6 +137,7 @@
     "test:seller-verification-p7": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-verification-p7.ts",
     "test:seller-verification-p8": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-verification-p8.ts",
     "test:seller-verification-p9": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-verification-p9.ts",
+    "test:multiseller-allocation": "node --import tsx scripts/test-multiseller-allocation.ts",
     "test:seller-onboarding-p5": "node --env-file=.env --conditions=react-server --import tsx scripts/test-seller-onboarding-p5.ts",
     "test:9f8c": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c.ts",
     "test:9f8c1": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f8c1.ts",
