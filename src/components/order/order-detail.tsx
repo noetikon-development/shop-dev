@@ -279,7 +279,17 @@ function SellerItemGroup({
   return (
     <div className="card-surface p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-subtitle">{sellerOrder.sellerName}</h2>
+        <div>
+          <h2 className="text-subtitle">{sellerOrder.sellerName}</h2>
+          {/* Clarify who fulfils this seller's items: the platform (FIRST_PARTY)
+              or an independent marketplace seller (THIRD_PARTY). Uses the
+              already-fetched sellerType/sellerName — no new data. */}
+          <p className="mt-0.5 text-xs text-ink-faint">
+            {sellerOrder.sellerType === "FIRST_PARTY"
+              ? "Sold by Axiaro"
+              : `Sold by ${sellerOrder.sellerName}`}
+          </p>
+        </div>
         <Badge tone={sellerOrderStatusTone(sellerOrder.status)}>{sellerOrderStatusLabel(sellerOrder.status)}</Badge>
       </div>
       <ul className="mt-4 divide-y divide-line">

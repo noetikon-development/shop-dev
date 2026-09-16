@@ -211,6 +211,22 @@ function staticTests() {
   ok("the aggregate Delivery card is now gated to single-seller/legacy only",
     /!isMultiSeller && showFulfilment/.test(orderDetail));
 
+  // Seller-type label (FIRST_PARTY vs THIRD_PARTY) on each seller card.
+  const sellerItemGroupBody = (() => {
+    const start = orderDetail.indexOf("function SellerItemGroup(");
+    if (start === -1) return "";
+    const end = orderDetail.indexOf("\nfunction ", start + 1);
+    return orderDetail.slice(start, end === -1 ? undefined : end);
+  })();
+  ok("ST1 · SellerItemGroup keys the seller-type label on sellerType === 'FIRST_PARTY' (uses existing data, no new rule)",
+    /sellerOrder\.sellerType === "FIRST_PARTY"/.test(sellerItemGroupBody));
+  ok("ST2 · FIRST_PARTY renders 'Sold by Axiaro'",
+    /Sold by Axiaro/.test(sellerItemGroupBody));
+  ok("ST3 · THIRD_PARTY renders 'Sold by ${sellerOrder.sellerName}'",
+    /Sold by \$\{sellerOrder\.sellerName\}/.test(sellerItemGroupBody));
+  ok("ST4 · the label lives in SellerItemGroup and reuses sellerName/sellerType — no duplicated seller data / new abstraction",
+    /sellerOrder\.sellerName/.test(sellerItemGroupBody) && sellerItemGroupBody.length > 0);
+
   ok("E7 · the account order page combines isCancellable(order.status) WITH allSellerOrdersCancellable(order.sellerOrders) — both required, no invented rule",
     /isCancellable\(order\.status\) && allSellerOrdersCancellable\(order\.sellerOrders\)/.test(accountOrderPage) &&
       /import \{ allSellerOrdersCancellable, hasUndeliveredSellerLines \} from "@\/lib\/marketplace\/customer-order-view"/.test(accountOrderPage));
