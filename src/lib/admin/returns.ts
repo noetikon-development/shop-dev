@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isReturnStatus } from "@/lib/returns/status";
-import { remainingReturnableByOrderItem, orderItemDeliveryState } from "@/lib/returns";
+import { remainingReturnableByOrderItem, orderItemDeliveryState, getReturnsConfig, withinReturnWindow } from "@/lib/returns";
 import { parseReturnDestination, sellerReturnAddressLines } from "@/lib/marketplace/return-destination";
 
 /**
@@ -282,12 +282,18 @@ export async function getReturnCounts(): Promise<Record<string, number>> {
  * For the admin "start a return" panel on the order page: the order's lines with
  * how many units of each are still returnable, and — per line — whether it's
  * naturally delivered (its own SellerOrder is DELIVERED; a legacy line with no
- * SellerOrder falls back to the whole-order status). This lets the create
- * action record an accurate, per-line override rather than one derived from
- * the aggregate `Order.status`, which a multi-seller order can outgrow.
+ * SellerOrder falls back to the whole-order status), which seller owns it, and
+ * whether it's still within the configured return window. This lets both the
+ * create action record an accurate per-line override (rather than one derived
+ * from the aggregate `Order.status`, which a multi-seller order can outgrow)
+ * AND the admin UI show the same accurate per-line state instead of a stale
+ * whole-order banner. `naturallyEligible` mirrors exactly what
+ * `returnEligibility()` would accept for this line on the customer side —
+ * delivered AND still within the window — reusing `withinReturnWindow` so the
+ * window rule is never duplicated.
  */
 export async function orderReturnableLines(orderId: string) {
-  const [order, remaining] = await Promise.all([
+  const [order, remaining, { windowDays }] = await Promise.all([
     prisma.order.findUnique({
       where: { id: orderId },
       select: {
@@ -307,18 +313,24 @@ export async function orderReturnableLines(orderId: string) {
             sku: true,
             unitPrice: true,
             quantity: true,
-            sellerOrder: { select: { status: true, shipments: { select: { deliveredAt: true } } } },
+            sellerOrder: { select: { status: true, sellerName: true, shipments: { select: { deliveredAt: true } } } },
           },
         },
       },
     }),
     remainingReturnableByOrderItem(orderId),
+    getReturnsConfig(),
   ]);
   if (!order) return null;
+  const now = Date.now();
   return {
     order: { id: order.id, orderNumber: order.orderNumber, status: order.status },
     lines: order.items.map((it) => {
       const state = orderItemDeliveryState(order, it.sellerOrder);
+      const withinWindow = state.delivered && state.deliveredAt !== null && withinReturnWindow(state.deliveredAt, windowDays, now);
+      const daysRemaining = state.delivered && state.deliveredAt !== null
+        ? Math.ceil((state.deliveredAt.getTime() + windowDays * 24 * 60 * 60 * 1000 - now) / (24 * 60 * 60 * 1000))
+        : null;
       return {
         orderItemId: it.id,
         productId: it.productId,
@@ -329,8 +341,11 @@ export async function orderReturnableLines(orderId: string) {
         unitPrice: it.unitPrice,
         orderedQuantity: it.quantity,
         remaining: remaining.get(it.id) ?? 0,
+        sellerName: it.sellerOrder?.sellerName ?? null,
         delivered: state.delivered,
         deliveredAt: state.deliveredAt,
+        naturallyEligible: withinWindow,
+        daysRemaining,
       };
     }),
   };

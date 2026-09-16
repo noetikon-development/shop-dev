@@ -19,6 +19,7 @@ import {
   isOrderStatus,
 } from "@/lib/orders/status";
 import { isStorePickupCode } from "@/lib/orders/couriers";
+import { formatDate } from "@/lib/utils";
 
 export async function generateMetadata({
   params,
@@ -143,7 +144,6 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
           <AdminStartReturn
             orderId={order.id}
             orderNumber={order.orderNumber}
-            orderStatus={order.status}
             openReturnNumber={openReturn?.open ? (openReturn.returnNumber ?? null) : null}
             lines={returnable.lines
               .filter((l) => l.remaining > 0)
@@ -152,6 +152,10 @@ export default async function AdminOrderDetailPage({ params }: PageProps<"/admin
                 name: l.name,
                 variantLabel: l.variantLabel,
                 remaining: l.remaining,
+                sellerName: l.sellerName,
+                naturallyEligible: l.naturallyEligible,
+                deliveredAtLabel: l.deliveredAt ? formatDate(l.deliveredAt) : null,
+                daysRemaining: l.daysRemaining,
               }))}
           />
         </div>

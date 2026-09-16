@@ -3,23 +3,39 @@
 import { useState, useTransition } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Loader2, RotateCcw } from "lucide-react";
-import { Card, Select, notify } from "@/components/admin/ui";
+import { Loader2, RotateCcw, AlertTriangle } from "lucide-react";
+import { Card, Select, StatusBadge, notify } from "@/components/admin/ui";
 import { RETURN_REASONS, RETURN_REASON_LABEL } from "@/lib/returns/status";
 import { adminCreateReturnAction } from "@/lib/admin/returns-actions";
 
-type Line = { orderItemId: string; name: string; variantLabel: string | null; remaining: number };
+/**
+ * Per-line delivery state is computed once, server-side, by
+ * `orderReturnableLines()` (which itself reuses `orderItemDeliveryState` /
+ * `withinReturnWindow` — the exact same rules `returnEligibility()` and the
+ * create action's own override computation already use). This component only
+ * ever DISPLAYS `naturallyEligible` — it never recomputes eligibility, and
+ * selecting an ineligible line remains fully possible (the existing admin
+ * override capability), just visibly flagged.
+ */
+type Line = {
+  orderItemId: string;
+  name: string;
+  variantLabel: string | null;
+  remaining: number;
+  sellerName: string | null;
+  naturallyEligible: boolean;
+  deliveredAtLabel: string | null;
+  daysRemaining: number | null;
+};
 
 export function AdminStartReturn({
   orderId,
   orderNumber,
-  orderStatus,
   openReturnNumber,
   lines,
 }: {
   orderId: string;
   orderNumber: string;
-  orderStatus: string;
   openReturnNumber: string | null;
   lines: Line[];
 }) {
@@ -52,7 +68,9 @@ export function AdminStartReturn({
     );
   }
 
-  const selected = Object.entries(qty).filter(([, n]) => n > 0);
+  const selectedLines = lines.filter((l) => (qty[l.orderItemId] ?? 0) > 0);
+  const anyIneligibleOnOrder = lines.some((l) => !l.naturallyEligible);
+  const selectionRequiresOverride = selectedLines.some((l) => !l.naturallyEligible);
 
   return (
     <Card>
@@ -71,15 +89,27 @@ export function AdminStartReturn({
         )}
       </div>
 
-      {orderStatus !== "DELIVERED" && (
-        <p className="mt-2 text-xs text-clay">
-          This order is {orderStatus}, not delivered — creating a return here will be recorded as an
-          override.
+      {anyIneligibleOnOrder && (
+        <p className="mt-2 text-xs text-ink-faint">
+          Only items whose seller has delivered are naturally eligible for return. On a multi-seller
+          order, another seller&apos;s items may not be eligible yet — selecting one records this
+          return as an override.
         </p>
       )}
 
       {open && (
         <div className="mt-4 space-y-3">
+          {selectionRequiresOverride && (
+            <div className="flex items-start gap-2 rounded-sm bg-clay-50 px-3 py-2 text-xs text-clay">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>
+                {selectedLines.filter((l) => !l.naturallyEligible).length === 1
+                  ? "One selected item hasn't been delivered yet."
+                  : `${selectedLines.filter((l) => !l.naturallyEligible).length} selected items haven't been delivered yet.`}{" "}
+                Creating this return will be recorded as an override.
+              </span>
+            </div>
+          )}
           <div className="overflow-hidden rounded-sm border border-line">
             {lines.map((l) => (
               <div
@@ -87,9 +117,31 @@ export function AdminStartReturn({
                 className="flex items-center justify-between gap-3 border-b border-line p-3 last:border-0"
               >
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">{l.name}</p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="text-sm font-medium">{l.name}</p>
+                    <StatusBadge tone={l.naturallyEligible ? "success" : "warning"}>
+                      {l.naturallyEligible
+                        ? "Eligible"
+                        : l.deliveredAtLabel
+                          ? "Return window passed"
+                          : "Not yet delivered"}
+                    </StatusBadge>
+                  </div>
                   {l.variantLabel && <p className="text-xs text-ink-faint">{l.variantLabel}</p>}
-                  <p className="text-xs text-ink-faint">up to {l.remaining} returnable</p>
+                  {l.sellerName && <p className="text-xs text-ink-faint">Seller: {l.sellerName}</p>}
+                  <p className="text-xs text-ink-faint">
+                    up to {l.remaining} returnable
+                    {l.deliveredAtLabel && (
+                      <>
+                        {" · Delivered "}
+                        {l.deliveredAtLabel}
+                        {l.daysRemaining !== null &&
+                          (l.daysRemaining >= 0
+                            ? `, ${l.daysRemaining} day${l.daysRemaining === 1 ? "" : "s"} left to return`
+                            : ", return window passed")}
+                      </>
+                    )}
+                  </p>
                 </div>
                 <input
                   type="number"
@@ -145,14 +197,14 @@ export function AdminStartReturn({
             </button>
             <button
               type="button"
-              disabled={pending || selected.length === 0 || !reason}
+              disabled={pending || selectedLines.length === 0 || !reason}
               onClick={() =>
                 start(async () => {
                   const res = await adminCreateReturnAction({
                     orderId,
                     reason,
                     staffNote: note.trim() || undefined,
-                    lines: selected.map(([orderItemId, quantity]) => ({ orderItemId, quantity })),
+                    lines: selectedLines.map((l) => ({ orderItemId: l.orderItemId, quantity: qty[l.orderItemId] ?? 0 })),
                   });
                   if (res.ok) {
                     notify.success(res.message ?? "Return created.");

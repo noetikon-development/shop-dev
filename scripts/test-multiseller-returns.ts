@@ -104,8 +104,8 @@ function staticTests() {
   ok("returnEligibility uses orderItemDeliveryState per item, not a single whole-order timestamp",
     /orderItemDeliveryState\(order, it\.sellerOrder\)/.test(returns));
 
-  ok("admin/returns.ts's orderReturnableLines reuses the SAME canonical helper (no duplicated logic)",
-    /import \{ remainingReturnableByOrderItem, orderItemDeliveryState \} from "@\/lib\/returns"/.test(adminReturns) &&
+  ok("admin/returns.ts's orderReturnableLines reuses the SAME canonical helpers (no duplicated logic)",
+    /import \{[^}]*remainingReturnableByOrderItem[^}]*orderItemDeliveryState[^}]*\} from "@\/lib\/returns"/.test(adminReturns) &&
       /orderItemDeliveryState\(order, it\.sellerOrder\)/.test(adminReturns));
   ok("admin/returns.ts exposes delivered + deliveredAt per returnable line",
     /delivered: state\.delivered/.test(adminReturns) && /deliveredAt: state\.deliveredAt/.test(adminReturns));
