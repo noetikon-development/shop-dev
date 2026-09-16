@@ -92,21 +92,29 @@ function staticTests() {
   const fn = repo.slice(repo.indexOf("export async function sellerCancelSellerOrder"), repo.indexOf("export type ShipmentInput"));
   ok("repo · SellerOrder write is status-guarded (0 rows ⇒ STALE) and zeroes commissionAmount",
     /updateMany\(\{\s*where: \{ id: sellerOrderId, sellerId: ctx\.sellerId, status: so\.status \},\s*data: \{ status: "CANCELLED", commissionAmount: 0/.test(fn));
-  ok("repo · parent Order cancelled by the SAME atomic one-shot gate as cancelOrderAction (status IN cancellable)",
-    /UPDATE "Order" SET "status" = 'CANCELLED'[\s\S]{0,120}status" IN \('PENDING_PAYMENT', 'PENDING', 'PROCESSING'\)/.test(fn) &&
-    /if \(cancelledOrder === 0\) throw new ParentOrderMovedError\(\)/.test(fn));
+  ok("repo · SellerOrder's own guarded update is now the one-shot idempotency gate (independent of the parent's fate)",
+    /where: \{ id: sellerOrderId, sellerId: ctx\.sellerId, status: so\.status \},[\s\S]{0,50}data: \{ status: "CANCELLED", commissionAmount: 0/.test(fn) &&
+    /if \(soRes\.count === 0\)/.test(fn));
   ok("repo · restores OfferInventory per OrderItem.offerId with restoreOfferStock reason CANCELLATION",
     /restoreOfferStock\(\s*\{\s*offerId: it\.offerId,\s*units: it\.quantity,\s*reason: "CANCELLATION"/.test(fn));
   ok("repo · rolls Product.soldCount back, never below zero",
     /UPDATE "Product" SET "soldCount" = GREATEST\(0, "soldCount" - \$\{qty\}\)/.test(fn));
-  ok("repo · single-seller only — a multi-seller parent is refused",
-    /if \(so\.order\.sellerOrders\.length !== 1\)/.test(fn));
+  ok("repo · multi-seller parents are now SUPPORTED — no length-based refusal, no 'contact Axiaro' error remains",
+    !/so\.order\.sellerOrders\.length/.test(fn) && !/contact Axiaro to cancel it/.test(fn));
+  ok("repo · the 'last active seller' cascade locks EVERY sibling SellerOrder row (FOR UPDATE) before deciding — concurrency-safe, reuses the same lock idiom restoreOfferStock already uses",
+    /SELECT "id", "status" FROM "SellerOrder" WHERE "orderId" = \$\{so\.order\.id\} FOR UPDATE/.test(fn) &&
+    /anySiblingStillActive/.test(fn));
+  ok("repo · parent Order is cancelled by the SAME guarded UPDATE as cancelOrderAction (status IN cancellable), but ONLY when no sibling SellerOrder is still active",
+    /UPDATE "Order" SET "status" = 'CANCELLED'[\s\S]{0,120}status" IN \('PENDING_PAYMENT', 'PENDING', 'PROCESSING'\)/.test(fn) &&
+    /if \(!anySiblingStillActive\) \{/.test(fn));
+  ok("repo · a 0-row parent-Order guard match is a benign no-op, never an error — this seller's own already-committed cancellation is never rolled back because of it",
+    !/throw new ParentOrderMovedError/.test(fn) && !/class ParentOrderMovedError/.test(repo));
   ok("repo · never touches payments / paymentStatus / Inventory / returns",
     !/paymentStatus|paymentMethod|\.inventory\.|inventoryAdjustment|returnRequest|paymentRefund/.test(fn));
   ok("repo · settlement clawback branch is symmetric with cancelOrderAction (only if already settled)",
     /if \(so\.settlementId !== null\) \{[\s\S]{0,400}settlementStatus: "CLAWED_BACK"/.test(fn));
-  ok("repo · one OrderEvent(CANCELLED) written inside the tx",
-    /orderEvent\.create\(\{\s*data: \{\s*orderId: so\.order\.id,\s*status: "CANCELLED",\s*title: "Order cancelled"/.test(fn));
+  ok("repo · OrderEvent(CANCELLED) wording is accurate — whole-order phrasing ONLY when the parent was actually cancelled too",
+    /title: parentAlsoCancelled \? "Order cancelled" : "Seller order cancelled"/.test(fn));
 
   // action
   ok("action · uses manage_seller_fulfillment permission",
@@ -141,17 +149,19 @@ function staticTests() {
     !/customerEmail|customerName|\bphone\b|shippingAddress/.test(ops.slice(ops.indexOf("renderSellerOrderCancelledOps"), ops.indexOf("renderSellerOrderCancelledOps") + 1800)));
 
   // read model + UI
-  ok("read model · canCancel = cancellable SellerOrder status ∧ cancellable parent ∧ single-seller",
-    /canCancel:\s*\n\s*sellerCanCancelSellerOrder\(so\.status\) &&\s*\n\s*\(CANCELLABLE_STATUSES as readonly string\[\]\)\.includes\(so\.order\.status\) &&\s*\n\s*so\.order\._count\.sellerOrders === 1/.test(readModel));
+  ok("read model · canCancel = cancellable SellerOrder status ∧ cancellable parent (single-seller restriction REMOVED — multi-seller now supported)",
+    /canCancel:\s*\n\s*sellerCanCancelSellerOrder\(so\.status\) &&\s*\n\s*\(CANCELLABLE_STATUSES as readonly string\[\]\)\.includes\(so\.order\.status\),/.test(readModel) &&
+    !/_count\.sellerOrders/.test(readModel));
   ok("page · cancel card renders on canCancel ∧ canFulfil, independent of the parentFulfillable branch",
     /\{order\.canCancel && canFulfil && \(\s*\n\s*<Card>/.test(page) &&
     page.indexOf("order.canCancel && canFulfil") > page.indexOf("!order.parentFulfillable"));
-  ok("panel · reason textarea is required and the consequence is spelled out before confirm",
-    /required/.test(panel) && /cancels the customer’s entire order/i.test(panel) && /can’t be undone/i.test(panel));
+  ok("panel · reason textarea is required, the consequence is spelled out before confirm, and the copy is now accurate for multi-seller (only claims the WHOLE order is cancelled conditionally)",
+    /required/.test(panel) && /cancels your part of this order/i.test(panel) && /can’t be undone/i.test(panel) &&
+    /last active seller/i.test(panel));
 
-  // scope — untouched
-  ok("scope · admin cancelOrderAction NOT modified by this phase",
-    !/9F-30B/.test(read("src/lib/admin/order-actions.ts")));
+  // scope — untouched, except the ONE necessary cross-file fix this phase requires
+  ok("scope · admin cancelOrderAction has EXACTLY the one change 9F-30B multi-seller requires — its offer-native reversal now skips items whose SellerOrder is already independently cancelled — nothing else in that file changed",
+    /OR: \[\{ sellerOrderId: \{ in: toCancel\.map\(\(s\) => s\.id\)/.test(read("src/lib/admin/order-actions.ts")));
   ok("scope · admin 1P fulfilment NOT modified",
     !/9F-30B/.test(read("src/lib/admin/fulfillment-actions.ts")));
   ok("scope · checkout NOT modified",
@@ -208,6 +218,7 @@ async function dbTests() {
       qty?: number;
       commissionAmount?: number;
       extraSeller?: string;
+      extraSellerStatus?: string;
     },
   ) {
     const order = await tx.order.create({
@@ -236,16 +247,18 @@ async function dbTests() {
     await tx.orderItem.create({
       data: { orderId: order.id, sellerOrderId: so.id, sellerId: spec.sellerId, productId: spec.productId, offerId: spec.offerId, name: "Item", unitPrice: 1000, quantity: spec.qty ?? 2, lineTotal: (spec.qty ?? 2) * 1000 },
     });
+    let extraSellerOrderId: string | undefined;
     if (spec.extraSeller) {
       const so2 = await tx.sellerOrder.create({
-        data: { orderId: order.id, sellerId: spec.extraSeller, sellerName: "S2", sellerType: "THIRD_PARTY", supportEmail: "s2@t.test", merchandiseSubtotal: 500, shippingFee: 0, total: 500, status: "PENDING_PAYMENT" },
+        data: { orderId: order.id, sellerId: spec.extraSeller, sellerName: "S2", sellerType: "THIRD_PARTY", supportEmail: "s2@t.test", merchandiseSubtotal: 500, shippingFee: 0, total: 500, status: spec.extraSellerStatus ?? "PENDING_PAYMENT" },
         select: { id: true },
       });
+      extraSellerOrderId = so2.id;
       await tx.orderItem.create({
         data: { orderId: order.id, sellerOrderId: so2.id, sellerId: spec.extraSeller, productId: spec.productId, name: "Item2", unitPrice: 500, quantity: 1, lineTotal: 500 },
       });
     }
-    return { orderId: order.id, orderNumber: order.orderNumber, sellerOrderId: so.id };
+    return { orderId: order.id, orderNumber: order.orderNumber, sellerOrderId: so.id, extraSellerOrderId };
   }
 
   try {
@@ -333,14 +346,22 @@ async function dbTests() {
           (await tx.offerInventory.findFirst({ where: { offerId: of.offerId }, select: { quantity: true } }))?.quantity === 8);
       }
 
-      // ── 6. multi-seller parent refused ─────────────────────────────────
+      // ── 6. multi-seller: Seller A cancels, Seller B remains active — parent Order UNCHANGED ──
       {
-        const of = await seedOfferForProduct(tx, S1.id);
-        const o = await seedOrder(tx, { parentStatus: "PROCESSING", sellerId: S1.id, soStatus: "PROCESSING", offerId: of.offerId, productId: of.productId, extraSeller: S2.id });
+        const of = await seedOfferForProduct(tx, S1.id, { soldCount: 4, qty: 6 });
+        const o = await seedOrder(tx, { parentStatus: "PROCESSING", sellerId: S1.id, soStatus: "PROCESSING", offerId: of.offerId, productId: of.productId, extraSeller: S2.id, extraSellerStatus: "PROCESSING" });
         const r = await sellerCancelSellerOrder(c1, o.sellerOrderId, "multi", tx);
-        ok("6 · multi-seller parent → VALIDATION (contact Axiaro), nothing changed",
-          r.ok === false && "code" in r && r.code === "VALIDATION" &&
-          (await tx.order.findUnique({ where: { id: o.orderId }, select: { status: true } }))?.status === "PROCESSING");
+        ok("6 · multi-seller — Seller A cancel now SUCCEEDS (no longer refused)", r.ok === true, JSON.stringify(r));
+        if (r.ok) {
+          ok("6 · Seller A's SellerOrder → CANCELLED", (await tx.sellerOrder.findUnique({ where: { id: o.sellerOrderId }, select: { status: true } }))?.status === "CANCELLED");
+          ok("6 · parentAlsoCancelled = false (Seller B still active)", r.parentAlsoCancelled === false);
+          ok("6 · parent Order UNCHANGED (still PROCESSING)",
+            (await tx.order.findUnique({ where: { id: o.orderId }, select: { status: true } }))?.status === "PROCESSING");
+          ok("6 · Seller B's SellerOrder untouched (still PROCESSING)",
+            (await tx.sellerOrder.findUnique({ where: { id: o.extraSellerOrderId! }, select: { status: true } }))?.status === "PROCESSING");
+          ok("6 · Seller A's inventory restored exactly once (6 + 2 = 8)",
+            (await tx.offerInventory.findFirst({ where: { offerId: of.offerId }, select: { quantity: true } }))?.quantity === 8);
+        }
       }
 
       // ── 7. existing 3P happy path unchanged (accept still works) ─────────

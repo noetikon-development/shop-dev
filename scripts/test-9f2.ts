@@ -341,11 +341,14 @@ async function staticTests() {
         detailRepo.indexOf("export async function getSellerOrderForSeller"),
         detailRepo.indexOf("// ---", detailRepo.indexOf("export async function getSellerOrderForSeller")),
       );
-      // selects only the safe parent-order fields (+ a sellerOrders _count for the 9F-30B single-seller gate)
+      // selects only the safe parent-order fields. The `sellerOrders` _count
+      // (originally added for the 9F-30B single-seller gate) was removed once
+      // multi-seller seller self-cancellation shipped — that gate no longer
+      // exists, so this field is no longer needed here.
       return (
         /orderNumber: true/.test(fn) &&
         /shippingAddress: true/.test(fn) &&
-        /_count: \{ select: \{ sellerOrders: true \} \}/.test(fn) &&
+        !/_count/.test(fn) &&
         !/\bemail: true/.test(fn) &&
         !/\bphone: true/.test(fn) &&
         !/\buserId: true/.test(fn) &&

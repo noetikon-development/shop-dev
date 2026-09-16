@@ -10,9 +10,12 @@ import { Modal, notify, usePersistentAction } from "@/components/seller/ui";
 
 /**
  * 9F-30B — the owning 3P seller declines (PENDING_PAYMENT) or cancels
- * (PROCESSING) an order they can't fulfil. A reason is mandatory, and the
- * consequence is spelled out before the confirm button: this cancels the
- * customer's WHOLE order, returns the stock, and can't be undone.
+ * (PROCESSING) an order they can't fulfil — always just THEIR OWN SellerOrder.
+ * A reason is mandatory, and the consequence is spelled out before the confirm
+ * button. On a multi-seller order this only cancels this seller's own portion;
+ * the customer's whole order is cancelled too ONLY if this was the last active
+ * seller on it (decided server-side — this panel doesn't know the siblings'
+ * state ahead of time, so the copy covers both outcomes rather than guessing).
  *
  * Rendered independently of the fulfilment panel — a PENDING_PAYMENT order is
  * not yet "fulfillable" but can still be declined.
@@ -50,8 +53,8 @@ export function SellerOrderCancelPanel({
     <>
       <p className="mb-3 text-sm text-ink-soft">
         Can’t fulfil this order? {labels.button === "Decline order" ? "Decline it" : "Cancel it"} and
-        the customer’s whole order is cancelled — the items go back to your stock and the customer is
-        notified. This can’t be undone.
+        your items go back to your stock. If you’re the last active seller on this order, the
+        customer’s whole order is cancelled too and they’re notified. This can’t be undone.
       </p>
       <button
         type="button"
@@ -74,12 +77,15 @@ export function SellerOrderCancelPanel({
       >
         <div className="space-y-3">
           <div className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">
-            <p className="font-medium">This cancels the customer’s entire order.</p>
+            <p className="font-medium">This cancels your part of this order.</p>
             <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
-              <li>The order is marked cancelled and can’t be reopened.</li>
+              <li>Your order is marked cancelled and can’t be reopened.</li>
               <li>Every item on it goes back to your stock.</li>
-              <li>The customer is emailed that their order was cancelled.</li>
-              <li>Any commission on the order is reversed.</li>
+              <li>Any commission on it is reversed.</li>
+              <li>
+                If you’re the last active seller on this order, the customer’s whole order is
+                cancelled too and they’re emailed.
+              </li>
             </ul>
           </div>
 

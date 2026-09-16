@@ -169,7 +169,6 @@ export async function getSellerOrderForSeller(
           status: true,
           placedAt: true,
           shippingAddress: true,
-          _count: { select: { sellerOrders: true } },
         },
       },
       items: {
@@ -482,30 +481,55 @@ export type SellerCancelResult =
       orderId: string;
       orderNumber: string;
       previousParentStatus: string;
+      /** True when this seller was the LAST active SellerOrder on the order,
+       *  so the parent Order was ALSO cancelled in this same transaction —
+       *  the existing whole-order-cancel semantics apply in that case
+       *  (customer notified, OrderEvent reads "Order cancelled"). False for a
+       *  multi-seller order where at least one sibling SellerOrder is still
+       *  active — the parent Order is left completely untouched. */
+      parentAlsoCancelled: boolean;
       restockedUnits: number;
       restockedLines: number;
       clawbackEvents: SellerOrderClawbackEvent[];
     }
   | SellerOrderRepoError;
 
-/** Thrown inside the tx when the atomic parent-Order gate matches 0 rows. */
-class ParentOrderMovedError extends Error {}
-
 /**
  * The owning seller cancels a `SellerOrder` (PENDING_PAYMENT = decline,
- * PROCESSING = cancel) because they can't fulfil it. Reuses the same reversal
- * the admin `cancelOrderAction` performs — this phase is single-seller, so the
- * seller's SellerOrder IS the whole order and cancelling it cancels the parent.
+ * PROCESSING = cancel) because they can't fulfil it — its OWN SellerOrder
+ * only, regardless of how many other sellers are on the same parent Order.
  *
- * Guards / idempotency (identical mechanism to `cancelOrderAction`):
+ * Guards / idempotency:
  *   - SellerOrder scoped to `ctx.sellerId`; status must be PENDING_PAYMENT / PROCESSING
- *   - the parent Order must still be in `CANCELLABLE_STATUSES`
- *   - a single atomic `UPDATE "Order" … WHERE status IN (cancellable)` is the
- *     one-shot gate: 0 rows ⇒ the order already moved on ⇒ nothing is restored
- *   - the SellerOrder write is status-guarded too (0 rows ⇒ STALE)
+ *     (`sellerCanCancelSellerOrder` — the same predicate the whole-order
+ *     cancellation safety gate in `orders/cancellation.ts` reuses)
+ *   - the parent Order must still be in `CANCELLABLE_STATUSES` (in practice this
+ *     is already implied whenever THIS seller is itself still decline-eligible —
+ *     the parent can only have advanced past PROCESSING once EVERY SellerOrder,
+ *     including this one, has shipped)
+ *   - the SellerOrder write is status-guarded (`updateMany` on `{id, sellerId,
+ *     status: so.status}`) — 0 rows ⇒ STALE. THIS is now the one-shot
+ *     idempotency gate for this seller's own reversal (inventory / soldCount /
+ *     settlement below), independent of the parent Order's fate.
+ *
+ * Parent-Order cascade (multi-seller-safe): after this SellerOrder is
+ * confirmed cancelled, every sibling `SellerOrder` row on the same parent is
+ * locked with `SELECT ... FOR UPDATE` (the same idiom `restoreOfferStock`
+ * already uses to lock `OfferInventory`) before deciding whether any of them
+ * is still active. Locking ALL sibling rows up front serializes two sellers
+ * declining at the same moment — whichever transaction's lock acquires first
+ * forces the other to wait and then see the up-to-date (already-committed)
+ * status, so "am I the last one" can never be answered incorrectly by both
+ * concurrent callers. The parent Order is cancelled ONLY when no sibling is
+ * left active; otherwise it is left completely untouched — no new status
+ * value, no schema change. If the guarded parent-Order UPDATE matches 0 rows
+ * (e.g. an admin already moved it, or a fulfilment cascade shipped it in the
+ * meantime), this is treated as a benign no-op, NOT an error — this seller's
+ * own already-committed cancellation must never be rolled back because of
+ * something that happened to the parent afterward.
  *
  * Never touches payments, `Order.paymentStatus`, `Inventory`, the returns/refund
- * flow, or another seller's rows.
+ * flow, or another seller's rows/inventory/commission/settlement.
  */
 export async function sellerCancelSellerOrder(
   ctx: SellerContext,
@@ -528,26 +552,12 @@ export async function sellerCancelSellerOrder(
         commissionAmount: true,
         settlementId: true,
         settlementClawbackAmount: true,
-        order: {
-          select: {
-            id: true,
-            orderNumber: true,
-            status: true,
-            sellerOrders: { select: { id: true } },
-          },
-        },
+        order: { select: { id: true, orderNumber: true, status: true } },
         items: { select: { id: true, offerId: true, quantity: true, productId: true } },
       },
     });
     if (!so) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
 
-    if (so.order.sellerOrders.length !== 1) {
-      return {
-        ok: false,
-        code: "VALIDATION",
-        error: "This order has items from more than one seller — contact Axiaro to cancel it.",
-      };
-    }
     if (!sellerCanCancelSellerOrder(so.status)) {
       return {
         ok: false,
@@ -564,7 +574,9 @@ export async function sellerCancelSellerOrder(
     }
 
     // 1. SellerOrder → CANCELLED, status-guarded + commission zeroed (the sale it
-    //    was earned on no longer exists). 0 rows ⇒ someone else moved it.
+    //    was earned on no longer exists). 0 rows ⇒ someone else moved it. This is
+    //    now the one-shot gate for steps 2–4 below — they run at most once
+    //    regardless of what happens to the parent Order afterward.
     const soRes = await tx.sellerOrder.updateMany({
       where: { id: sellerOrderId, sellerId: ctx.sellerId, status: so.status },
       data: { status: "CANCELLED", commissionAmount: 0, updatedAt: new Date() },
@@ -573,19 +585,9 @@ export async function sellerCancelSellerOrder(
       return { ok: false, code: "STALE", error: "This order was updated elsewhere — reload and try again." };
     }
 
-    // 2. Parent Order → CANCELLED — the atomic one-shot gate for the reversal
-    //    below. 0 rows ⇒ the order was shipped / delivered / cancelled since we
-    //    read it ⇒ abort the WHOLE tx (rolls back the SellerOrder write) so
-    //    inventory is never restored against an order that's still live.
-    const cancelledOrder = await tx.$executeRaw`
-      UPDATE "Order" SET "status" = 'CANCELLED', "updatedAt" = now()
-      WHERE "id" = ${so.order.id}
-        AND "status" IN ('PENDING_PAYMENT', 'PENDING', 'PROCESSING')`;
-    if (cancelledOrder === 0) throw new ParentOrderMovedError();
-
-    // 3. Reverse exactly what checkout's SALE deducted — OfferInventory per
-    //    OrderItem.offerId + OfferAdjustment(CANCELLATION). Same as
-    //    cancelOrderAction's offer-native branch. Runs at most once (step 2 gate).
+    // 2. Reverse exactly what checkout's SALE deducted — OfferInventory per
+    //    OrderItem.offerId + OfferAdjustment(CANCELLATION). Scoped to `so.items`
+    //    (this SellerOrder's own OrderItems only) — never another seller's.
     let restockedUnits = 0;
     let restockedLines = 0;
     const soldBackByProduct = new Map<string, number>();
@@ -609,14 +611,14 @@ export async function sellerCancelSellerOrder(
       soldBackByProduct.set(it.productId, (soldBackByProduct.get(it.productId) ?? 0) + it.quantity);
     }
 
-    // 4. Undo the soldCount bump checkout made (never below zero).
+    // 3. Undo the soldCount bump checkout made (never below zero).
     for (const [productId, qty] of soldBackByProduct) {
       await tx.$executeRaw`
         UPDATE "Product" SET "soldCount" = GREATEST(0, "soldCount" - ${qty})
         WHERE "id" = ${productId}`;
     }
 
-    // 5. Settlement clawback — ONLY if this SellerOrder was somehow already
+    // 4. Settlement clawback — ONLY if this SellerOrder was somehow already
     //    settled. It never can be from PENDING_PAYMENT / PROCESSING (settlement
     //    needs DELIVERED), but keep the branch symmetric with cancelOrderAction.
     const clawbackEvents: SellerOrderClawbackEvent[] = [];
@@ -639,13 +641,40 @@ export async function sellerCancelSellerOrder(
       }
     }
 
-    // 6. Timeline event on the customer-facing order.
+    // 5. Concurrency-safe "last active seller" cascade. Lock EVERY SellerOrder
+    //    row on this parent Order (including the one just cancelled above) so a
+    //    concurrent decline on a sibling can never race this decision — it must
+    //    wait for this lock, then see this seller's row as already CANCELLED.
+    const siblings = await tx.$queryRaw<{ id: string; status: string }[]>`
+      SELECT "id", "status" FROM "SellerOrder" WHERE "orderId" = ${so.order.id} FOR UPDATE`;
+    const anySiblingStillActive = siblings.some((s) => s.id !== sellerOrderId && s.status !== "CANCELLED");
+
+    let parentAlsoCancelled = false;
+    if (!anySiblingStillActive) {
+      // Guarded — a benign no-op (not an error) if the parent already moved on
+      // for some other reason (e.g. an admin cancelled it, or a fulfilment
+      // cascade shipped it) between our read above and reaching here. This
+      // seller's own already-committed cancellation must never roll back
+      // because of that.
+      const cancelledOrder = await tx.$executeRaw`
+        UPDATE "Order" SET "status" = 'CANCELLED', "updatedAt" = now()
+        WHERE "id" = ${so.order.id}
+          AND "status" IN ('PENDING_PAYMENT', 'PENDING', 'PROCESSING')`;
+      parentAlsoCancelled = cancelledOrder > 0;
+    }
+
+    // 6. Timeline event on the customer-facing order — accurate to what
+    //    actually happened. The whole-order wording is used ONLY when this
+    //    seller really was the last one and the parent was cancelled too,
+    //    consistent with the existing single-seller / whole-order semantics.
     await tx.orderEvent.create({
       data: {
         orderId: so.order.id,
         status: "CANCELLED",
-        title: "Order cancelled",
-        detail: `Cancelled by the seller. Reason: ${cleanReason}`,
+        title: parentAlsoCancelled ? "Order cancelled" : "Seller order cancelled",
+        detail: parentAlsoCancelled
+          ? `Cancelled by the seller. Reason: ${cleanReason}`
+          : `${ctx.sellerName}'s items were cancelled by the seller. Reason: ${cleanReason}`,
       },
     });
 
@@ -655,6 +684,7 @@ export async function sellerCancelSellerOrder(
       orderId: so.order.id,
       orderNumber: so.order.orderNumber,
       previousParentStatus: so.order.status,
+      parentAlsoCancelled,
       restockedUnits,
       restockedLines,
       clawbackEvents,
@@ -665,9 +695,6 @@ export async function sellerCancelSellerOrder(
     if (externalTx) return await run(externalTx);
     return await prisma.$transaction(run);
   } catch (err) {
-    if (err instanceof ParentOrderMovedError) {
-      return { ok: false, code: "CONFLICT", error: "The order changed while you were cancelling it. Reload and try again." };
-    }
     console.error("[seller-order-repository] sellerCancelSellerOrder failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not cancel the order." };
   }

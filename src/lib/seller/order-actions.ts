@@ -131,13 +131,18 @@ export async function advanceSellerOrderAction(
 // ---------------------------------------------------------------------------
 // Cancel / decline — 9F-30B
 //
-// The owning seller cancels an order they can't fulfil. This IS a cancellation
-// (not a fulfilment move): it goes through `sellerCancelSellerOrder`, which
-// reuses the admin `cancelOrderAction` reversal architecture — parent Order →
-// CANCELLED, OfferInventory restored, soldCount rolled back, commission zeroed,
-// one OrderEvent, all inside one transaction. This layer then (post-commit)
-// audits it, tells the CUSTOMER, and raises an Ops signal. The seller is NOT
-// emailed about their own cancellation (they just did it).
+// The owning seller cancels an order they can't fulfil — ONLY its own
+// SellerOrder, regardless of how many other sellers are on the same parent
+// Order. `sellerCancelSellerOrder` reverses OfferInventory / soldCount /
+// commission for this seller alone, and cancels the parent Order TOO only
+// when this was the last active SellerOrder on it (`res.parentAlsoCancelled`).
+// This layer then (post-commit) audits it, raises an Ops signal, and tells the
+// CUSTOMER — but the existing "your order was cancelled" email is only ever
+// correct when the parent Order actually was, so it's gated on
+// `parentAlsoCancelled`. A multi-seller partial decline currently sends no
+// customer email at all (an open policy question — see the phase report — not
+// invented here). The seller is NOT emailed about their own cancellation
+// (they just did it).
 // ---------------------------------------------------------------------------
 
 const cancelSchema = z.object({
@@ -171,7 +176,10 @@ export async function sellerCancelOrderAction(
     targetId: res.orderId,
     summary:
       `Seller ${ctx.sellerName} ${verb} order ${res.orderNumber} ` +
-      `(was ${res.previousParentStatus}); restocked ${res.restockedUnits} unit(s) across ${res.restockedLines} line(s)`,
+      `(was ${res.previousParentStatus}); restocked ${res.restockedUnits} unit(s) across ${res.restockedLines} line(s)` +
+      (res.parentAlsoCancelled
+        ? " — last active seller on this order; the customer's order is now cancelled"
+        : " — other sellers on this order remain active; the customer's order is unaffected"),
     meta: {
       trigger: res.from === "PENDING_PAYMENT" ? "seller_decline" : "seller_cancel",
       sellerId: ctx.sellerId,
@@ -179,6 +187,7 @@ export async function sellerCancelOrderAction(
       orderNumber: res.orderNumber,
       from: res.from,
       previousParentStatus: res.previousParentStatus,
+      parentAlsoCancelled: res.parentAlsoCancelled,
       restockedUnits: res.restockedUnits,
       restockedLines: res.restockedLines,
       reason: parsed.data.reason,
@@ -208,10 +217,16 @@ export async function sellerCancelOrderAction(
     });
   }
 
-  // Customer notification — the SAME email the admin cancellation sends. It never
-  // claims a refund (COD / PayMongo dormant). Key ORDER_CANCELLED:<orderId> → one
-  // send per order (a later admin cancel can't duplicate it).
-  scheduleEmail(() => sendOrderCancelled(res.orderId, parsed.data.reason));
+  // Customer notification — the SAME email the admin cancellation sends. Only
+  // correct to send when the parent Order actually was cancelled — a
+  // multi-seller partial decline leaves the customer's order untouched, and
+  // this email says "your order was cancelled", which would be wrong there.
+  // Never claims a refund (COD / PayMongo dormant). Key
+  // ORDER_CANCELLED:<orderId> → one send per order (a later admin cancel
+  // can't duplicate it).
+  if (res.parentAlsoCancelled) {
+    scheduleEmail(() => sendOrderCancelled(res.orderId, parsed.data.reason));
+  }
   // Axiaro Operations — a seller just cancelled a customer's order. Ops-only,
   // audit-row-anchored key, no customer PII. The seller does NOT get an email.
   if (auditId) {

@@ -373,9 +373,17 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
 
       if (offerNative) {
         // 2a. OfferInventory reversal — the WHOLE reversal, per OrderItem.offerId.
-        //     No Inventory row is read or locked (§12/§13).
+        //     No Inventory row is read or locked (§12/§13). Scoped to items whose
+        //     SellerOrder is in `toCancel` (about to be cancelled here) or has none
+        //     at all (a legacy line) — an item whose SellerOrder was ALREADY
+        //     independently cancelled (a prior seller self-decline, 9F-30B
+        //     multi-seller) must never be reversed again. `restoreOfferStock` has
+        //     no idempotency guard of its own; this scope is what makes that safe.
         const items = await tx.orderItem.findMany({
-          where: { orderId },
+          where: {
+            orderId,
+            OR: [{ sellerOrderId: { in: toCancel.map((s) => s.id) } }, { sellerOrderId: null }],
+          },
           select: { id: true, offerId: true, quantity: true, productId: true },
         });
         for (const it of items) {

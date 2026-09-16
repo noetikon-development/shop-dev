@@ -122,11 +122,14 @@ export type SellerOrderDetailView = {
   shipment: SellerOrderShipmentView | null;
   allowedMoves: string[];
   /**
-   * 9F-30B — the owning seller may cancel / decline this order: SellerOrder is
-   * PENDING_PAYMENT or PROCESSING, the parent Order is still cancellable, and it
-   * is a single-seller order (this phase only cancels those on the seller plane).
-   * Independent of `parentFulfillable` — a PENDING_PAYMENT order is not yet
-   * fulfillable but can still be declined.
+   * 9F-30B — the owning seller may cancel / decline THIS SellerOrder:
+   * SellerOrder is PENDING_PAYMENT or PROCESSING, and the parent Order is
+   * still cancellable. Works the same whether or not other sellers are on the
+   * same parent Order — a seller only ever affects its OWN SellerOrder; the
+   * repository decides whether that also cancels the parent (only once every
+   * sibling SellerOrder is itself CANCELLED). Independent of
+   * `parentFulfillable` — a PENDING_PAYMENT order is not yet fulfillable but
+   * can still be declined.
    */
   canCancel: boolean;
   /** Button + toast wording for the cancel control, keyed off the current status. */
@@ -194,8 +197,7 @@ export async function getSellerOrderDetail(
     allowedMoves: allowedSellerOrderMoves(so.status, { parentOrderStatus: so.order.status }),
     canCancel:
       sellerCanCancelSellerOrder(so.status) &&
-      (CANCELLABLE_STATUSES as readonly string[]).includes(so.order.status) &&
-      so.order._count.sellerOrders === 1,
+      (CANCELLABLE_STATUSES as readonly string[]).includes(so.order.status),
     cancelLabels: sellerCancelLabels(so.status),
   };
 }
