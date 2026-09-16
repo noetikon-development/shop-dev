@@ -2,7 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { isReturnStatus } from "@/lib/returns/status";
-import { remainingReturnableByOrderItem } from "@/lib/returns";
+import { remainingReturnableByOrderItem, orderItemDeliveryState } from "@/lib/returns";
 import { parseReturnDestination, sellerReturnAddressLines } from "@/lib/marketplace/return-destination";
 
 /**
@@ -280,7 +280,11 @@ export async function getReturnCounts(): Promise<Record<string, number>> {
 
 /**
  * For the admin "start a return" panel on the order page: the order's lines with
- * how many units of each are still returnable.
+ * how many units of each are still returnable, and — per line — whether it's
+ * naturally delivered (its own SellerOrder is DELIVERED; a legacy line with no
+ * SellerOrder falls back to the whole-order status). This lets the create
+ * action record an accurate, per-line override rather than one derived from
+ * the aggregate `Order.status`, which a multi-seller order can outgrow.
  */
 export async function orderReturnableLines(orderId: string) {
   const [order, remaining] = await Promise.all([
@@ -290,6 +294,8 @@ export async function orderReturnableLines(orderId: string) {
         id: true,
         orderNumber: true,
         status: true,
+        placedAt: true,
+        deliveredAt: true,
         items: {
           orderBy: { id: "asc" },
           select: {
@@ -301,6 +307,7 @@ export async function orderReturnableLines(orderId: string) {
             sku: true,
             unitPrice: true,
             quantity: true,
+            sellerOrder: { select: { status: true, shipments: { select: { deliveredAt: true } } } },
           },
         },
       },
@@ -310,16 +317,21 @@ export async function orderReturnableLines(orderId: string) {
   if (!order) return null;
   return {
     order: { id: order.id, orderNumber: order.orderNumber, status: order.status },
-    lines: order.items.map((it) => ({
-      orderItemId: it.id,
-      productId: it.productId,
-      variantId: it.variantId,
-      name: it.name,
-      variantLabel: it.variantLabel,
-      sku: it.sku,
-      unitPrice: it.unitPrice,
-      orderedQuantity: it.quantity,
-      remaining: remaining.get(it.id) ?? 0,
-    })),
+    lines: order.items.map((it) => {
+      const state = orderItemDeliveryState(order, it.sellerOrder);
+      return {
+        orderItemId: it.id,
+        productId: it.productId,
+        variantId: it.variantId,
+        name: it.name,
+        variantLabel: it.variantLabel,
+        sku: it.sku,
+        unitPrice: it.unitPrice,
+        orderedQuantity: it.quantity,
+        remaining: remaining.get(it.id) ?? 0,
+        delivered: state.delivered,
+        deliveredAt: state.deliveredAt,
+      };
+    }),
   };
 }

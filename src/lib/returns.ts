@@ -101,6 +101,64 @@ export async function remainingReturnableByOrderItem(
 }
 
 // ---------------------------------------------------------------------------
+// Per-item delivery state (multi-seller-aware)
+// ---------------------------------------------------------------------------
+
+/** The parent-Order fields `orderItemDeliveryState` needs — a subset of `Order`. */
+export type ReturnEligibilityOrder = {
+  status: string;
+  deliveredAt: Date | null;
+  placedAt: Date;
+};
+
+/** The owning SellerOrder's fields, or `null` for a pre-marketplace legacy line
+ *  (`OrderItem.sellerOrderId` predates the 9E-3C-1 backfill). */
+export type ReturnEligibilitySellerOrder = {
+  status: string;
+  shipments: { deliveredAt: Date | null }[];
+} | null;
+
+/**
+ * Whether a single `OrderItem` is itself "delivered" for return-eligibility
+ * purposes, and the timestamp its own return window should count from.
+ *
+ * A marketplace-era line (its `sellerOrder` is present) is judged by ITS OWN
+ * `SellerOrder.status` — never the aggregate parent `Order.status`, which can
+ * legitimately still read PROCESSING while a sibling SellerOrder lags behind
+ * (the 9F-12b / 9F-35B rollup only advances the parent once EVERY SellerOrder
+ * reaches a milestone). A pre-marketplace legacy line (`sellerOrder` null) has
+ * no per-seller signal to consult, so it keeps the ORIGINAL whole-order check
+ * byte-for-byte — this function changes nothing for it.
+ *
+ * The delivered timestamp prefers the owning SellerOrder's own `Shipment`
+ * (`shipments[0]`, the same "take the one shipment row" convention already
+ * used by `rollUpParentOrder` in seller-order-repository.ts), falling back to
+ * the parent Order's `deliveredAt`/`placedAt` only if a DELIVERED SellerOrder
+ * somehow has no shipment row — never a hard failure, and never a stricter
+ * window than before.
+ */
+export function orderItemDeliveryState(
+  order: ReturnEligibilityOrder,
+  sellerOrder: ReturnEligibilitySellerOrder,
+): { delivered: boolean; deliveredAt: Date | null } {
+  if (sellerOrder) {
+    if (sellerOrder.status !== "DELIVERED") return { delivered: false, deliveredAt: null };
+    return {
+      delivered: true,
+      deliveredAt: sellerOrder.shipments[0]?.deliveredAt ?? order.deliveredAt ?? order.placedAt,
+    };
+  }
+  if (order.status !== "DELIVERED") return { delivered: false, deliveredAt: null };
+  return { delivered: true, deliveredAt: order.deliveredAt ?? order.placedAt };
+}
+
+/** Whether `deliveredAt` is still within the configured return window. Shared
+ *  ms-math so the customer and admin paths can never drift apart on it. */
+export function withinReturnWindow(deliveredAt: Date, windowDays: number, now: number = Date.now()): boolean {
+  return now <= deliveredAt.getTime() + windowDays * 24 * 60 * 60 * 1000;
+}
+
+// ---------------------------------------------------------------------------
 // Eligibility
 // ---------------------------------------------------------------------------
 
@@ -136,6 +194,13 @@ const OPEN_RETURN_STATUSES = ["REQUESTED", "APPROVED", "RECEIVED", "REFUND_INITI
 /**
  * Customer self-service eligibility for `orderNumber`, scoped to `userId`.
  * Returns the returnable lines when eligible.
+ *
+ * Delivered/window are evaluated PER LINE via `orderItemDeliveryState` — a
+ * line whose own SellerOrder is DELIVERED is eligible even while a sibling
+ * SellerOrder on the same Order is still PROCESSING/SHIPPED; that sibling's
+ * lines simply aren't included. The aggregate `Order.status` is never used as
+ * a stand-in for an individual line's delivery state (only a pre-marketplace
+ * legacy line, which has no SellerOrder at all, still falls back to it).
  */
 export async function returnEligibility(
   userId: string,
@@ -164,18 +229,28 @@ export async function returnEligibility(
           sku: true,
           unitPrice: true,
           quantity: true,
+          sellerOrder: { select: { status: true, shipments: { select: { deliveredAt: true } } } },
         },
       },
     },
   });
 
   if (!order || order.userId !== userId) return { eligible: false, code: "not_found" };
-  if (order.status !== "DELIVERED") return { eligible: false, code: "not_delivered" };
 
   const { windowDays } = await getReturnsConfig();
-  const since = order.deliveredAt ?? order.placedAt;
-  const deadline = since.getTime() + windowDays * 24 * 60 * 60 * 1000;
-  if (Date.now() > deadline) return { eligible: false, code: "window_expired" };
+  const now = Date.now();
+  const deliveryByItem = new Map(
+    order.items.map((it) => [it.id, orderItemDeliveryState(order, it.sellerOrder)]),
+  );
+
+  const anyDelivered = [...deliveryByItem.values()].some((d) => d.delivered);
+  if (!anyDelivered) return { eligible: false, code: "not_delivered" };
+
+  const deliveredWithinWindow = order.items.filter((it) => {
+    const d = deliveryByItem.get(it.id)!;
+    return d.delivered && d.deliveredAt !== null && withinReturnWindow(d.deliveredAt, windowDays, now);
+  });
+  if (deliveredWithinWindow.length === 0) return { eligible: false, code: "window_expired" };
 
   const openReturn = await prisma.returnRequest.findFirst({
     where: { orderId: order.id, status: { in: [...OPEN_RETURN_STATUSES] } },
@@ -186,7 +261,7 @@ export async function returnEligibility(
   }
 
   const remaining = await remainingReturnableByOrderItem(order.id);
-  const lines: EligibleLine[] = order.items
+  const lines: EligibleLine[] = deliveredWithinWindow
     .map((it) => ({
       orderItemId: it.id,
       productId: it.productId,

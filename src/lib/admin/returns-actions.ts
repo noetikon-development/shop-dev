@@ -37,7 +37,13 @@ import {
   isReturnItemCondition,
   RETURN_LIMITS,
 } from "@/lib/returns/status";
-import { nextReturnNumber, remainingReturnableByOrderItem, getReturnsConfig } from "@/lib/returns";
+import {
+  nextReturnNumber,
+  remainingReturnableByOrderItem,
+  getReturnsConfig,
+  orderItemDeliveryState,
+  withinReturnWindow,
+} from "@/lib/returns";
 import { refundRouteForOrder, initiateProviderRefund } from "@/lib/payments/refund";
 import { hasPermission } from "@/lib/admin/rbac";
 
@@ -877,6 +883,7 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
           sku: true,
           unitPrice: true,
           quantity: true,
+          sellerOrder: { select: { status: true, shipments: { select: { deliveredAt: true } } } },
         },
       },
     },
@@ -891,16 +898,16 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
     return { ok: false, error: `This order already has an open return (${openReturn.returnNumber}).` };
   }
 
-  // Soft eligibility — admins may assist with undelivered / late returns, but
-  // every override is recorded.
-  const overridden: string[] = [];
-  if (order.status !== "DELIVERED") overridden.push("status");
   const { windowDays } = await getReturnsConfig();
-  const since = order.deliveredAt ?? order.placedAt;
-  if (Date.now() > since.getTime() + windowDays * 24 * 60 * 60 * 1000) overridden.push("window");
-
   const remaining = await remainingReturnableByOrderItem(order.id);
   const orderItemById = new Map(order.items.map((i) => [i.id, i]));
+
+  // Soft eligibility — admins may assist with undelivered / late returns, but
+  // every override is recorded. Computed PER SELECTED LINE (not the aggregate
+  // `Order.status`, which can read PROCESSING while this specific line's own
+  // SellerOrder already delivered — the "status" override must only reflect
+  // lines that genuinely aren't naturally eligible).
+  const overridden = new Set<string>();
   const items: Prisma.ReturnItemUncheckedCreateWithoutReturnRequestInput[] = [];
   for (const l of parsed.data.lines) {
     const it = orderItemById.get(l.orderItemId);
@@ -908,6 +915,12 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
     const rem = remaining.get(it.id) ?? 0;
     if (l.quantity > rem) {
       return { ok: false, error: `At most ${rem} of “${it.name}” can still be returned.` };
+    }
+    const state = orderItemDeliveryState(order, it.sellerOrder);
+    if (!state.delivered) {
+      overridden.add("status");
+    } else if (!state.deliveredAt || !withinReturnWindow(state.deliveredAt, windowDays)) {
+      overridden.add("window");
     }
     items.push({
       orderItemId: it.id,
@@ -922,6 +935,7 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
     });
   }
   if (items.length === 0) return { ok: false, error: "Nothing to return." };
+  const overriddenList = [...overridden];
 
   let created: { id: string; returnNumber: string };
   try {
@@ -942,7 +956,7 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
             clean(parsed.data.staffNote, RETURN_LIMITS.staffNoteMax),
           ),
           adminAssisted: true,
-          overriddenRules: overridden.length ? JSON.stringify(overridden) : null,
+          overriddenRules: overriddenList.length ? JSON.stringify(overriddenList) : null,
           items: { create: items },
         },
         select: { id: true, returnNumber: true },
@@ -963,12 +977,12 @@ export async function adminCreateReturnAction(input: unknown): Promise<ReturnAdm
     targetId: created.id,
     summary:
       `${admin.user.email} created assisted return ${created.returnNumber} for order ${order.orderNumber}` +
-      (overridden.length ? ` (overrode: ${overridden.join(", ")})` : ""),
+      (overriddenList.length ? ` (overrode: ${overriddenList.join(", ")})` : ""),
     meta: {
       returnNumber: created.returnNumber,
       orderNumber: order.orderNumber,
       adminAssisted: true,
-      overriddenRules: overridden,
+      overriddenRules: overriddenList,
     },
   });
 
