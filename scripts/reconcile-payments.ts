@@ -17,6 +17,14 @@
  *   8  PAID Payment carries metadata.providerPaymentId (pay_…) — 9F-54        WARN
  *   9  a PROCESSED `*.payment.paid` WebhookEvent's Payment is PAID            FAIL
  *
+ * 9F-59 — seller-aware refund attribution foundation:
+ *  10  Σ PaymentRefund(live) amount <= Payment.amount, per payment            FAIL
+ *  11  SUCCEEDED PaymentRefund aggregate matches Payment.status               FAIL
+ *  12  ReturnRequest.refundAmount == its linked PaymentRefund.amount          FAIL
+ *  13  Σ seller-scoped PaymentRefund(live) <= SellerOrder.total, per seller   FAIL
+ *  14  Σ seller-attributed PaymentRefund(live) <= Payment.amount, per payment FAIL
+ *  15  a bookkeeping-labelled ReturnRequest never has a PaymentRefund row     FAIL
+ *
  *   node --env-file=.env --import tsx scripts/reconcile-payments.ts
  */
 import { PrismaClient } from "@prisma/client";
@@ -113,6 +121,103 @@ async function run() {
   } else {
     FAIL(`9 · ${paidEvents.length} PROCESSED payment-paid WebhookEvent(s) but 0 PAID Payment rows`);
   }
+
+  // ── 9F-59 — seller-aware refund attribution foundation (all read-only) ──
+  const LIVE_REFUND = ["PENDING", "PROCESSING", "SUCCEEDED"];
+  const refunds = await prisma.paymentRefund.findMany({
+    select: {
+      id: true, paymentId: true, sellerOrderId: true, returnRequestId: true,
+      amount: true, status: true,
+      payment: { select: { id: true, amount: true, status: true } },
+    },
+  });
+  console.log(`  ${refunds.length} PaymentRefund row(s)\n`);
+
+  // 10 — Σ live refunds <= Payment.amount, per payment.
+  const byPayment = new Map<string, { amount: number; live: number }>();
+  for (const r of refunds) {
+    const e = byPayment.get(r.paymentId) ?? { amount: r.payment.amount, live: 0 };
+    if (LIVE_REFUND.includes(r.status)) e.live += r.amount;
+    byPayment.set(r.paymentId, e);
+  }
+  const overPayment = [...byPayment.entries()].filter(([, e]) => e.live > e.amount);
+  if (overPayment.length === 0) PASS("10 · Σ PaymentRefund(live) amount <= Payment.amount, per payment");
+  else for (const [pid, e] of overPayment) FAIL(`10 · Payment ${pid}: Σ live refunds ${e.live} > amount ${e.amount}`);
+
+  // 11 — SUCCEEDED aggregate must match the Payment.status the webhook derives.
+  const succeededByPayment = new Map<string, number>();
+  for (const r of refunds) {
+    if (r.status !== "SUCCEEDED") continue;
+    succeededByPayment.set(r.paymentId, (succeededByPayment.get(r.paymentId) ?? 0) + r.amount);
+  }
+  let statusBad = 0;
+  for (const [pid, succeeded] of succeededByPayment) {
+    const payment = refunds.find((r) => r.paymentId === pid)!.payment;
+    const expected = succeeded >= payment.amount ? "REFUNDED" : "PARTIALLY_REFUNDED";
+    if (payment.status !== expected) {
+      statusBad++;
+      FAIL(`11 · Payment ${pid}: Σ SUCCEEDED refunds ${succeeded}/${payment.amount} implies ${expected} but status is ${payment.status}`);
+    }
+  }
+  if (statusBad === 0) PASS("11 · SUCCEEDED PaymentRefund aggregate is consistent with Payment.status");
+
+  // 12 — ReturnRequest.refundAmount must match its linked PaymentRefund.
+  const returnsWithRefund = await prisma.returnRequest.findMany({
+    where: { paymentRefund: { isNot: null } },
+    select: { id: true, returnNumber: true, refundAmount: true, paymentRefund: { select: { amount: true } } },
+  });
+  const amountMismatch = returnsWithRefund.filter((r) => r.refundAmount !== r.paymentRefund?.amount);
+  if (amountMismatch.length === 0) PASS("12 · ReturnRequest.refundAmount is consistent with its PaymentRefund amount where applicable");
+  else for (const r of amountMismatch) FAIL(`12 · Return ${r.returnNumber}: refundAmount ${r.refundAmount} != PaymentRefund.amount ${r.paymentRefund?.amount}`);
+
+  // 13 — Σ live seller-scoped refunds <= SellerOrder.total, per seller.
+  const bySeller = new Map<string, number>();
+  for (const r of refunds) {
+    if (!r.sellerOrderId || !LIVE_REFUND.includes(r.status)) continue;
+    bySeller.set(r.sellerOrderId, (bySeller.get(r.sellerOrderId) ?? 0) + r.amount);
+  }
+  let sellerCapBad = 0;
+  for (const [sellerOrderId, live] of bySeller) {
+    const so = await prisma.sellerOrder.findUnique({ where: { id: sellerOrderId }, select: { total: true } });
+    if (so && live > so.total) {
+      sellerCapBad++;
+      FAIL(`13 · SellerOrder ${sellerOrderId}: Σ live seller-scoped refunds ${live} > total ${so.total}`);
+    }
+  }
+  if (sellerCapBad === 0) PASS("13 · no seller-scoped PaymentRefund total exceeds SellerOrder.total");
+
+  // 14 — Σ live seller-attributed refunds (across every seller sharing one
+  //      Payment) <= that Payment.amount — distinct from #10 (which sums ALL
+  //      refunds regardless of attribution): this isolates just the
+  //      seller-attributed subset, so a future multi-seller-per-payment
+  //      scenario can't silently let per-seller caps individually pass while
+  //      their sum still overruns the shared Payment.
+  const sellerAttributedByPayment = new Map<string, number>();
+  for (const r of refunds) {
+    if (!r.sellerOrderId || !LIVE_REFUND.includes(r.status)) continue;
+    sellerAttributedByPayment.set(r.paymentId, (sellerAttributedByPayment.get(r.paymentId) ?? 0) + r.amount);
+  }
+  let crossSellerBad = 0;
+  for (const [pid, live] of sellerAttributedByPayment) {
+    const amount = byPayment.get(pid)?.amount ?? 0;
+    if (live > amount) {
+      crossSellerBad++;
+      FAIL(`14 · Payment ${pid}: Σ seller-attributed live refunds ${live} > amount ${amount}`);
+    }
+  }
+  if (crossSellerBad === 0) PASS("14 · total refunds across all SellerOrders never exceed the Payment refundable balance");
+
+  // 15 — a bookkeeping-labelled refund (refundMethod not "... via PayMongo")
+  //      must never have a PaymentRefund row — the two paths stay separate.
+  const refundedReturns = await prisma.returnRequest.findMany({
+    where: { refundAmount: { not: null } },
+    select: { id: true, returnNumber: true, refundMethod: true, paymentRefund: { select: { id: true } } },
+  });
+  const leaked = refundedReturns.filter(
+    (r) => r.paymentRefund && !/via PayMongo$/.test(r.refundMethod ?? ""),
+  );
+  if (leaked.length === 0) PASS("15 · existing bookkeeping-only refunds remain separate from PaymentRefund rows");
+  else for (const r of leaked) FAIL(`15 · Return ${r.returnNumber} looks bookkeeping (refundMethod "${r.refundMethod}") but has a PaymentRefund row`);
 
   console.log(`\n  ${pass} pass · ${warn} warn · ${fail} fail`);
   if (fail > 0) {

@@ -44,7 +44,7 @@ import {
   orderItemDeliveryState,
   withinReturnWindow,
 } from "@/lib/returns";
-import { refundRouteForOrder, initiateProviderRefund } from "@/lib/payments/refund";
+import { refundRouteForOrder, initiateProviderRefund, deriveReturnSellerOrderId } from "@/lib/payments/refund";
 import { hasPermission } from "@/lib/admin/rbac";
 
 /**
@@ -631,12 +631,19 @@ export async function initiateRefundAction(input: unknown): Promise<ReturnAdminS
     });
     if (claimed.count === 0) return { ok: false, error: "The return was updated elsewhere — refresh and try again." };
 
+    // Seller attribution (schema foundation, 9F-59). NULL for a legacy return
+    // with no SellerOrder linkage, or a genuinely mixed-seller return (see
+    // `deriveReturnSellerOrderId`'s own doc — no split-refund mechanism is
+    // invented here); either way `initiateProviderRefund`'s Payment-level cap
+    // still applies.
+    const attribution = await deriveReturnSellerOrderId(ret.id);
     const provider = await initiateProviderRefund({
       returnRequestId: ret.id,
       paymentId: routing.payment.id,
       providerPaymentId: routing.payment.providerId,
       amount: parsed.data.refundAmount,
       reason: "requested_by_customer",
+      sellerOrderId: attribution.sellerOrderId,
     });
     if (!provider.ok) {
       // Roll the return back so an admin can retry or fall back to bookkeeping.
