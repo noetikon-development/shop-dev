@@ -265,8 +265,9 @@ export function rollupAuditInput(
 }
 
 /**
- * Roll the customer-facing parent `Order` forward when every `SellerOrder` on it
- * has reached the milestone the current seller just moved to (9F-12b).
+ * Roll the customer-facing parent `Order` forward when every ACTIVE (non-
+ * CANCELLED) `SellerOrder` on it has reached the milestone the current seller
+ * just moved to (9F-12b; CANCELLED made non-blocking in 9F-44E).
  *
  *   - SHIPPED   → parent `PROCESSING → SHIPPED` (only from PROCESSING), copying
  *                 the seller's OWN Shipment carrier/tracking onto the Order and
@@ -274,14 +275,25 @@ export function rollupAuditInput(
  *   - DELIVERED → parent `SHIPPED | OUT_FOR_DELIVERY → DELIVERED`, stamping
  *                 `deliveredAt` (the settlement return-window anchor).
  *
- * All-or-nothing: if ANY SellerOrder is not yet at the target, or the parent is
- * not in the expected state, this is a no-op (returns null). No `PARTIALLY_*`
- * status. Payment fields are NEVER touched (a COD order ships/delivers while
- * still `paymentStatus = PENDING`). Runs inside the caller's tx so the parent
- * transition and its `OrderEvent` commit atomically with the SellerOrder move.
- * The audit row + customer notification are fired by the caller AFTER commit.
- * Returns null (not an error) when nothing was rolled — the seller's own
- * transition still succeeds.
+ * A CANCELLED SellerOrder is excluded from the "every" check on BOTH branches —
+ * a seller who cancelled can never block a sibling's shipment/delivery from
+ * rolling the parent forward. If every SellerOrder on the order is CANCELLED,
+ * `active` is empty and this returns null unconditionally: an all-cancelled
+ * order becomes `Order.status = CANCELLED` through the EXISTING cancellation
+ * cascade (`sellerCancelSellerOrder`'s last-active-seller lock, or the
+ * whole-order cancel path) — never through this function, which must not be
+ * able to accidentally roll an all-cancelled order to SHIPPED/DELIVERED.
+ * `sellerType` (FIRST_PARTY/THIRD_PARTY) plays no part in this predicate — the
+ * rollup is keyed purely on `SellerOrder.status`.
+ *
+ * Beyond that, still all-or-nothing: if any ACTIVE SellerOrder is not yet at
+ * the target, or the parent is not in the expected state, this is a no-op
+ * (returns null). No `PARTIALLY_*` status. Payment fields are NEVER touched (a
+ * COD order ships/delivers while still `paymentStatus = PENDING`). Runs inside
+ * the caller's tx so the parent transition and its `OrderEvent` commit
+ * atomically with the SellerOrder move. The audit row + customer notification
+ * are fired by the caller AFTER commit. Returns null (not an error) when
+ * nothing was rolled — the seller's own transition still succeeds.
  */
 async function rollUpParentOrder(
   tx: Prisma.TransactionClient,
@@ -307,9 +319,15 @@ async function rollUpParentOrder(
   if (!so) return null;
   const order = so.order;
 
+  // CANCELLED siblings never block a rollup. An all-CANCELLED order (empty
+  // `active`) is deliberately excluded from BOTH branches below — that parent
+  // transition belongs to the cancellation cascade, not here.
+  const active = order.sellerOrders.filter((s) => s.status !== "CANCELLED");
+  if (active.length === 0) return null;
+
   if (sellerTo === "SHIPPED") {
-    // Every SellerOrder shipped or beyond, and the parent still in PROCESSING.
-    if (!order.sellerOrders.every((s) => SHIPPED_OR_BEYOND.has(s.status))) return null;
+    // Every ACTIVE SellerOrder shipped or beyond, and the parent still in PROCESSING.
+    if (!active.every((s) => SHIPPED_OR_BEYOND.has(s.status))) return null;
     if (order.status !== "PROCESSING" || !canTransition("PROCESSING", "SHIPPED")) return null;
 
     const ship = so.shipments[0] ?? null;
@@ -340,8 +358,8 @@ async function rollUpParentOrder(
     return { id: order.id, orderNumber: order.orderNumber, rolledTo: "SHIPPED" };
   }
 
-  // DELIVERED — every SellerOrder delivered, parent in a shipped state.
-  if (!order.sellerOrders.every((s) => s.status === "DELIVERED")) return null;
+  // DELIVERED — every ACTIVE SellerOrder delivered, parent in a shipped state.
+  if (!active.every((s) => s.status === "DELIVERED")) return null;
   if (
     (order.status !== "SHIPPED" && order.status !== "OUT_FOR_DELIVERY") ||
     !canTransition(order.status, "DELIVERED")
