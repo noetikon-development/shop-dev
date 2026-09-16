@@ -1002,15 +1002,29 @@ model PaymentRefund {
   failureReason String?
   metadata      String  @default("{}")
 
+  // Multi-seller refund attribution (schema foundation only — no refund logic
+  // reads/writes this yet). NULL is the intentional default for: every
+  // existing row (0 in production today), a legacy/pre-marketplace order with
+  // no SellerOrder, and any future refund that genuinely can't be attributed
+  // to one seller. Deliberately does NOT change how a refund's total is
+  // computed or capped — SellerOrder.total remains the seller-share basis, read
+  // (not stored) by whatever future logic uses this column. Bookkeeping-only
+  // refunds (ReturnRequest.refundAmount / refundMethod / etc.) are a completely
+  // separate model and never create a PaymentRefund row — this column has no
+  // bearing on them.
+  sellerOrderId String?
+
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   succeededAt DateTime?
 
   payment       Payment        @relation(fields: [paymentId], references: [id], onDelete: Cascade)
   returnRequest ReturnRequest? @relation(fields: [returnRequestId], references: [id], onDelete: SetNull)
+  sellerOrder   SellerOrder?   @relation(fields: [sellerOrderId], references: [id], onDelete: SetNull)
 
   @@index([paymentId])
   @@index([status])
+  @@index([sellerOrderId])
 }
 
 // Every inbound provider webhook, for replay protection + idempotent processing.
@@ -1639,6 +1653,12 @@ model SellerOrder {
   items      OrderItem[]
   shipments  Shipment[]
   settlement SellerSettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  // Required opposite side of PaymentRefund.sellerOrder (Prisma relations are
+  // declared on both models). Virtual — Prisma computes this from
+  // PaymentRefund.sellerOrderId; it adds NO column/table to SellerOrder at the
+  // database level. Nothing reads this yet (refund logic is not implemented in
+  // this phase).
+  paymentRefunds PaymentRefund[]
 
   @@unique([orderId, sellerId])
   @@index([orderId])
