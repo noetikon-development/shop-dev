@@ -10,7 +10,11 @@ import { orderStatusTone } from "@/lib/orders/status";
 import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
 import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { formatPrice, formatDate, discountPercent } from "@/lib/utils";
+import { groupOrderItemsBySeller, type CustomerOrderSellerOrder } from "@/lib/marketplace/customer-order-view";
+import { sellerOrderStatusLabel, sellerOrderStatusTone } from "@/lib/marketplace/seller-order-status";
 import type { OrderView } from "@/lib/data";
+
+type OrderItemRow = NonNullable<OrderView>["items"][number];
 
 export function OrderDetail({
   order,
@@ -43,6 +47,15 @@ export function OrderDetail({
             : "Pay on delivery"
           : "Unpaid";
 
+  // Multi-seller presentation (customer order UI phase): a genuinely
+  // multi-seller order (more than one SellerOrder) is grouped so each
+  // seller's own status and shipment are visible — a single-seller or legacy
+  // (zero-SellerOrder) order keeps the exact flat list it always had.
+  const isMultiSeller = order.sellerOrders.length > 1;
+  const { groups: sellerGroups, ungrouped: ungroupedItems } = isMultiSeller
+    ? groupOrderItemsBySeller(order.items, order.sellerOrders)
+    : { groups: [], ungrouped: order.items };
+
   return (
     <div className="grid gap-10 lg:grid-cols-[1fr_340px]">
       <div className="space-y-8">
@@ -68,49 +81,32 @@ export function OrderDetail({
           </div>
         </div>
 
-        <div className="card-surface p-5">
-          <h2 className="text-subtitle">Items</h2>
-          <ul className="mt-4 divide-y divide-line">
-            {order.items.map((it) => {
-              // 9F-38B: show the historical markdown ONLY from the frozen snapshot
-              // (`originalUnitPrice`) — never the current Offer. NULL / <= unitPrice
-              // (pre-9F-38B lines, or no compare-at at purchase) → display exactly
-              // as before. The percentage is DERIVED via discountPercent().
-              const hadMarkdown =
-                it.originalUnitPrice != null && it.originalUnitPrice > it.unitPrice;
-              const wasLineTotal = hadMarkdown ? it.originalUnitPrice! * it.quantity : 0;
-              const offPercent = hadMarkdown
-                ? discountPercent(it.unitPrice, it.originalUnitPrice)
-                : 0;
-              return (
-                <li key={it.id} className="flex gap-4 py-4">
-                  <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
-                    <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} compact sizes="64px" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">{it.name}</p>
-                    {it.variantLabel && (
-                      <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>
-                    )}
-                    {isNoteworthyCondition(it.condition) && (
-                      <p className="mt-0.5 text-meta text-ink-soft">Condition: {conditionLabel(it.condition!)}</p>
-                    )}
-                    <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
-                  </div>
-                  <div className="shrink-0 text-right">
-                    <span className="text-sm font-medium tabular-nums">{formatPrice(it.lineTotal)}</span>
-                    {hadMarkdown && offPercent > 0 && (
-                      <p className="mt-0.5 text-meta text-ink-faint tabular-nums">
-                        <s>{formatPrice(wasLineTotal)}</s>{" "}
-                        <span className="text-success">−{offPercent}%</span>
-                      </p>
-                    )}
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
+        {isMultiSeller ? (
+          <>
+            {sellerGroups.map((g) => (
+              <SellerItemGroup key={g.sellerOrder.id} sellerOrder={g.sellerOrder} items={g.items} />
+            ))}
+            {ungroupedItems.length > 0 && (
+              <div className="card-surface p-5">
+                <h2 className="text-subtitle">Other items</h2>
+                <ul className="mt-4 divide-y divide-line">
+                  {ungroupedItems.map((it) => (
+                    <ItemRow key={it.id} it={it} />
+                  ))}
+                </ul>
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="card-surface p-5">
+            <h2 className="text-subtitle">Items</h2>
+            <ul className="mt-4 divide-y divide-line">
+              {order.items.map((it) => (
+                <ItemRow key={it.id} it={it} />
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <aside className="space-y-6">
@@ -143,7 +139,11 @@ export function OrderDetail({
           </dl>
         </div>
 
-        {showFulfilment && (
+        {/* Multi-seller: each SellerOrder's own shipment card (below, per
+            group) replaces this aggregate one — the aggregate Order fields
+            describe at most one seller's shipment once the rollup fires, which
+            is misleading once there's more than one seller on the order. */}
+        {!isMultiSeller && showFulfilment && (
           <div className="card-surface p-5 text-sm">
             <h3 className="flex items-center gap-1.5 font-medium">
               <Truck size={15} className="text-ink-soft" /> {pickup ? "Pickup" : "Delivery"}
@@ -222,6 +222,114 @@ export function OrderDetail({
           Continue shopping
         </Link>
       </aside>
+    </div>
+  );
+}
+
+/** One order line — extracted so the single-seller flat list and each
+ *  multi-seller group render identical item rows. */
+function ItemRow({ it }: { it: OrderItemRow }) {
+  // 9F-38B: show the historical markdown ONLY from the frozen snapshot
+  // (`originalUnitPrice`) — never the current Offer. NULL / <= unitPrice
+  // (pre-9F-38B lines, or no compare-at at purchase) → display exactly
+  // as before. The percentage is DERIVED via discountPercent().
+  const hadMarkdown = it.originalUnitPrice != null && it.originalUnitPrice > it.unitPrice;
+  const wasLineTotal = hadMarkdown ? it.originalUnitPrice! * it.quantity : 0;
+  const offPercent = hadMarkdown ? discountPercent(it.unitPrice, it.originalUnitPrice) : 0;
+  return (
+    <li className="flex gap-4 py-4">
+      <div className="h-20 w-16 shrink-0 overflow-hidden rounded-sm bg-surface-sunken">
+        <ProductImage src={it.imageUrl ?? "art:accessory:order"} alt={it.name} compact sizes="64px" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{it.name}</p>
+        {it.variantLabel && <p className="mt-0.5 text-meta text-ink-faint">{it.variantLabel}</p>}
+        {isNoteworthyCondition(it.condition) && (
+          <p className="mt-0.5 text-meta text-ink-soft">Condition: {conditionLabel(it.condition!)}</p>
+        )}
+        <p className="mt-1 text-meta text-ink-faint">Qty {it.quantity}</p>
+      </div>
+      <div className="shrink-0 text-right">
+        <span className="text-sm font-medium tabular-nums">{formatPrice(it.lineTotal)}</span>
+        {hadMarkdown && offPercent > 0 && (
+          <p className="mt-0.5 text-meta text-ink-faint tabular-nums">
+            <s>{formatPrice(wasLineTotal)}</s> <span className="text-success">−{offPercent}%</span>
+          </p>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** One seller's card on a multi-seller order: its own status, its own items,
+ *  and its own shipment (never the aggregate Order.courier/trackingNumber —
+ *  those describe at most one seller once every seller has finished). Only
+ *  shipment fields that actually exist are shown; nothing is fabricated. */
+function SellerItemGroup({
+  sellerOrder,
+  items,
+}: {
+  sellerOrder: CustomerOrderSellerOrder;
+  items: OrderItemRow[];
+}) {
+  const ship = sellerOrder.shipments[0];
+  const hasShipmentInfo = Boolean(ship?.carrier || ship?.trackingNumber || ship?.shippedAt || ship?.deliveredAt);
+  const trackingLink = ship?.trackingUrl && isSafeTrackingUrl(ship.trackingUrl) ? ship.trackingUrl : null;
+
+  return (
+    <div className="card-surface p-5">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-subtitle">{sellerOrder.sellerName}</h2>
+        <Badge tone={sellerOrderStatusTone(sellerOrder.status)}>{sellerOrderStatusLabel(sellerOrder.status)}</Badge>
+      </div>
+      <ul className="mt-4 divide-y divide-line">
+        {items.map((it) => (
+          <ItemRow key={it.id} it={it} />
+        ))}
+      </ul>
+      {hasShipmentInfo && (
+        <div className="mt-4 rounded-sm border border-line p-3 text-sm">
+          <h3 className="flex items-center gap-1.5 font-medium text-ink-soft">
+            <Truck size={14} /> Shipment
+          </h3>
+          <dl className="mt-2 space-y-1.5">
+            {ship?.carrier && (
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-faint">Courier</dt>
+                <dd className="text-right">{courierLabel(ship.carrier, ship.carrierName)}</dd>
+              </div>
+            )}
+            {ship?.trackingNumber && (
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-faint">Tracking number</dt>
+                <dd className="text-right font-mono">{ship.trackingNumber}</dd>
+              </div>
+            )}
+            {ship?.shippedAt && (
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-faint">Shipped</dt>
+                <dd className="text-right">{formatDate(ship.shippedAt)}</dd>
+              </div>
+            )}
+            {ship?.deliveredAt && (
+              <div className="flex justify-between gap-4">
+                <dt className="text-ink-faint">Delivered</dt>
+                <dd className="text-right">{formatDate(ship.deliveredAt)}</dd>
+              </div>
+            )}
+          </dl>
+          {trackingLink && (
+            <a
+              href={trackingLink}
+              target="_blank"
+              rel="noopener noreferrer nofollow"
+              className={buttonClasses({ variant: "outline", size: "sm", className: "mt-3 w-full" })}
+            >
+              Track parcel <ExternalLink size={13} />
+            </a>
+          )}
+        </div>
+      )}
     </div>
   );
 }

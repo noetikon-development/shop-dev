@@ -1174,8 +1174,23 @@ export async function getOrderByNumber(orderNumber: string) {
       events: { orderBy: { createdAt: "asc" } },
       // 9F-16B: read-only — lets the customer timeline reword the PROCESSING
       // rung while a THIRD_PARTY SellerOrder is still awaiting the seller's
-      // "Accept order". No customer PII; no other SellerOrder fields.
-      sellerOrders: { select: { sellerType: true, status: true, sellerName: true } },
+      // "Accept order". Extended (customer multi-seller UI phase) with `id`
+      // (to group OrderItems by their own sellerOrderId) and each SellerOrder's
+      // OWN shipment (carrier/tracking/shipped/delivered) so the order page can
+      // show per-seller progress instead of only the aggregate Order fields.
+      // Still no other SellerOrder fields (commission, settlement, etc. stay
+      // internal) — nothing seller-sensitive is exposed to the customer.
+      sellerOrders: {
+        select: {
+          id: true,
+          sellerType: true,
+          status: true,
+          sellerName: true,
+          shipments: {
+            select: { carrier: true, carrierName: true, trackingNumber: true, trackingUrl: true, shippedAt: true, deliveredAt: true },
+          },
+        },
+      },
     },
   });
   if (!order) return null;

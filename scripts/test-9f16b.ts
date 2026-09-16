@@ -70,7 +70,8 @@ function staticTests() {
   const status = read("src/lib/orders/status.ts");
 
   // 1 — read-only SellerOrder select, no PII
-  ok("data · getOrderByNumber selects ONLY sellerType/status/sellerName", /getOrderByNumber[\s\S]{0,600}sellerOrders: \{ select: \{ sellerType: true, status: true, sellerName: true \} \}/.test(data));
+  ok("data · getOrderByNumber selects sellerType/status/sellerName (+ id/shipments added for the customer multi-seller UI phase)",
+    /getOrderByNumber[\s\S]{0,900}sellerOrders: \{[\s\S]{0,50}select: \{[\s\S]{0,50}id: true,[\s\S]{0,50}sellerType: true,[\s\S]{0,50}status: true,[\s\S]{0,50}sellerName: true,[\s\S]{0,400}shipments: \{/.test(data));
   ok("data · no customer PII / extra SellerOrder fields added to that select", !/getOrderByNumber[\s\S]{0,600}sellerOrders: \{ select: \{[^}]*\b(supportEmail|total|commissionAmount|merchandiseSubtotal|settlement)/.test(data));
   ok("data · getPublicTracking still does NOT select sellerOrders (E)", (() => {
     const start = data.indexOf("export async function getPublicTracking");

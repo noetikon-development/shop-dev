@@ -4,6 +4,8 @@ import { notFound } from "next/navigation";
 import { ChevronLeft } from "lucide-react";
 import { requireUser } from "@/lib/auth";
 import { returnEligibility, describeIneligibility } from "@/lib/returns";
+import { getOrderByNumber } from "@/lib/data";
+import { hasUndeliveredSellerLines } from "@/lib/marketplace/customer-order-view";
 import { ReturnRequestForm } from "@/components/returns/return-request-form";
 import { buttonClasses } from "@/components/ui/button";
 
@@ -23,6 +25,12 @@ export default async function StartReturnPage({
 
   if (!elig.eligible && elig.code === "not_found") notFound();
 
+  // `elig.eligible` already proved this order belongs to `user` — reusing
+  // the existing order read here (no new eligibility rule) only to decide
+  // whether to show the "some items aren't ready yet" note below.
+  const showsPartialEligibilityNote =
+    elig.eligible && hasUndeliveredSellerLines((await getOrderByNumber(orderNumber))?.sellerOrders ?? []);
+
   return (
     <div className="space-y-6">
       <Link
@@ -40,17 +48,25 @@ export default async function StartReturnPage({
       </div>
 
       {elig.eligible ? (
-        <ReturnRequestForm
-          orderNumber={orderNumber}
-          lines={elig.lines.map((l) => ({
-            orderItemId: l.orderItemId,
-            name: l.name,
-            variantLabel: l.variantLabel,
-            sku: l.sku,
-            unitPrice: l.unitPrice,
-            remaining: l.remaining,
-          }))}
-        />
+        <>
+          {showsPartialEligibilityNote && (
+            <p className="text-sm text-ink-faint">
+              Only items that have already been delivered are shown below. Other items on this
+              order will become available once they&apos;re delivered.
+            </p>
+          )}
+          <ReturnRequestForm
+            orderNumber={orderNumber}
+            lines={elig.lines.map((l) => ({
+              orderItemId: l.orderItemId,
+              name: l.name,
+              variantLabel: l.variantLabel,
+              sku: l.sku,
+              unitPrice: l.unitPrice,
+              remaining: l.remaining,
+            }))}
+          />
+        </>
       ) : (
         <div className="card-surface p-5">
           <p className="text-sm text-ink-soft">{describeIneligibility(elig.code)}</p>

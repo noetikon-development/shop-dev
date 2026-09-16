@@ -6,6 +6,7 @@ import { requireUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { returnEligibility } from "@/lib/returns";
 import { isCancellable } from "@/lib/orders/status";
+import { allSellerOrdersCancellable, hasUndeliveredSellerLines } from "@/lib/marketplace/customer-order-view";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { canResumeOnlinePayment } from "@/lib/payments/checkout-session";
 import { OrderDetail } from "@/components/order/order-detail";
@@ -46,8 +47,15 @@ export default async function AccountOrderPage({
       </Link>
       <h2 className="text-subtitle">Order {order.orderNumber}</h2>
       <OrderDetail order={order} onlinePayable={onlinePayable} />
-      {isCancellable(order.status) && <CustomerCancelOrder orderNumber={order.orderNumber} />}
-      <ReturnCallout orderNumber={orderNumber} elig={elig} orderStatus={order.status} />
+      {isCancellable(order.status) && allSellerOrdersCancellable(order.sellerOrders) && (
+        <CustomerCancelOrder orderNumber={order.orderNumber} />
+      )}
+      <ReturnCallout
+        orderNumber={orderNumber}
+        elig={elig}
+        orderStatus={order.status}
+        sellerOrders={order.sellerOrders}
+      />
     </div>
   );
 }
@@ -56,10 +64,12 @@ function ReturnCallout({
   orderNumber,
   elig,
   orderStatus,
+  sellerOrders,
 }: {
   orderNumber: string;
   elig: Awaited<ReturnType<typeof returnEligibility>>;
   orderStatus: string;
+  sellerOrders: { status: string }[];
 }) {
   if (elig.eligible) {
     return (
@@ -71,6 +81,12 @@ function ReturnCallout({
             <p className="text-sm text-ink-soft">
               You can request a return for items on this order.
             </p>
+            {hasUndeliveredSellerLines(sellerOrders) && (
+              <p className="mt-1 text-meta text-ink-faint">
+                Only items that have already been delivered are eligible for return right now.
+                Other items will become available once they&apos;re delivered.
+              </p>
+            )}
           </div>
         </div>
         <Link

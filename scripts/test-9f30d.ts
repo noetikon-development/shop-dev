@@ -118,8 +118,9 @@ function staticTests() {
     (() => { try { read("src/lib/order-actions.ts"); return false; } catch { return true; } })());
 
   // UI
-  ok("page · CustomerCancelOrder rendered only when isCancellable(order.status)",
-    /\{isCancellable\(order\.status\) && <CustomerCancelOrder orderNumber=\{order\.orderNumber\} \/>\}/.test(page));
+  ok("page · CustomerCancelOrder rendered only when isCancellable(order.status) AND every SellerOrder is itself still cancellable (multi-seller UI phase — never MORE permissive than the server's own gate)",
+    /isCancellable\(order\.status\) && allSellerOrdersCancellable\(order\.sellerOrders\)/.test(page) &&
+      /<CustomerCancelOrder orderNumber=\{order\.orderNumber\} \/>/.test(page));
   ok("panel · confirmation dialog (role=dialog, aria-modal) explains it can't be undone",
     /role="dialog"/.test(panel) && /aria-modal="true"/.test(panel) && /can&apos;t be undone/i.test(panel));
   ok("panel · reason is OPTIONAL (no required attribute, labelled optional)",
