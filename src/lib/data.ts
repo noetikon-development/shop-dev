@@ -1209,6 +1209,17 @@ export async function getOrderByNumber(orderNumber: string) {
  * page — no customer email/phone, no address, no billing, no prices, no internal
  * fulfilment note, and no free-text event detail (which could carry an admin's
  * cancellation reason). Returns null when the order number or email don't match.
+ *
+ * Multi-seller (customer tracking-visibility phase): also selects each
+ * SellerOrder's OWN status + shipment (carrier/tracking/shipped/delivered) and
+ * each item's `sellerOrderId`, so /track can render per-seller progress exactly
+ * like the authenticated order page (`getOrderByNumber` — same field set, same
+ * safety posture). Deliberately mirrors that allow-list: id/sellerName/
+ * sellerType/status/shipments only — NEVER commissionAmount, commissionRate,
+ * settlementId, settlementStatus, settlementClawbackAmount, or any other
+ * seller-financial field. A single-seller (or legacy zero-SellerOrder) order's
+ * existing presentation is unaffected — `sellerOrders` is simply an empty/
+ * one-element array there.
  */
 export async function getPublicTracking(orderNumber: string, email: string) {
   const order = await prisma.order.findUnique({
@@ -1229,10 +1240,31 @@ export async function getPublicTracking(orderNumber: string, email: string) {
       trackingUrl: true,
       shippedAt: true,
       deliveredAt: true,
-      items: { select: { name: true, variantLabel: true, quantity: true }, orderBy: { id: "asc" } },
+      items: {
+        select: { sellerOrderId: true, name: true, variantLabel: true, quantity: true },
+        orderBy: { id: "asc" },
+      },
       events: {
         orderBy: { createdAt: "asc" },
         select: { status: true, title: true, location: true, createdAt: true },
+      },
+      sellerOrders: {
+        select: {
+          id: true,
+          sellerType: true,
+          status: true,
+          sellerName: true,
+          shipments: {
+            select: {
+              carrier: true,
+              carrierName: true,
+              trackingNumber: true,
+              trackingUrl: true,
+              shippedAt: true,
+              deliveredAt: true,
+            },
+          },
+        },
       },
     },
   });
