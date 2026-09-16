@@ -2,6 +2,7 @@ import "server-only";
 import type { Prisma } from "@prisma/client";
 import { adjustStock } from "@/lib/inventory";
 import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
+import { sellerCanCancelSellerOrder } from "@/lib/marketplace/seller-order-status";
 
 /**
  * The shared inventory-reversal + SellerOrder-cascade an order cancellation must
@@ -33,7 +34,38 @@ import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
  *
  * Never touches payments, `Order.paymentStatus`, the returns/refund flow, or
  * `Variant.stock` directly.
+ *
+ * Multi-seller safety gate (added once checkout could produce N SellerOrders
+ * per Order): a whole-order cancellation is refused OUTRIGHT — nothing is
+ * written at all — if any live SellerOrder has progressed past
+ * `sellerCanCancelSellerOrder` (i.e. it is READY_TO_SHIP / SHIPPED / DELIVERED).
+ * Before this gate, cascading every non-CANCELLED SellerOrder to CANCELLED
+ * regardless of its own status could pull an already-shipped-or-delivered
+ * SellerOrder backwards, wrongly restoring inventory that had already left and
+ * zeroing commission that was legitimately earned. There is no partial
+ * cancellation here: either every SellerOrder is still in a state a seller
+ * could themselves decline/cancel, and the whole order (and every SellerOrder
+ * on it) is cancelled exactly as before, or none of it is touched — the caller
+ * must throw `SellerOrderNotCancellableError` before this function performs any
+ * write, so its own atomic `Order.status → CANCELLED` gate rolls back with the
+ * rest of the transaction.
  */
+
+/**
+ * Thrown when the parent Order cannot be safely cancelled as a whole because at
+ * least one of its SellerOrders has progressed past the point a seller could
+ * still decline it (anything `sellerCanCancelSellerOrder` disallows). The
+ * caller's enclosing `$transaction` rolls back entirely on this throw — the
+ * atomic `Order.status → CANCELLED` UPDATE that ran just before reaching here
+ * is undone along with everything else, so the Order and every SellerOrder are
+ * left exactly as they were.
+ */
+export class SellerOrderNotCancellableError extends Error {
+  constructor(public readonly blockedSellerOrderIds: string[]) {
+    super("This order can't be cancelled because part of it has already shipped.");
+    this.name = "SellerOrderNotCancellableError";
+  }
+}
 
 export type CancellationClawbackEvent = {
   sellerOrderId: string;
@@ -67,6 +99,30 @@ export async function reverseCancelledOrder(
 
   let restockedUnits = 0;
   let restockedLines = 0;
+
+  // 1b. Multi-seller safety gate — fetched and checked BEFORE any reversal
+  //     write, so a blocked cancellation leaves everything untouched. Reused
+  //     below (step 3b) so this is the only SellerOrder read this function does.
+  const toCancel = await tx.sellerOrder.findMany({
+    where: { orderId, status: { not: "CANCELLED" } },
+    select: {
+      id: true,
+      status: true,
+      total: true,
+      commissionAmount: true,
+      settlementId: true,
+      settlementClawbackAmount: true,
+      sellerId: true,
+    },
+  });
+  const blockedSellerOrders = toCancel.filter((so) => !sellerCanCancelSellerOrder(so.status));
+  if (blockedSellerOrders.length > 0) {
+    console.error(
+      "[cancellation] refusing whole-order cancellation — seller order(s) already past the cancellable window",
+      { orderId, orderNumber, blockedSellerOrderIds: blockedSellerOrders.map((so) => so.id) },
+    );
+    throw new SellerOrderNotCancellableError(blockedSellerOrders.map((so) => so.id));
+  }
 
   // 2. Reverse EXACTLY what the SALE deducted — symmetric by construction.
   const saleOfferAdjustments = await tx.offerAdjustment.count({
@@ -143,21 +199,12 @@ export async function reverseCancelledOrder(
       WHERE "id" = ${productId}`;
   }
 
-  // 3b. Marketplace cascade — keep the seller plane in step. Status-guarded so an
-  //     already-CANCELLED / historic row is untouched.
+  // 3b. Marketplace cascade — keep the seller plane in step. `toCancel` was
+  //     fetched (and safety-checked) in step 1b above; every row in it is
+  //     already confirmed cancellable, so this cascade always applies to all
+  //     of them — never a partial subset.
   const clawbackEvents: CancellationClawbackEvent[] = [];
   let cancelledSellerOrderIds: string[] = [];
-  const toCancel = await tx.sellerOrder.findMany({
-    where: { orderId, status: { not: "CANCELLED" } },
-    select: {
-      id: true,
-      total: true,
-      commissionAmount: true,
-      settlementId: true,
-      settlementClawbackAmount: true,
-      sellerId: true,
-    },
-  });
   if (toCancel.length > 0) {
     const unsettledIds = toCancel.filter((s) => s.settlementId === null).map((s) => s.id);
     if (unsettledIds.length > 0) {

@@ -11,7 +11,7 @@ import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { scheduleEmail } from "@/lib/email/schedule";
 import { sendOrderCancelled, sendSellerOrderCancelled } from "@/lib/email/notifications";
 import { isCancellable, orderStatusLabel } from "@/lib/orders/status";
-import { reverseCancelledOrder } from "@/lib/orders/cancellation";
+import { reverseCancelledOrder, SellerOrderNotCancellableError } from "@/lib/orders/cancellation";
 
 /**
  * Customer self-service order cancellation (Phase 9F-30D).
@@ -103,6 +103,12 @@ export async function customerCancelOrderAction(input: unknown): Promise<Custome
   } catch (err) {
     if (err instanceof StaleOrderError) {
       return { ok: false, error: "The order was just updated — refresh and try again." };
+    }
+    if (err instanceof SellerOrderNotCancellableError) {
+      return {
+        ok: false,
+        error: "Part of this order has already shipped, so it can no longer be cancelled. Contact us if you need help.",
+      };
     }
     if (err instanceof Error) {
       console.error("[account/order-actions] customerCancelOrderAction failed", err);

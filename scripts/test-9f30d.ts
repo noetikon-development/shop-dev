@@ -103,7 +103,7 @@ function staticTests() {
   // scope — siblings untouched
   ok("scope · admin cancelOrderAction NOT modified (still its own inline reversal)",
     !/9F-30D/.test(adminActions) &&
-    /const toCancel = await tx\.sellerOrder\.findMany/.test(adminActions) &&
+    /toCancel = await tx\.sellerOrder\.findMany/.test(adminActions) &&
     /scheduleEmail\(\(\) => sendOrderCancelled\(orderId, reason \?\? null\)\)/.test(adminActions));
   ok("scope · seller sellerCancelSellerOrder (9F-30B) NOT modified",
     !/9F-30D/.test(sellerRepo));

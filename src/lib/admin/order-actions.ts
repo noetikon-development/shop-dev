@@ -8,6 +8,8 @@ import { writeAudit } from "@/lib/admin/audit";
 import { adjustStock } from "@/lib/inventory";
 import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { cascadeSellerOrderFromParent } from "@/lib/marketplace/seller-order-repository";
+import { sellerCanCancelSellerOrder } from "@/lib/marketplace/seller-order-status";
+import { SellerOrderNotCancellableError } from "@/lib/orders/cancellation";
 import { revalidateOrderPaths } from "@/lib/admin/order-cache";
 import { ORDER_STATUS_META } from "@/lib/constants";
 import {
@@ -41,6 +43,12 @@ import { sendOrderCancelled, sendOrderProcessing, sendSellerOrderCancelled } fro
  *   retained). It never touches `Variant.stock` directly and never restocks
  *   twice — the atomic `Order.status` gate makes the whole reversal run at
  *   most once.
+ * - Multi-seller safety gate: cancellation is refused outright (nothing is
+ *   written, including the atomic `Order.status` flip) if any live SellerOrder
+ *   has progressed past `sellerCanCancelSellerOrder` — i.e. it is READY_TO_SHIP
+ *   / SHIPPED / DELIVERED. See `SellerOrderNotCancellableError` in
+ *   `@/lib/orders/cancellation` for why: a whole-order cancel must never pull an
+ *   already-dispatched SellerOrder back to CANCELLED.
  * - Every action records an `OrderEvent` and an `AdminAuditLog` entry.
  */
 
@@ -282,6 +290,16 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
   let restockedLines = 0;
   let reversalPath: "offer-native" | "legacy" = "legacy";
   let cancelledSellerOrderIds: string[] = [];
+  // Fetched + safety-checked in step 1b, then reused in step 3b.
+  let toCancel: {
+    id: string;
+    status: string;
+    total: number;
+    commissionAmount: number;
+    settlementId: string | null;
+    settlementClawbackAmount: number;
+    sellerId: string;
+  }[] = [];
   // 9F-20 — post-settlement clawbacks accrued below, written as dedicated
   // `seller.settlement.clawback_accrued` audit rows AFTER commit.
   const clawbackEvents: {
@@ -301,6 +319,36 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
         WHERE "id" = ${orderId}
           AND "status" IN ('PENDING_PAYMENT', 'PENDING', 'PROCESSING')`;
       if (cancelled === 0) throw new StaleOrderError();
+
+      // 1b. Multi-seller safety gate — fetched and checked BEFORE any reversal
+      //     write, so a blocked cancellation leaves everything untouched (this
+      //     throw rolls back the atomic UPDATE above along with the rest of the
+      //     transaction). A SellerOrder that has progressed past what a seller
+      //     could themselves decline/cancel (READY_TO_SHIP / SHIPPED / DELIVERED)
+      //     must never be pulled back to CANCELLED by a whole-order cancellation —
+      //     that would wrongly restore inventory that already left and zero
+      //     commission that was legitimately earned. Reused below (step 3b) so
+      //     this is the only SellerOrder read in this transaction.
+      toCancel = await tx.sellerOrder.findMany({
+        where: { orderId, status: { not: "CANCELLED" } },
+        select: {
+          id: true,
+          status: true,
+          total: true,
+          commissionAmount: true,
+          settlementId: true,
+          settlementClawbackAmount: true,
+          sellerId: true,
+        },
+      });
+      const blockedSellerOrders = toCancel.filter((so) => !sellerCanCancelSellerOrder(so.status));
+      if (blockedSellerOrders.length > 0) {
+        console.error(
+          "[admin/order-actions] refusing whole-order cancellation — seller order(s) already past the cancellable window",
+          { orderId, orderNumber: order.orderNumber, blockedSellerOrderIds: blockedSellerOrders.map((so) => so.id) },
+        );
+        throw new SellerOrderNotCancellableError(blockedSellerOrders.map((so) => so.id));
+      }
 
       // 2. Reverse EXACTLY what the SALE deducted — symmetric by construction.
       //
@@ -405,18 +453,10 @@ export async function cancelOrderAction(input: unknown): Promise<OrderActionStat
       //     unchanged. (9F-7b: capture exactly which rows this flip touches so
       //     the affected seller(s) can be notified after commit — never a
       //     blind "notify every SellerOrder on this order", which would also
-      //     fire for ones already CANCELLED earlier.)
-      const toCancel = await tx.sellerOrder.findMany({
-        where: { orderId, status: { not: "CANCELLED" } },
-        select: {
-          id: true,
-          total: true,
-          commissionAmount: true,
-          settlementId: true,
-          settlementClawbackAmount: true,
-          sellerId: true,
-        },
-      });
+      //     fire for ones already CANCELLED earlier.) `toCancel` was fetched
+      //     (and safety-checked) in step 1b above — every row in it is already
+      //     confirmed cancellable, so this cascade always applies to all of
+      //     them, never a partial subset.
       if (toCancel.length > 0) {
         // 9F-8c: the sale this commission was earned on no longer exists —
         // zero it in the same guarded write, so a repeat cancel attempt (which
