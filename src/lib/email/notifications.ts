@@ -16,6 +16,7 @@ import { renderOrderShipped } from "@/lib/email/templates/order-shipped";
 import { renderOutForDelivery } from "@/lib/email/templates/out-for-delivery";
 import { renderOrderDelivered } from "@/lib/email/templates/order-delivered";
 import { renderOrderCancelled } from "@/lib/email/templates/order-cancelled";
+import { renderOrderPartiallyCancelled } from "@/lib/email/templates/order-partially-cancelled";
 import { renderWelcome } from "@/lib/email/templates/welcome";
 import { renderPasswordChanged } from "@/lib/email/templates/password-changed";
 import { renderEmailChanged } from "@/lib/email/templates/email-changed";
@@ -1387,6 +1388,82 @@ export async function sendOrderCancelled(
   }
 }
 
+/**
+ * Customer — ONE seller's items on a multi-seller order were cancelled by
+ * that seller, but the parent Order remains active (at least one other
+ * seller is still fulfilling it). Distinct from `sendOrderCancelled`, which
+ * claims the WHOLE order was cancelled — sending that here would be wrong.
+ *
+ * `refundAmount` reflects whether a PaymentRefund was actually created for
+ * this SellerOrder's cancellation (9F-60) — `null` for COD, no eligible
+ * Payment, or the provider-refund feature being off (the only case in
+ * Production today). The copy never claims a refund that doesn't exist.
+ *
+ * Key: ORDER_PARTIALLY_CANCELLED:<sellerOrderId> — a SellerOrder cancels at
+ * most once (CANCELLED is terminal), so this can never double-send.
+ */
+export async function sendOrderPartiallyCancelled(
+  orderId: string,
+  sellerOrderId: string,
+  reason: string | null,
+  opts: { retry?: boolean; client?: Prisma.TransactionClient } = {},
+): Promise<DispatchResult> {
+  const idempotencyKey = `ORDER_PARTIALLY_CANCELLED:${sellerOrderId}`;
+  const failPrep = (error: string) =>
+    failEmailPreparation({ type: "order_partially_cancelled", idempotencyKey, subject: "Part of your order was cancelled", error, retry: opts.retry, client: opts.client });
+  try {
+    const db = opts.client ?? prisma;
+    const [order, so, refund] = await Promise.all([
+      db.order.findUnique({
+        where: { id: orderId },
+        select: { id: true, orderNumber: true, email: true, userId: true, user: { select: { name: true } }, shippingAddress: true },
+      }),
+      db.sellerOrder.findUnique({
+        where: { id: sellerOrderId },
+        select: { sellerName: true, items: { select: { quantity: true } } },
+      }),
+      db.paymentRefund.findFirst({ where: { sellerOrderId }, select: { amount: true } }),
+    ]);
+    if (!order || !order.email) return failPrep("order_not_found");
+    if (!so) return failPrep("seller_order_not_found");
+
+    const [brand, siteUrl] = [await getStoreBrand(), getSiteUrl()];
+    const shipping = safeParse<Record<string, unknown>>(order.shippingAddress, {});
+    const customerName =
+      firstNameOf(order.user?.name) ??
+      (typeof shipping.firstName === "string" ? shipping.firstName : null) ??
+      "there";
+    const itemCount = so.items.reduce((n, it) => n + it.quantity, 0);
+
+    return renderAndDispatch(
+      {
+        type: "order_partially_cancelled",
+        to: order.email,
+        idempotencyKey,
+        userId: order.userId,
+        orderId: order.id,
+        retry: opts.retry,
+        client: opts.client,
+      },
+      () =>
+        renderOrderPartiallyCancelled({
+          brand,
+          siteUrl,
+          orderUrl: orderLink(siteUrl, order),
+          orderNumber: order.orderNumber,
+          customerName,
+          sellerName: so.sellerName,
+          itemCount,
+          reason: (reason ?? "").trim() || null,
+          refundAmount: refund?.amount ?? null,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendOrderPartiallyCancelled", err);
+    return failPrep(`unexpected: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Welcome — WELCOME:<userId>
 // ---------------------------------------------------------------------------
@@ -2374,9 +2451,18 @@ async function loadRefundEmailContext(
     siteUrl,
     customerName,
     returnNumber: r.returnRequest?.returnNumber ?? "—",
-    returnUrl: order.userId
-      ? `${siteUrl}/account/returns/${encodeURIComponent(r.returnRequest?.returnNumber ?? "")}`
-      : `${siteUrl}/track`,
+    // 9F-60 — a non-return-derived refund (e.g. a seller-cancellation refund)
+    // has no ReturnRequest to link to; falling through to
+    // `/account/returns/${encodeURIComponent("")}` produced a broken URL.
+    // Point a logged-in customer at their own order page instead; a guest
+    // still goes to /track, unchanged from before.
+    returnUrl: r.returnRequest
+      ? order.userId
+        ? `${siteUrl}/account/returns/${encodeURIComponent(r.returnRequest.returnNumber)}`
+        : `${siteUrl}/track`
+      : order.userId
+        ? `${siteUrl}/account/orders/${encodeURIComponent(order.orderNumber)}`
+        : `${siteUrl}/track`,
   };
 }
 

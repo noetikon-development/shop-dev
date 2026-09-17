@@ -120,7 +120,11 @@ export type EmailType =
   | "seller_verification_approved"
   | "seller_verification_rejected"
   // 9F-18 — Ops alert raised when another transactional email FAILED / SKIPPED.
-  | "email_failure_alert_ops";
+  | "email_failure_alert_ops"
+  // 9F-60 — customer notification for a multi-seller PARTIAL cancellation (one
+  // seller's items cancelled, the rest of the order unaffected). Distinct from
+  // order_cancelled, which claims the WHOLE order was cancelled.
+  | "order_partially_cancelled";
 
 export type DispatchInput = {
   type: EmailType;

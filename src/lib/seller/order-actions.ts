@@ -17,11 +17,14 @@ import {
   sendOrderDelivered,
   sendOrderProcessing,
   sendOrderCancelled,
+  sendOrderPartiallyCancelled,
   sendSellerOrderCancelledOps,
   sendSellerOrderMilestone,
   sendSellerShipmentCreated,
+  sendRefundIssued,
 } from "@/lib/email/notifications";
 import { sellerAdvanceLabels, sellerCancelLabels } from "@/lib/marketplace/seller-order-status";
+import { refundRouteForOrder, callProviderForRefund } from "@/lib/payments/refund";
 
 /**
  * `/seller/orders` server actions (Phase 9F-2).
@@ -226,11 +229,43 @@ export async function sellerCancelOrderAction(
   // can't duplicate it).
   if (res.parentAlsoCancelled) {
     scheduleEmail(() => sendOrderCancelled(res.orderId, parsed.data.reason));
+  } else {
+    // 9F-60 — a multi-seller PARTIAL decline previously sent no customer
+    // email at all. This is a distinct notification (not sendOrderCancelled,
+    // which would wrongly claim the whole order was cancelled) — one per
+    // SellerOrder cancellation (ORDER_PARTIALLY_CANCELLED:<sellerOrderId>).
+    scheduleEmail(() => sendOrderPartiallyCancelled(res.orderId, parsed.data.sellerOrderId, parsed.data.reason));
   }
   // Axiaro Operations — a seller just cancelled a customer's order. Ops-only,
   // audit-row-anchored key, no customer PII. The seller does NOT get an email.
   if (auditId) {
     scheduleEmail(() => sendSellerOrderCancelledOps(parsed.data.sellerOrderId, auditId));
+  }
+
+  // 9F-60 — the seller-aware refund-row was already created (DB only) inside
+  // sellerCancelSellerOrder's own transaction, which has now committed. The
+  // PayMongo network call happens ONLY here, strictly post-commit, and ONLY
+  // when routing is still live at the moment we check (re-derived via the
+  // SAME unmodified refundRouteForOrder gate — never bypassed). In Production
+  // today this is unreachable (onlinePaymentEnabled is false), so
+  // res.paymentRefundId is always null and this whole block is a no-op.
+  if (res.paymentRefundId) {
+    const routing = await refundRouteForOrder(res.orderId);
+    if (routing.route === "provider") {
+      const provider = await callProviderForRefund(res.paymentRefundId, routing.payment.providerId);
+      if (provider.ok) {
+        if (!provider.alreadyProcessed) scheduleEmail(() => sendRefundIssued(res.paymentRefundId!));
+      } else {
+        // The PaymentRefund row is already marked FAILED by callProviderForRefund.
+        // The cancellation itself is already committed and must never be rolled
+        // back or retried because of this — visible for ops via reconcile:payments.
+        console.error("[seller-cancel] provider refund call failed", {
+          sellerOrderId: parsed.data.sellerOrderId,
+          paymentRefundId: res.paymentRefundId,
+          error: provider.error,
+        });
+      }
+    }
   }
 
   revalidate(parsed.data.sellerOrderId);

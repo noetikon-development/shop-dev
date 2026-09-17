@@ -66,9 +66,28 @@ export function OrderTimeline({
   // 9F-16B: only the PROCESSING rung, only while a THIRD_PARTY SellerOrder is
   // still PENDING_PAYMENT (seller hasn't accepted). null otherwise → default copy.
   const procOverride = processingRungOverride(status, sellerOrders);
+  // 9F-60 — a multi-seller PARTIAL cancellation writes a CANCELLED-status
+  // OrderEvent even though the parent Order itself stays active (only the
+  // whole-order cancellation above reads `status === "CANCELLED"`). That
+  // event previously had nowhere to render — "CANCELLED" isn't a rung in
+  // `flow` — so it was silently invisible to the customer. Surfaced here by
+  // reusing the SAME existing OrderEvent rows already passed in, with no
+  // change to `Order.status`, no new status value, no new event model.
+  const partialCancellations = events.filter((e) => e.status === "CANCELLED");
 
   return (
-    <ol className="relative space-y-6">
+    <>
+      {partialCancellations.length > 0 && (
+        <div className="mb-4 space-y-2">
+          {partialCancellations.map((e, i) => (
+            <div key={i} className="rounded-md border border-sale/30 bg-clay-50 px-4 py-3 text-sm text-sale">
+              <p className="font-medium">{e.title}</p>
+              {e.detail && <p className="mt-1 text-ink-soft">{e.detail}</p>}
+            </div>
+          ))}
+        </div>
+      )}
+      <ol className="relative space-y-6">
       {flow.map((s, i) => {
         const meta = ORDER_STATUS_META[s];
         const done = i <= currentIndex;
@@ -112,6 +131,7 @@ export function OrderTimeline({
           </li>
         );
       })}
-    </ol>
+      </ol>
+    </>
   );
 }

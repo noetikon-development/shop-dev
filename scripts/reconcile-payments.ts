@@ -25,6 +25,9 @@
  *  14  Σ seller-attributed PaymentRefund(live) <= Payment.amount, per payment FAIL
  *  15  a bookkeeping-labelled ReturnRequest never has a PaymentRefund row     FAIL
  *
+ * 9F-60 — PAID seller-cancellation refund trigger:
+ *  16  no PENDING PaymentRefund older than 24h (provider call never landed)   WARN
+ *
  *   node --env-file=.env --import tsx scripts/reconcile-payments.ts
  */
 import { PrismaClient } from "@prisma/client";
@@ -127,7 +130,7 @@ async function run() {
   const refunds = await prisma.paymentRefund.findMany({
     select: {
       id: true, paymentId: true, sellerOrderId: true, returnRequestId: true,
-      amount: true, status: true,
+      amount: true, status: true, createdAt: true,
       payment: { select: { id: true, amount: true, status: true } },
     },
   });
@@ -218,6 +221,17 @@ async function run() {
   );
   if (leaked.length === 0) PASS("15 · existing bookkeeping-only refunds remain separate from PaymentRefund rows");
   else for (const r of leaked) FAIL(`15 · Return ${r.returnNumber} looks bookkeeping (refundMethod "${r.refundMethod}") but has a PaymentRefund row`);
+
+  // 16 — 9F-60: a PENDING PaymentRefund older than 24h means the provider call
+  //      never landed (network timeout, crash between commit and the call, a
+  //      failed process before callProviderForRefund ran) — mirrors rule 1's
+  //      shape exactly (same cutoff, same WARN-not-FAIL severity: it's an
+  //      ops-visibility signal, not a ledger-integrity violation).
+  const stalePendingRefunds = refunds.filter(
+    (r) => r.status === "PENDING" && r.createdAt.getTime() < cutoff,
+  );
+  if (stalePendingRefunds.length === 0) PASS("16 · no PENDING PaymentRefund older than 24h");
+  else WARN(`16 · ${stalePendingRefunds.length} PENDING PaymentRefund(s) > 24h old — the provider call may never have landed: ${stalePendingRefunds.map((r) => r.id).join(", ")}`);
 
   console.log(`\n  ${pass} pass · ${warn} warn · ${fail} fail`);
   if (fail > 0) {

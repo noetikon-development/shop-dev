@@ -13,6 +13,8 @@ import {
 import { getCourier, isCourierCode, courierLabel } from "@/lib/orders/couriers";
 import { canTransition, CANCELLABLE_STATUSES } from "@/lib/orders/status";
 import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
+import { refundRouteForOrder, createAttributedPaymentRefund } from "@/lib/payments/refund";
+import { getPaymentsConfig } from "@/lib/payments/config";
 import { resolveShippingProvider } from "@/lib/shipping/registry";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
@@ -509,6 +511,13 @@ export type SellerCancelResult =
       restockedUnits: number;
       restockedLines: number;
       clawbackEvents: SellerOrderClawbackEvent[];
+      /** 9F-60 — the PENDING PaymentRefund created for this seller's share when
+       *  the parent Order has an eligible PAID/PARTIALLY_REFUNDED Payment AND
+       *  provider routing is live; `null` for COD, no Payment, a bookkeeping-
+       *  routed order, or the (dormant-today) feature being off. The caller
+       *  invokes the provider call AFTER this transaction has committed —
+       *  never from in here (see `sellerCancelOrderAction`). */
+      paymentRefundId: string | null;
     }
   | SellerOrderRepoError;
 
@@ -559,6 +568,18 @@ export async function sellerCancelSellerOrder(
   if (!cleanReason) {
     return { ok: false, code: "VALIDATION", error: "Add a reason so Axiaro and the customer know why." };
   }
+
+  // Checked ONCE, OUTSIDE the transaction — the common case today (feature
+  // off in every environment) then makes ZERO extra queries during the
+  // transaction below. Calling `getPaymentsConfig()` (a plain, non-tx query)
+  // from inside the transaction was tried first and caused a genuine
+  // regression: it adds an extra pooled connection to every single
+  // cancellation, and under real concurrent cancellations (the existing
+  // sibling-lock race test) that contention produced spurious transaction
+  // failures. Hoisting it out fixes that while staying fully correct — when
+  // the feature IS live (future), `refundRouteForOrder` below still does its
+  // own authoritative, tx-scoped Payment lookup.
+  const refundFeatureLive = await getPaymentsConfig().then((c) => c.onlinePaymentEnabled && c.mode === "live");
 
   const run = async (tx: Prisma.TransactionClient): Promise<SellerCancelResult> => {
     const so = await tx.sellerOrder.findFirst({
@@ -681,6 +702,40 @@ export async function sellerCancelSellerOrder(
       parentAlsoCancelled = cancelledOrder > 0;
     }
 
+    // 5b. Seller-aware refund-row creation (9F-60) — DB ONLY, no PayMongo call
+    //     here. Runs AFTER the sibling-lock cascade above so the well-tested
+    //     "last active seller" decision is fully resolved first; the new
+    //     Payment `FOR UPDATE` lock this acquires is a different lock family
+    //     than the SellerOrder locks above, and no other code path acquires
+    //     these two lock families in the opposite order, so this ordering
+    //     introduces no deadlock risk (architecture audit, 9F-59-cancel-audit).
+    //     `refundRouteForOrder` / `createAttributedPaymentRefund` are the
+    //     EXISTING, unmodified (besides an added optional `db` param) seller-
+    //     aware refund foundation — reused verbatim, not reimplemented.
+    //     Skipped entirely for COD / no Payment / bookkeeping-routed orders /
+    //     the feature being off (today, always — Phase 4-A dormant). A cap
+    //     rejection here (not expected in practice: `so.total` is exactly the
+    //     seller's own ceiling, read inside this same transaction) must never
+    //     fail the cancellation itself — refund attribution is best-effort on
+    //     top of it, never a precondition.
+    let paymentRefundId: string | null = null;
+    if (refundFeatureLive) {
+      const routing = await refundRouteForOrder(so.order.id, tx);
+      if (routing.route === "provider") {
+        const created = await createAttributedPaymentRefund(
+          {
+            paymentId: routing.payment.id,
+            returnRequestId: null,
+            sellerOrderId,
+            amount: so.total,
+            reason: "seller_cancellation",
+          },
+          tx,
+        );
+        if (created.ok) paymentRefundId = created.paymentRefundId;
+      }
+    }
+
     // 6. Timeline event on the customer-facing order — accurate to what
     //    actually happened. The whole-order wording is used ONLY when this
     //    seller really was the last one and the parent was cancelled too,
@@ -706,6 +761,7 @@ export async function sellerCancelSellerOrder(
       restockedUnits,
       restockedLines,
       clawbackEvents,
+      paymentRefundId,
     };
   };
 

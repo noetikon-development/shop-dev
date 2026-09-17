@@ -31,7 +31,7 @@ export type RefundRoute =
       alreadyRefunded: number;
     };
 
-export async function refundRouteForOrder(orderId: string): Promise<RefundRoute> {
+export async function refundRouteForOrder(orderId: string, db: Db = prisma): Promise<RefundRoute> {
   const config = await getPaymentsConfig();
   if (!config.onlinePaymentEnabled) {
     return { route: "bookkeeping", reason: "online_payment_disabled" };
@@ -40,7 +40,7 @@ export async function refundRouteForOrder(orderId: string): Promise<RefundRoute>
     return { route: "bookkeeping", reason: "not_live_mode" };
   }
 
-  const payment = await prisma.payment.findFirst({
+  const payment = await db.payment.findFirst({
     where: { orderId, status: { in: ["PAID", "PARTIALLY_REFUNDED"] } },
     orderBy: { paidAt: "desc" },
     select: { id: true, providerId: true, amount: true, method: true, status: true },
@@ -52,7 +52,7 @@ export async function refundRouteForOrder(orderId: string): Promise<RefundRoute>
   // Extract the provider payment id (pay_xxx) — for a checkout session we stored
   // the session id, so a real integration resolves the nested payment id. In
   // Phase 4-A this branch is unreachable; the shape is here for 4-D.
-  const agg = await prisma.paymentRefund.aggregate({
+  const agg = await db.paymentRefund.aggregate({
     where: { paymentId: payment.id, status: { in: ["PENDING", "PROCESSING", "SUCCEEDED"] } },
     _sum: { amount: true },
   });
@@ -206,14 +206,83 @@ export async function createAttributedPaymentRefund(
   return run(db as Prisma.TransactionClient);
 }
 
+export type CallProviderForRefundResult =
+  | { ok: true; paymentRefundId: string; alreadyProcessed?: boolean }
+  | { ok: false; error: string };
+
+/**
+ * The provider-call phase ONLY, for a `PaymentRefund` row already created
+ * elsewhere (e.g. inside `sellerCancelSellerOrder`'s own transaction, via
+ * `createAttributedPaymentRefund`). Reads its own `amount`/`reason` off the
+ * row rather than taking them as params, so the caller can't accidentally
+ * send a different amount than what was actually capped/committed.
+ *
+ * NEVER call this from inside a DB transaction — it makes a real network
+ * call (see the module doc on `initiateProviderRefund`'s original shape for
+ * why that's unsafe: held locks across a network round-trip, and a
+ * provider-accepted refund that a later local rollback could never undo).
+ *
+ * Idempotent: a row that has already left PENDING (a retried cancellation, a
+ * duplicate invocation before a UI button disables) is a no-op — this is the
+ * ONLY new idempotency surface this phase introduces, since the PENDING row
+ * itself is created at most once per cancellation (guarded by
+ * `sellerCancelSellerOrder`'s own one-shot SellerOrder-status gate).
+ */
+export async function callProviderForRefund(
+  paymentRefundId: string,
+  providerPaymentId: string,
+): Promise<CallProviderForRefundResult> {
+  const refund = await prisma.paymentRefund.findUnique({
+    where: { id: paymentRefundId },
+    select: { amount: true, reason: true, status: true },
+  });
+  if (!refund) return { ok: false, error: "Refund record not found." };
+  if (refund.status !== "PENDING") {
+    return { ok: true, paymentRefundId, alreadyProcessed: true };
+  }
+
+  try {
+    const remote = await createRefund(
+      { amount: refund.amount, paymentId: providerPaymentId, reason: refund.reason ?? "requested_by_customer" },
+      `refund:${paymentRefundId}`,
+    );
+    await prisma.paymentRefund.update({
+      where: { id: paymentRefundId },
+      data: { providerId: remote.id, status: "PROCESSING" },
+    });
+    return { ok: true, paymentRefundId };
+  } catch (err) {
+    const detail =
+      err instanceof PaymongoNotConfiguredError
+        ? "PayMongo is not configured."
+        : err instanceof Error
+          ? err.message
+          : "refund request failed";
+    await prisma.paymentRefund.update({
+      where: { id: paymentRefundId },
+      data: { status: "FAILED", failureReason: detail.slice(0, 300) },
+    });
+    return { ok: false, error: detail };
+  }
+}
+
 /**
  * DORMANT in Phase 4-A. Creates a PaymentRefund row (via the atomic,
- * lock-protected core above) and calls PayMongo. The webhook
- * (`refund.updated`) completes it. Callers must have verified the
- * `issue_refunds` permission first.
+ * lock-protected core above) and calls PayMongo (via `callProviderForRefund`
+ * above). The webhook (`refund.updated`) completes it. Callers must have
+ * verified the `issue_refunds` permission first.
+ *
+ * `returnRequestId` is nullable so this same function shape could serve a
+ * future non-return-derived provider refund (e.g. a PAID seller cancellation
+ * — see `sellerCancelSellerOrder`, which today creates its PaymentRefund row
+ * directly via `createAttributedPaymentRefund` + a separate, later
+ * `callProviderForRefund` call rather than through this function, since its
+ * row already exists by the time a provider call is possible). The
+ * PayMongo idempotency key is based on the PaymentRefund row's own id, never
+ * on the nullable `returnRequestId`.
  */
 export async function initiateProviderRefund(params: {
-  returnRequestId: string;
+  returnRequestId: string | null;
   paymentId: string;
   providerPaymentId: string;
   amount: number;
@@ -237,29 +306,8 @@ export async function initiateProviderRefund(params: {
     reason: params.reason,
   });
   if (!created.ok) return { ok: false, error: created.error };
-  const refund = { id: created.paymentRefundId };
 
-  try {
-    const remote = await createRefund(
-      { amount: params.amount, paymentId: params.providerPaymentId, reason: params.reason },
-      `refund:${params.returnRequestId}`,
-    );
-    await prisma.paymentRefund.update({
-      where: { id: refund.id },
-      data: { providerId: remote.id, status: "PROCESSING" },
-    });
-    return { ok: true, paymentRefundId: refund.id };
-  } catch (err) {
-    const detail =
-      err instanceof PaymongoNotConfiguredError
-        ? "PayMongo is not configured."
-        : err instanceof Error
-          ? err.message
-          : "refund request failed";
-    await prisma.paymentRefund.update({
-      where: { id: refund.id },
-      data: { status: "FAILED", failureReason: detail.slice(0, 300) },
-    });
-    return { ok: false, error: detail };
-  }
+  const result = await callProviderForRefund(created.paymentRefundId, params.providerPaymentId);
+  if (!result.ok) return { ok: false, error: result.error };
+  return { ok: true, paymentRefundId: result.paymentRefundId };
 }

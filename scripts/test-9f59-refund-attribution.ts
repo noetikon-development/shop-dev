@@ -441,6 +441,7 @@ async function concurrencyTest() {
 
   const fixtureOrderIds: string[] = [];
   const fixtureSellerIds: string[] = [];
+  const fixtureProductIds: string[] = [];
   let fixtureUserId: string | null = null;
 
   try {
@@ -455,6 +456,7 @@ async function concurrencyTest() {
       data: { name: `P ${sfx}`, slug: `p-${sfx}`, shortDescription: "s", description: "d", categoryId: category.id, status: "ACTIVE", price: 1000 },
       select: { id: true },
     });
+    fixtureProductIds.push(product.id);
     const order = await prisma.order.create({
       data: {
         orderNumber: `AX-RFND-CONC-${sfx}`, userId: user.id, email: "buyer@example.test", phone: "+639000000000",
@@ -500,11 +502,13 @@ async function concurrencyTest() {
     ok("I · the ledger never exceeded the Payment's own amount despite the race", (finalAgg._sum.amount ?? 0) <= 1000);
   } finally {
     if (fixtureOrderIds.length) await prisma.order.deleteMany({ where: { id: { in: fixtureOrderIds } } }).catch(() => {});
+    if (fixtureProductIds.length) await prisma.product.deleteMany({ where: { id: { in: fixtureProductIds } } }).catch(() => {});
     if (fixtureSellerIds.length) await prisma.seller.deleteMany({ where: { id: { in: fixtureSellerIds } } }).catch(() => {});
     if (fixtureUserId) await prisma.user.deleteMany({ where: { id: fixtureUserId } }).catch(() => {});
   }
 
   ok("I · CLEANUP — no fixture order leaked", (await prisma.order.count({ where: { orderNumber: { contains: sfx } } })) === 0);
+  ok("I · CLEANUP — no fixture product leaked", (await prisma.product.count({ where: { id: { in: fixtureProductIds } } })) === 0);
   ok("I · CLEANUP — no fixture seller leaked", (await prisma.seller.count({ where: { id: { in: fixtureSellerIds } } })) === 0);
 }
 
