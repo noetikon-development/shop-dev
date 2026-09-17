@@ -147,7 +147,16 @@ function staticTests() {
   ok("core · writes AdminAuditLog order.cod_payment_confirmed with amountConfirmed = grandTotal", /action: "order\.cod_payment_confirmed"/.test(core) && /amountConfirmed: order\.grandTotal,\s*grandTotal: order\.grandTotal,/.test(core));
   ok("core · amount is never operator-entered (no amount field in input / schema)", !/amount:\s*z\./.test(actions) && !/input\.amount/.test(core));
   ok("core · NO Payment / PaymentRefund / WebhookEvent write anywhere", !/\b(payment|paymentRefund|webhookEvent)\.(create|update|updateMany|upsert)\b/i.test(core.replace(/COD_ONLINE_PAYMENT_STATUSES/g, "")) && !/\b(payment|paymentRefund|webhookEvent)\.(create|update)\b/i.test(actions));
-  ok("core · no reverse / un-confirm (PAID → PENDING) path", !/paymentStatus: "PENDING"[\s\S]{0,80}PAID|un-?confirm|reverseCodPayment/i.test(core));
+  // Precise on purpose: a real reversal would either (a) write paymentStatus
+  // back to PENDING/UNPAID inside an update payload, or (b) be a function
+  // whose name itself IS the reversal verb (unconfirm/reverse/revert/undo…
+  // Cod/Payment). Matching on the bare substring "unconfirm" anywhere in the
+  // file is too blunt — it also matches a legitimate read-only query name
+  // like `listUnconfirmedCodDeliveries` (an adjective describing state, not
+  // a reversal action), which is exactly the false positive this caused.
+  const reversalWrite = /\.(update|updateMany|upsert)\(\{[\s\S]{0,400}?data:\s*\{[\s\S]{0,120}?paymentStatus:\s*"(PENDING|UNPAID)"/;
+  const reversalAction = /export\s+(async\s+)?function\s+(unconfirm|reverse|revert|undo)[A-Za-z]*(Cod|Payment)/i;
+  ok("core · no reverse / un-confirm (PAID → PENDING) path", !reversalWrite.test(core) && !reversalAction.test(core));
   ok("core · CodConfirmConflict → typed INVALID_STATE result (no throw to caller)", /err instanceof CodConfirmConflict[\s\S]{0,120}code: "INVALID_STATE"/.test(core));
 
   ok("schema · NO new Order columns (no codPaymentConfirmedAt / codRemittanceReference)", !/codPaymentConfirmedAt|codRemittanceReference/.test(schema));
