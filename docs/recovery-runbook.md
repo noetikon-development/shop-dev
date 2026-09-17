@@ -145,6 +145,31 @@ incident response relies on them.** Do not assume backups exist, are recent,
 or are restorable, based on this document or on Supabase's general
 platform capabilities — only a checked dashboard state is trustworthy.
 
+### Verified PostgreSQL-level WAL archiving evidence (2026-09-17)
+
+A read-only check of Postgres system views (`pg_stat_archiver`, `SHOW
+wal_level`) against the Production database, performed 2026-09-17, found:
+
+- `wal_level = logical`
+- `pg_stat_archiver.archived_count = 2,834`
+- `pg_stat_archiver.failed_count = 0`
+- `last_archived_time = 2026-09-17T06:32:22Z`
+- `stats_reset = 2026-08-25T20:32:01Z`
+
+This confirms WAL archiving activity is verified at the PostgreSQL level, but
+this does not by itself establish that customer-accessible Supabase backup
+or Point-in-Time Recovery is enabled for this project. Supabase runs WAL
+archiving as part of its own infrastructure across plan tiers — its presence
+does not confirm the plan/tier, whether automated backups or PITR are
+enabled as a customer-facing feature, any retention window, that a specific
+recoverable restore point exists, or that a restore has ever been tested.
+None of those remain any more verified than before this check: Supabase
+plan/tier, automated backup configuration, PITR status, PITR/backup
+retention, recovery-point availability, and restore capability are all
+**still NOT VERIFIED**, because dashboard/Management API access is
+unavailable in this environment. This also says nothing about Supabase
+Storage — no Storage backup capability is verified or claimed.
+
 ## G. Database Recovery
 
 Decision process:
