@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { requirePermission, hasPermission } from "@/lib/admin/rbac";
 import {
   listAdminPayments,
   getPaymentsAdminConfig,
   listStuckPayments,
+  listUnconfirmedCodDeliveries,
   listRecentWebhookEvents,
 } from "@/lib/admin/payments";
 import { getPaymongoDiagnostics } from "@/lib/payments/diagnostics";
@@ -11,6 +13,8 @@ import { PageHeader, FilterBar, SearchInput, FilterSelect, Pagination, Card } fr
 import { PaymentsTable } from "@/components/admin/payments/payments-table";
 import { ReprocessWebhookButton } from "@/components/admin/payments/reprocess-webhook-button";
 import { PAYMENT_STATUSES, paymentStatusLabel } from "@/lib/payments/status";
+import { PAYMENT_STATUS_LABEL } from "@/lib/orders/status";
+import { formatDate } from "@/lib/utils";
 
 export const metadata: Metadata = { title: "Payments" };
 
@@ -26,7 +30,7 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
   const sp = await searchParams;
   const str = (v: string | string[] | undefined) => (typeof v === "string" ? v : undefined);
 
-  const [{ rows, total, pageCount, page: current }, config, stuck, diag, webhooks] = await Promise.all([
+  const [{ rows, total, pageCount, page: current }, config, stuck, unconfirmedCod, diag, webhooks] = await Promise.all([
     listAdminPayments({
       q: str(sp.q),
       status: str(sp.status),
@@ -35,6 +39,7 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
     }),
     getPaymentsAdminConfig(),
     listStuckPayments(),
+    listUnconfirmedCodDeliveries(),
     getPaymongoDiagnostics(),
     listRecentWebhookEvents(25),
   ]);
@@ -98,6 +103,48 @@ export default async function AdminPaymentsPage({ searchParams }: PageProps<"/ad
           <p className="mt-1 text-ink-soft">
             A provider webhook may have been missed. Open the order and use “Re-check with PayMongo”.
           </p>
+        </Card>
+      )}
+
+      {unconfirmedCod.length > 0 && (
+        <Card className="mb-5 border-l-4 border-l-clay text-sm">
+          <p className="font-medium text-ink">
+            COD payments awaiting confirmation ({unconfirmedCod.length})
+          </p>
+          <p className="mt-1 text-ink-soft">
+            These orders have been delivered, but their cash-on-delivery payment has not yet been
+            confirmed as received. Open an order and use “Confirm COD payment”.
+          </p>
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full text-xs">
+              <thead className="text-ink-faint">
+                <tr className="border-b border-line/60 text-left">
+                  <th className="py-1 pr-3 font-medium">Order</th>
+                  <th className="py-1 pr-3 font-medium">Delivered</th>
+                  <th className="py-1 pr-3 font-medium">Payment status</th>
+                  <th className="py-1 font-medium">Method</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unconfirmedCod.map((o) => (
+                  <tr key={o.id} className="border-b border-line/40 align-top">
+                    <td className="py-1.5 pr-3">
+                      <Link href={`/admin/orders/${o.id}`} className="font-medium text-ink underline underline-offset-2 hover:text-clay">
+                        {o.orderNumber}
+                      </Link>
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-faint">
+                      {o.deliveredAt ? formatDate(o.deliveredAt) : "—"}
+                    </td>
+                    <td className="py-1.5 pr-3 text-ink-soft">
+                      {PAYMENT_STATUS_LABEL[o.paymentStatus] ?? o.paymentStatus}
+                    </td>
+                    <td className="py-1.5 text-ink-soft">{o.paymentMethod === "NONE" ? "COD" : o.paymentMethod}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </Card>
       )}
 

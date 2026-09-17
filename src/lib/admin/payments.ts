@@ -392,6 +392,32 @@ export async function listStuckPayments() {
   });
 }
 
+/**
+ * COD orders that are DELIVERED but whose cash has not yet been confirmed
+ * received via `confirmCodPaymentReceived` — the same condition that function
+ * itself guards against (`NOT_DELIVERED` / the PENDING·UNPAID check), surfaced
+ * here for admin visibility only. Read-only; never writes, never repairs.
+ * Mirrors `listStuckPayments()` above.
+ */
+export async function listUnconfirmedCodDeliveries() {
+  return prisma.order.findMany({
+    where: {
+      status: "DELIVERED",
+      paymentStatus: { in: ["PENDING", "UNPAID"] },
+      paymentMethod: { in: ["NONE", "COD"] },
+      payments: { none: { status: { in: [...COD_ONLINE_PAYMENT_STATUSES] } } },
+    },
+    orderBy: { deliveredAt: "asc" },
+    select: {
+      id: true,
+      orderNumber: true,
+      deliveredAt: true,
+      paymentStatus: true,
+      paymentMethod: true,
+    },
+  });
+}
+
 export async function getPaymentsAdminConfig() {
   return getPaymentsConfig();
 }
