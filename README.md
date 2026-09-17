@@ -918,6 +918,9 @@ Vercel deployments here are pushed via the local CLI (`vercel deploy --prod`),
 not a GitHub-integrated pipeline, so Vercel's own deployment metadata does not
 reliably expose which Git commit a deployment was built from; that log is the
 project's authoritative commit-to-deployment record.
+[`scripts/deploy-production.mjs`](scripts/deploy-production.mjs) wraps the
+same deployment command and records that entry automatically — see
+"Using the deployment helper" in `docs/deployments.md`.
 
 `supabase/migrations/*.sql` is a separate, hand-maintained SQL migration
 mechanism — it is independent of Prisma's own migration history (which this
