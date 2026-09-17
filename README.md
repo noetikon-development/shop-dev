@@ -909,6 +909,28 @@ The build never connects to the database — every storefront route is
 `force-dynamic` and renders on request. SQLite is not used anywhere; it cannot
 run on Vercel's serverless filesystem.
 
+### Production promotion workflow
+
+Production promotion follows: **Git commit → Preview → verification →
+Production**. Before promoting to Production, record the commit SHA and the
+resulting Vercel deployment ID in [`docs/deployments.md`](docs/deployments.md) —
+Vercel deployments here are pushed via the local CLI (`vercel deploy --prod`),
+not a GitHub-integrated pipeline, so Vercel's own deployment metadata does not
+reliably expose which Git commit a deployment was built from; that log is the
+project's authoritative commit-to-deployment record.
+
+`supabase/migrations/*.sql` is a separate, hand-maintained SQL migration
+mechanism — it is independent of Prisma's own migration history (which this
+project does not use; schema sync is via `prisma db push`). When schema setup
+or recovery requires it, review and apply these files in filename order using
+the project's existing mechanism (`node --env-file=.env scripts/apply-sql.mjs
+supabase/migrations/<file>.sql`).
+
+Application rollback and database rollback are separate operations — rolling
+back the deployed application does not roll back the database's schema or
+data, and vice versa. See [`docs/recovery-runbook.md`](docs/recovery-runbook.md)
+for the full recovery procedure.
+
 ### Local production build
 
 PayMongo test deployment
