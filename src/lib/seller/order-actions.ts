@@ -182,7 +182,9 @@ export async function sellerCancelOrderAction(
       `(was ${res.previousParentStatus}); restocked ${res.restockedUnits} unit(s) across ${res.restockedLines} line(s)` +
       (res.parentAlsoCancelled
         ? " — last active seller on this order; the customer's order is now cancelled"
-        : " — other sellers on this order remain active; the customer's order is unaffected"),
+        : res.parentRollup
+          ? ` — other sellers remain active; removing this seller's block let the order roll forward to ${res.parentRollup.rolledTo}`
+          : " — other sellers on this order remain active; the customer's order is unaffected"),
     meta: {
       trigger: res.from === "PENDING_PAYMENT" ? "seller_decline" : "seller_cancel",
       sellerId: ctx.sellerId,
@@ -191,6 +193,10 @@ export async function sellerCancelOrderAction(
       from: res.from,
       previousParentStatus: res.previousParentStatus,
       parentAlsoCancelled: res.parentAlsoCancelled,
+      // Launch-readiness audit fix — removing a blocking cancelled sibling can
+      // let the EXISTING SHIPPED/DELIVERED rollup (9F-12b) advance in the same
+      // transaction; recorded here for ops visibility, no separate audit row.
+      parentRolledTo: res.parentRollup?.rolledTo ?? null,
       restockedUnits: res.restockedUnits,
       restockedLines: res.restockedLines,
       reason: parsed.data.reason,

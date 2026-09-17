@@ -506,11 +506,20 @@ export type SellerCancelResult =
        *  the existing whole-order-cancel semantics apply in that case
        *  (customer notified, OrderEvent reads "Order cancelled"). False for a
        *  multi-seller order where at least one sibling SellerOrder is still
-       *  active — the parent Order is left completely untouched. */
+       *  active — the parent Order's own status is untouched by the
+       *  cancellation itself, though `parentRollup` below may still have
+       *  advanced it forward (SHIPPED/DELIVERED) in the SAME transaction if
+       *  this cancellation was the last thing blocking that. */
       parentAlsoCancelled: boolean;
       restockedUnits: number;
       restockedLines: number;
       clawbackEvents: SellerOrderClawbackEvent[];
+      /** Set only when removing this cancelled SellerOrder let the parent
+       *  Order's EXISTING SHIPPED/DELIVERED rollup (9F-12b) advance — e.g. a
+       *  sibling was already DELIVERED but the parent was stuck at
+       *  PROCESSING because this now-cancelled seller hadn't shipped yet.
+       *  Never set when `parentAlsoCancelled` is true. */
+      parentRollup?: ParentOrderRollup;
       /** 9F-60 — the PENDING PaymentRefund created for this seller's share when
        *  the parent Order has an eligible PAID/PARTIALLY_REFUNDED Payment AND
        *  provider routing is live; `null` for COD, no Payment, a bookkeeping-
@@ -702,6 +711,52 @@ export async function sellerCancelSellerOrder(
       parentAlsoCancelled = cancelledOrder > 0;
     }
 
+    // 5a. Re-evaluate the SHIPPED/DELIVERED rollup now that a cancelled
+    //     sibling can no longer block it (launch-readiness audit finding).
+    //     Reuses the EXISTING, unmodified `rollUpParentOrder()` — no new
+    //     eligibility logic, no new lock. Only attempted when a sibling is
+    //     still active; when none are, the all-cancelled cascade above
+    //     already owns the parent transition (and `rollUpParentOrder`'s own
+    //     `active.length === 0` guard would no-op here anyway, so this can
+    //     never turn an all-cancelled order into SHIPPED/DELIVERED).
+    //
+    //     Tried SHIPPED-then-DELIVERED, in that order, inside this SAME
+    //     transaction: a parent stuck at PROCESSING because this seller
+    //     hadn't shipped yet — while a sibling is already DELIVERED — needs
+    //     both steps to catch up in one go. Each call re-reads live state and
+    //     is independently self-guarded (a no-op unless its OWN precondition
+    //     now holds), exactly like two ordinary sequential fulfilment
+    //     advances would be. `rollUpParentOrder` decides purely from every
+    //     ACTIVE sibling's status (already re-fetched fresh inside it) — the
+    //     specific sibling id passed in only supplies which SellerOrder's own
+    //     Shipment gets copied onto the parent for the SHIPPED branch, the
+    //     same "whichever seller" ambiguity the existing 9F-12b design
+    //     already accepts for a normal multi-seller shipment.
+    //
+    //     Safe under concurrency: this runs AFTER the sibling `FOR UPDATE`
+    //     lock above, which already holds every SellerOrder row on this
+    //     parent Order for the rest of this transaction — no new lock is
+    //     acquired here, so this cannot introduce a new deadlock or race
+    //     against a concurrent sibling cancellation. A concurrent
+    //     `advanceSellerOrderStatus` on a sibling only ever locks its own one
+    //     row via a status-guarded `updateMany`; it cannot be waiting on a
+    //     lock this transaction needs while this transaction waits on it, so
+    //     no cross-path deadlock is possible either.
+    let parentRollup: ParentOrderRollup | undefined;
+    if (anySiblingStillActive) {
+      const activeSibling = siblings.find((s) => s.id !== sellerOrderId && s.status !== "CANCELLED");
+      if (activeSibling) {
+        // Both calls always run — a parent stuck at PROCESSING needs the
+        // SHIPPED hop to land BEFORE the DELIVERED check's own precondition
+        // (order.status already SHIPPED/OUT_FOR_DELIVERY) can pass. Using
+        // `??` here would short-circuit the DELIVERED attempt the moment
+        // SHIPPED fired, stranding a fully-DELIVERED order at SHIPPED.
+        const shippedRollup = await rollUpParentOrder(tx, activeSibling.id, "SHIPPED");
+        const deliveredRollup = await rollUpParentOrder(tx, activeSibling.id, "DELIVERED");
+        parentRollup = deliveredRollup ?? shippedRollup ?? undefined;
+      }
+    }
+
     // 5b. Seller-aware refund-row creation (9F-60) — DB ONLY, no PayMongo call
     //     here. Runs AFTER the sibling-lock cascade above so the well-tested
     //     "last active seller" decision is fully resolved first; the new
@@ -761,6 +816,7 @@ export async function sellerCancelSellerOrder(
       restockedUnits,
       restockedLines,
       clawbackEvents,
+      parentRollup,
       paymentRefundId,
     };
   };
