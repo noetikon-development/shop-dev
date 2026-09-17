@@ -4,7 +4,7 @@ export const SITE = {
   brand: "Axiaro",
   tagline: "Considered things for everyday living",
   description:
-    "Axiaro is a modern homeware and lifestyle store — furniture, kitchen, textiles and wardrobe essentials, designed to last and priced fairly.",
+    "Axiaro is an online marketplace offering a growing range of products from Axiaro and independent third-party sellers.",
 };
 
 // Cart-page shipping ESTIMATE only. The authoritative rates live in the

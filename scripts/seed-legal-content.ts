@@ -113,7 +113,7 @@ You are responsible for the accuracy of the information on your account and for 
 
 # Product information
 
-We describe our products as accurately as we can. Product illustrations on this store are an in-house graphic system rather than photographs, and colours can vary between screens. Minor variation in natural materials is normal and is not a fault.
+We describe our products as accurately as we can. Product images and presentation may vary depending on the product and seller — some use Axiaro's own product imagery, others use images provided by the respective seller — and colours can vary between screens. Minor variation in natural materials is normal and is not a fault.
 
 # Pricing
 
@@ -289,25 +289,34 @@ To cancel an order, use the **[Contact us](/pages/contact)** page and include yo
 
 const ABOUT = `# Our approach
 
-Axiaro designs homeware and a small wardrobe in-house, works directly with a short list of makers, and skips the traditional retail markup. The aim is furniture and everyday pieces that are made to last and priced fairly.
+Axiaro brings together a wide range of products from different categories and sources. Some products are offered directly by Axiaro, while others are offered by independent third-party sellers through the Axiaro marketplace.
 
-# What we care about
+We aim to make it easy to discover useful, interesting, and well-considered products in one place, while giving sellers an opportunity to reach more customers.
 
-- **Materials you can trace** — solid wood, natural fibres and honest hardware.
-- **Repairable design** — covers that unzip, parts that can be replaced.
-- **Fair pricing** — a real price, not an inflated "RRP" to discount from.
+# What we offer
 
-# How the store works
+- **A wide range of products** — from everyday essentials to products that are harder to find.
+- **Axiaro products** — products sourced or offered directly by Axiaro.
+- **Independent sellers** — products offered by third-party sellers through the Axiaro marketplace.
+- **More choices** — a growing selection across different categories, price points, and product types.
 
-Browse the catalogue, add pieces to your bag, and check out with delivery or free store pickup. You can shop as a guest or create an account to save addresses, track orders and keep a wishlist. After you place an order our team contacts you to arrange payment, then prepares it for dispatch.
+# How Axiaro works
+
+Browse products, add items to your cart, and place your order through Axiaro. Depending on the product, your order may be fulfilled directly by Axiaro or by one of our independent sellers.
+
+You can shop as a guest or create an account to manage your orders, track deliveries, and keep a wishlist.
 
 # Product imagery
 
-Selected products are represented using Axiaro's in-house product illustration system rather than photographs. Store and contact details shown across the site are managed from the store's own settings.
+Product images and presentation may vary depending on the product and seller. Some products may use Axiaro's own product imagery, while others may use images provided by the respective seller.
+
+# Our marketplace
+
+Axiaro is designed to grow beyond a single product category or product type. We may introduce products directly through Axiaro and continue to expand the marketplace by welcoming selected third-party sellers.
 
 # Get in touch
 
-Questions are welcome through our **[Contact us](/pages/contact)** page, and order updates are always on **[Track your order](/track)**.`;
+Questions are welcome through our **[Contact us](/pages/contact)** page, and order updates can be followed through **[Track your order](/track)**.`;
 
 // ---------------------------------------------------------------------------
 
@@ -420,10 +429,10 @@ export const LEGAL_PAGES: LegalPageSeed[] = [
   {
     slug: "about",
     title: "About Axiaro",
-    excerpt: "Why we make what we make, and how the store works.",
+    excerpt: "A marketplace for products worth discovering, from Axiaro and independent sellers.",
     seoTitle: "About Axiaro",
     seoDescription:
-      "Axiaro designs homeware and a small wardrobe in-house, works directly with makers, and prices fairly. How the store works.",
+      "Axiaro is an online marketplace offering a growing range of products from Axiaro and independent third-party sellers.",
     body: ABOUT,
   },
   {
