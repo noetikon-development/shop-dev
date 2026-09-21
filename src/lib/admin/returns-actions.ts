@@ -615,6 +615,10 @@ export async function initiateRefundAction(input: unknown): Promise<ReturnAdminS
   // runs and the existing P3 behaviour is byte-identical.
   const routing = await refundRouteForOrder(ret.order.id);
 
+  if (routing.route === "blocked") {
+    return { ok: false, error: `Refund could not be issued: ${routing.reason}` };
+  }
+
   if (routing.route === "provider") {
     if (!(admin.isSuperAdmin || hasPermission(admin, "issue_refunds"))) {
       return { ok: false, error: "Issuing a refund to the customer’s payment method needs the ‘issue refunds’ permission." };
@@ -640,7 +644,7 @@ export async function initiateRefundAction(input: unknown): Promise<ReturnAdminS
     const provider = await initiateProviderRefund({
       returnRequestId: ret.id,
       paymentId: routing.payment.id,
-      providerPaymentId: routing.payment.providerId,
+      providerPaymentId: routing.payment.providerPaymentId,
       amount: parsed.data.refundAmount,
       reason: "requested_by_customer",
       sellerOrderId: attribution.sellerOrderId,

@@ -258,7 +258,7 @@ export async function sellerCancelOrderAction(
   if (res.paymentRefundId) {
     const routing = await refundRouteForOrder(res.orderId);
     if (routing.route === "provider") {
-      const provider = await callProviderForRefund(res.paymentRefundId, routing.payment.providerId);
+      const provider = await callProviderForRefund(res.paymentRefundId, routing.payment.providerPaymentId);
       if (provider.ok) {
         if (!provider.alreadyProcessed) scheduleEmail(() => sendRefundIssued(res.paymentRefundId!));
       } else {
@@ -271,6 +271,16 @@ export async function sellerCancelOrderAction(
           error: provider.error,
         });
       }
+    } else if (routing.route === "blocked") {
+      // The PaymentRefund row stays PENDING — never call PayMongo with the
+      // wrong id, and never roll back the already-committed cancellation.
+      // reconcile:payments rule 16 (stale PENDING PaymentRefund) is the
+      // existing ops-visibility net for this, unchanged.
+      console.error("[seller-cancel] provider refund blocked — missing PayMongo payment id", {
+        sellerOrderId: parsed.data.sellerOrderId,
+        paymentRefundId: res.paymentRefundId,
+        reason: routing.reason,
+      });
     }
   }
 

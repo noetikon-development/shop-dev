@@ -27,9 +27,36 @@ export type RefundRoute =
   | { route: "bookkeeping"; reason: string }
   | {
       route: "provider";
-      payment: { id: string; providerId: string; amount: number; method: string | null };
+      payment: { id: string; providerPaymentId: string; amount: number; method: string | null };
       alreadyRefunded: number;
-    };
+    }
+  | { route: "blocked"; code: "MISSING_PROVIDER_PAYMENT_ID"; reason: string };
+
+/**
+ * Safely extract the real PayMongo Payment id (`pay_…`) from `Payment.metadata`.
+ *
+ * `Payment.providerId` holds the Checkout Session id (`cs_…`) instead — set once
+ * at session creation and never updated. The webhook's `applyPaid` handler is
+ * the only writer of `metadata.providerPaymentId`, once a `*.paid` event
+ * confirms the actual capture (see webhook.ts). A provider refund call needs
+ * THIS id — PayMongo's `/refunds` endpoint expects a real Payment resource, not
+ * a Checkout Session. Never substitute `providerId` here.
+ *
+ * Metadata is untrusted-shape JSON (a historical row, or one written before
+ * this field existed, may lack it, be malformed, or predate the webhook that
+ * would have set it) — this returns `null` rather than throwing for anything
+ * but a well-formed non-empty string.
+ */
+export function extractProviderPaymentId(metadata: string | null | undefined): string | null {
+  if (!metadata) return null;
+  try {
+    const parsed = JSON.parse(metadata) as { providerPaymentId?: unknown };
+    const id = parsed.providerPaymentId;
+    return typeof id === "string" && id.trim() ? id.trim() : null;
+  } catch {
+    return null;
+  }
+}
 
 export async function refundRouteForOrder(orderId: string, db: Db = prisma): Promise<RefundRoute> {
   const config = await getPaymentsConfig();
@@ -43,15 +70,25 @@ export async function refundRouteForOrder(orderId: string, db: Db = prisma): Pro
   const payment = await db.payment.findFirst({
     where: { orderId, status: { in: ["PAID", "PARTIALLY_REFUNDED"] } },
     orderBy: { paidAt: "desc" },
-    select: { id: true, providerId: true, amount: true, method: true, status: true },
+    select: { id: true, amount: true, method: true, status: true, metadata: true },
   });
   if (!payment || !isPaidPaymentStatus(payment.status)) {
     return { route: "bookkeeping", reason: "no_paid_payment" };
   }
 
-  // Extract the provider payment id (pay_xxx) — for a checkout session we stored
-  // the session id, so a real integration resolves the nested payment id. In
-  // Phase 4-A this branch is unreachable; the shape is here for 4-D.
+  // Guard: a provider refund must never be attempted, nor a wrong id ever
+  // substituted, when the real PayMongo Payment id isn't on record (e.g. a
+  // webhook race, or a historical row predating this field).
+  const providerPaymentId = extractProviderPaymentId(payment.metadata);
+  if (!providerPaymentId) {
+    return {
+      route: "blocked",
+      code: "MISSING_PROVIDER_PAYMENT_ID",
+      reason:
+        "This payment has no recorded PayMongo Payment ID (metadata.providerPaymentId) — a provider refund cannot be issued safely.",
+    };
+  }
+
   const agg = await db.paymentRefund.aggregate({
     where: { paymentId: payment.id, status: { in: ["PENDING", "PROCESSING", "SUCCEEDED"] } },
     _sum: { amount: true },
@@ -61,7 +98,7 @@ export async function refundRouteForOrder(orderId: string, db: Db = prisma): Pro
     route: "provider",
     payment: {
       id: payment.id,
-      providerId: payment.providerId,
+      providerPaymentId,
       amount: payment.amount,
       method: payment.method,
     },
