@@ -51,7 +51,7 @@ export async function HomepageBlocks({
           return (
             <CategoryTiles
               key={block.id}
-              categories={tree}
+              categories={tree.filter((c) => (c.productCount ?? 0) > 0)}
               eyebrow={str(block.data.eyebrow) || undefined}
               heading={str(block.data.heading) || undefined}
             />

@@ -33,7 +33,7 @@ export default async function HomePage() {
   return (
     <div className="home-root flex flex-col gap-9 md:gap-12 lg:gap-16">
       <Hero />
-      <CategoryTiles categories={tree} />
+      <CategoryTiles categories={tree.filter((c) => (c.productCount ?? 0) > 0)} />
       <ProductRail
         eyebrow="Just landed"
         title="New this season"
