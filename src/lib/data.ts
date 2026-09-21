@@ -470,6 +470,8 @@ export type ListingParams = {
   minRating?: number;
   page?: number;
   perPage?: number;
+  /** The `/c/new` virtual collection — see `NEW_ARRIVALS_WINDOW_DAYS` below. */
+  forceNew?: boolean;
 };
 
 export type ListingResult = {
@@ -481,6 +483,20 @@ export type ListingResult = {
   priceBounds: { min: number; max: number };
   colorFacets: { name: string; hex: string | null; count: number }[];
 };
+
+/**
+ * `/c/new` eligibility: ACTIVE products created in the last
+ * `NEW_ARRIVALS_WINDOW_DAYS` days — unless fewer than `NEW_ARRIVALS_MIN_COUNT`
+ * qualify, in which case the newest `NEW_ARRIVALS_MIN_COUNT` ACTIVE products
+ * are used instead, so a slow week never leaves the page thin or empty. The
+ * fallback resolves to a fixed set of product ids (not a relaxed date filter),
+ * so it stays exactly `NEW_ARRIVALS_MIN_COUNT` products regardless of how the
+ * customer re-sorts them afterward. Independent of `Product.badges` — the
+ * "New" merchandising badge is a separate, manually-set flag (see
+ * `PRODUCT_BADGES` in `@/lib/constants`) and is not read or written here.
+ */
+const NEW_ARRIVALS_WINDOW_DAYS = 30;
+const NEW_ARRIVALS_MIN_COUNT = 8;
 
 /**
  * Uncached product-listing core. App code uses the cached `listProducts` export
@@ -510,6 +526,23 @@ export async function runListProducts(params: ListingParams): Promise<ListingRes
 
   const query = params.query?.trim() ?? "";
   const AND: Record<string, unknown>[] = [{ status: "ACTIVE" }];
+  if (params.forceNew) {
+    const cutoff = new Date(Date.now() - NEW_ARRIVALS_WINDOW_DAYS * 86_400_000);
+    const withinWindow = await prisma.product.count({
+      where: { status: "ACTIVE", createdAt: { gte: cutoff } },
+    });
+    if (withinWindow >= NEW_ARRIVALS_MIN_COUNT) {
+      AND.push({ createdAt: { gte: cutoff } });
+    } else {
+      const newest = await prisma.product.findMany({
+        where: { status: "ACTIVE" },
+        orderBy: { createdAt: "desc" },
+        take: NEW_ARRIVALS_MIN_COUNT,
+        select: { id: true },
+      });
+      AND.push({ id: { in: newest.map((p) => p.id) } });
+    }
+  }
   if (categoryIds) AND.push({ categoryId: { in: categoryIds } });
   if (query) {
     const m = { contains: query, mode: "insensitive" as const };

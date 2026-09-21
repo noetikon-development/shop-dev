@@ -40,6 +40,7 @@ export function parseListingParams(
     minRating: num(sp.rating),
     page: num(sp.page) ?? 1,
     perPage: 24,
+    forceNew: opts.forceNew,
   };
 }
 
