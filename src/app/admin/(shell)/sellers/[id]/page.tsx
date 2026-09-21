@@ -217,6 +217,21 @@ export default async function AdminSellerDetailPage({
                     .join(" · ")
                 : null}
             </Field>
+            <Field label="Pickup / origin address (forward shipments)">
+              {s.profile.originAddress
+                ? [
+                    s.profile.originAddress.recipient,
+                    s.profile.originAddress.line1,
+                    s.profile.originAddress.line2,
+                    [s.profile.originAddress.barangay, s.profile.originAddress.city].filter(Boolean).join(", "),
+                    [s.profile.originAddress.province, s.profile.originAddress.postalCode].filter(Boolean).join(" "),
+                    countryName(s.profile.originAddress.country),
+                    s.profile.originAddress.phone,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")
+                : null}
+            </Field>
             <div className="mt-3">
               <p className="text-xs font-medium text-ink-faint">Social links</p>
               {social.length === 0 ? (

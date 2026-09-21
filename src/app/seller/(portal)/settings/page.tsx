@@ -93,6 +93,7 @@ export default async function SellerSettingsPage() {
           shipFromCity={view.profile.shipFromCity}
           shipFromCountry={view.profile.shipFromCountry}
           returnAddress={view.profile.returnAddress}
+          originAddress={view.profile.originAddress}
           socialLinks={view.profile.socialLinks}
           contentStatus={view.contentStatus}
         />

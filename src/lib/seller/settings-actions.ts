@@ -20,6 +20,7 @@ import {
 } from "@/lib/marketplace/seller-media-repository";
 import { SELLER_SOCIAL_KEYS } from "@/lib/marketplace/types";
 import { SELLER_RETURN_ADDRESS_FIELDS } from "@/lib/marketplace/return-destination";
+import { SELLER_ORIGIN_ADDRESS_FIELDS } from "@/lib/marketplace/origin-address";
 
 /**
  * `/seller/settings` server actions (Phase 9F-4a).
@@ -95,6 +96,17 @@ export async function saveSellerProfileAction(
     }
   }
 
+  // Forward-shipment pickup/origin address (`originAddress.<field>` inputs).
+  // Same "only touch it when the form actually carried the fields" guard.
+  const originAddressSubmitted = SELLER_ORIGIN_ADDRESS_FIELDS.some((k) => formData.has(`originAddress.${k}`));
+  const originAddress: Record<string, string> = {};
+  if (originAddressSubmitted) {
+    for (const k of SELLER_ORIGIN_ADDRESS_FIELDS) {
+      const v = formData.get(`originAddress.${k}`);
+      originAddress[k] = typeof v === "string" ? v : "";
+    }
+  }
+
   const res = await updateSellerProfileDraft(ctx, {
     bio: parsed.data.bio ?? null,
     returnPolicy: parsed.data.returnPolicy ?? null,
@@ -102,6 +114,7 @@ export async function saveSellerProfileAction(
     shipFromCity: parsed.data.shipFromCity ?? null,
     shipFromCountry: parsed.data.shipFromCountry ?? null,
     ...(returnAddressSubmitted ? { returnAddress } : {}),
+    ...(originAddressSubmitted ? { originAddress } : {}),
     socialLinks,
   });
   if (!res.ok) return fromRepoError(res);

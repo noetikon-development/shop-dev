@@ -8,6 +8,10 @@ import {
   parseSellerReturnAddress,
 } from "@/lib/marketplace/return-destination";
 import {
+  validateSellerOriginAddress,
+  parseSellerOriginAddress,
+} from "@/lib/marketplace/origin-address";
+import {
   SELLER_SOCIAL_KEYS,
   type SellerContext,
   type SellerContentStatus,
@@ -73,6 +77,7 @@ const PROFILE_SELECT = {
   shipFromCity: true,
   shipFromCountry: true,
   returnAddress: true,
+  originAddress: true,
   socialLinks: true,
   contentStatus: true,
   contentSubmittedAt: true,
@@ -122,6 +127,7 @@ export async function getSellerSettings(
       shipFromCity: row.shipFromCity,
       shipFromCountry: row.shipFromCountry,
       returnAddress: parseSellerReturnAddress(row.returnAddress),
+      originAddress: parseSellerOriginAddress(row.originAddress),
       socialLinks: parseSocial(row.socialLinks),
     },
     logoUrl: isImg(row.logoMedia),
@@ -157,6 +163,8 @@ export type SellerProfilePatch = Partial<{
   shipFromCountry: string | null;
   /** 9F-41B — raw `{ field: string }` map from the return-address form; validated here. */
   returnAddress: Record<string, unknown> | null;
+  /** raw `{ field: string }` map from the pickup/origin-address form; validated here. */
+  originAddress: Record<string, unknown> | null;
   socialLinks: SellerSocialLinks;
 }>;
 
@@ -203,6 +211,18 @@ function validateAndCleanPatch(
       const v = validateSellerReturnAddress(patch.returnAddress);
       if (!v.ok) return { ok: false, code: "VALIDATION", error: v.error };
       data.returnAddress = v.value == null ? Prisma.JsonNull : (v.value as unknown as Prisma.InputJsonValue);
+    }
+  }
+
+  // Forward-shipment pickup/origin address — same moderated bundle, same
+  // validation shape as returnAddress. DATA ONLY: nothing reads this column.
+  if ("originAddress" in patch) {
+    if (patch.originAddress == null) {
+      data.originAddress = Prisma.JsonNull;
+    } else {
+      const v = validateSellerOriginAddress(patch.originAddress);
+      if (!v.ok) return { ok: false, code: "VALIDATION", error: v.error };
+      data.originAddress = v.value == null ? Prisma.JsonNull : (v.value as unknown as Prisma.InputJsonValue);
     }
   }
 

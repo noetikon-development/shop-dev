@@ -8,6 +8,7 @@ import {
   type SellerContentStatus,
   type SellerSocialLinks,
   type SellerReturnAddress,
+  type SellerOriginAddress,
 } from "@/lib/marketplace/types";
 import {
   saveSellerProfileAction,
@@ -32,6 +33,7 @@ export function ProfileSettingsForm({
   shipFromCity,
   shipFromCountry,
   returnAddress,
+  originAddress,
   socialLinks,
   contentStatus,
 }: {
@@ -41,10 +43,12 @@ export function ProfileSettingsForm({
   shipFromCity: string | null;
   shipFromCountry: string | null;
   returnAddress: SellerReturnAddress | null;
+  originAddress: SellerOriginAddress | null;
   socialLinks: SellerSocialLinks;
   contentStatus: SellerContentStatus;
 }) {
   const ra = returnAddress;
+  const oa = originAddress;
   const save = usePersistentAction<SellerSettingsActionState>(saveSellerProfileAction, {});
   const submit = usePersistentAction<SellerSettingsActionState>(submitSellerProfileAction, {});
 
@@ -139,6 +143,50 @@ export function ProfileSettingsForm({
             </FormField>
             <FormField label="Country" htmlFor="returnAddress.country">
               <Select id="returnAddress.country" name="returnAddress.country" defaultValue={ra?.country ?? ""}>
+                <option value="">Not set</option>
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+          </div>
+        </fieldset>
+
+        <fieldset className="space-y-3">
+          <legend className="text-sm font-medium text-ink">Pickup / Origin Address</legend>
+          <p className="text-xs text-ink-faint">
+            Where a carrier would collect your outgoing orders from. Not used for anything yet —
+            it&rsquo;s saved for when Axiaro turns on carrier pickup for your store.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <FormField label="Recipient / business name" htmlFor="originAddress.recipient">
+              <input id="originAddress.recipient" name="originAddress.recipient" maxLength={120} defaultValue={oa?.recipient ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Phone" htmlFor="originAddress.phone">
+              <input id="originAddress.phone" name="originAddress.phone" maxLength={30} defaultValue={oa?.phone ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Street address" htmlFor="originAddress.line1">
+              <input id="originAddress.line1" name="originAddress.line1" maxLength={160} defaultValue={oa?.line1 ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Unit / floor / building (optional)" htmlFor="originAddress.line2">
+              <input id="originAddress.line2" name="originAddress.line2" maxLength={160} defaultValue={oa?.line2 ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Barangay (optional)" htmlFor="originAddress.barangay">
+              <input id="originAddress.barangay" name="originAddress.barangay" maxLength={80} defaultValue={oa?.barangay ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="City / municipality" htmlFor="originAddress.city">
+              <input id="originAddress.city" name="originAddress.city" maxLength={80} defaultValue={oa?.city ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Province / region" htmlFor="originAddress.province">
+              <input id="originAddress.province" name="originAddress.province" maxLength={80} defaultValue={oa?.province ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Postal code" htmlFor="originAddress.postalCode">
+              <input id="originAddress.postalCode" name="originAddress.postalCode" maxLength={12} defaultValue={oa?.postalCode ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Country" htmlFor="originAddress.country">
+              <Select id="originAddress.country" name="originAddress.country" defaultValue={oa?.country ?? ""}>
                 <option value="">Not set</option>
                 {COUNTRIES.map((c) => (
                   <option key={c.code} value={c.code}>

@@ -35,6 +35,24 @@ export type SellerReturnAddress = {
   phone: string;
 };
 
+/**
+ * Seller forward-shipment pickup / origin address — same shape as
+ * `SellerReturnAddress`, deliberately a distinct type: this is where a carrier
+ * would collect a forward shipment FROM, not where a customer sends a return
+ * TO. Part of the moderated profile bundle. DATA ONLY — nothing reads it yet.
+ */
+export type SellerOriginAddress = {
+  recipient: string;
+  line1: string;
+  line2: string | null;
+  barangay: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+};
+
 /** The seller-editable, MODERATED store-profile bundle. */
 export type SellerProfileDraft = {
   bio: string | null;
@@ -45,6 +63,7 @@ export type SellerProfileDraft = {
   shipFromCity: string | null;
   shipFromCountry: string | null;
   returnAddress: SellerReturnAddress | null;
+  originAddress: SellerOriginAddress | null;
   socialLinks: SellerSocialLinks;
 };
 
