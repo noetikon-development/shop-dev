@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Heart, Check, Truck, RotateCcw, ShoppingBag } from "lucide-react";
 import { toast } from "sonner";
@@ -143,6 +143,35 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   // change, but the gallery can otherwise be shorter than a stale index).
   const mainImage = galleryImages[activeImage] ?? galleryImages[0];
 
+  // Touch swipe on the main image (mobile/tablet). Only start/end coordinates
+  // are read — touchmove is never intercepted and nothing calls
+  // preventDefault, so native vertical scrolling and pinch-zoom are completely
+  // unaffected. A gesture only navigates when it's clearly horizontal and past
+  // SWIPE_THRESHOLD_PX, so an ordinary tap (on the image or the wishlist
+  // button layered over it) never gets misread as a swipe. Operates on
+  // whichever `galleryImages` group is currently resolved, so a swipe right
+  // after selecting a colour navigates within that colour's images only.
+  // Stops at the first/last image (no wrap) — dots/thumbnails have never had a
+  // next/prev concept to be consistent with, so this follows the more common,
+  // less disorienting convention for a short image set.
+  const SWIPE_THRESHOLD_PX = 40;
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  const handleTouchStart = (e: React.TouchEvent) => {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  };
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const start = touchStart.current;
+    touchStart.current = null;
+    if (!start || galleryImages.length < 2) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - start.x;
+    const dy = t.clientY - start.y;
+    if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
+    const direction = dx < 0 ? 1 : -1;
+    setActiveImage((i) => Math.max(0, Math.min(galleryImages.length - 1, i + direction)));
+  };
+
   async function addToBag() {
     if (missingSelection) {
       toast.error(`Please choose a ${missingOptionNames.join(" and ")}`);
@@ -203,7 +232,11 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             </div>
           )}
 
-          <div className="relative flex-1 overflow-hidden rounded-lg bg-surface-sunken">
+          <div
+            className="relative flex-1 overflow-hidden rounded-lg bg-surface-sunken"
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+          >
             <div
               className="aspect-square"
               role="img"
