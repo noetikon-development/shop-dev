@@ -57,6 +57,23 @@ export function detectKeyMode(rawKey: string | undefined): PaymentsMode | "unkno
   return "unknown";
 }
 
+/**
+ * Is this genuinely a Vercel Production runtime?
+ *
+ * `NODE_ENV` does NOT distinguish this — Vercel sets `NODE_ENV=production`
+ * for BOTH Preview and Production builds (only `next dev` locally sets
+ * `NODE_ENV=development`), so a check against `NODE_ENV` alone treats every
+ * Preview deployment as if it were Production. `VERCEL_ENV` is the actual
+ * per-deployment-target indicator Vercel provides ("production" | "preview"
+ * | "development"); it is unset entirely outside Vercel's own build/runtime
+ * (local `next dev`, or a local `next build && next start`), which is
+ * treated the same as Preview here — never as Production. See the
+ * PayMongo configuration-hygiene audit for the full trace.
+ */
+export function isVercelProductionEnvironment(): boolean {
+  return process.env.VERCEL_ENV === "production";
+}
+
 export type PaymentsConfig = {
   /** Phase 6B gate — enough to CREATE a Checkout Session and redirect the
    *  customer: the `payments.onlinePaymentEnabled` setting is on AND
@@ -178,25 +195,76 @@ export function applyPaymentSettingRows(rows: PaymentSettingRow[] | null): {
   return { onlineSetting, holdForReview, mode, enabledMethods, settingsReadFailed: rows === null };
 }
 
+export type PaymentActivationGates = {
+  sessionsEnabled: boolean;
+  onlinePaymentEnabled: boolean;
+  modeMismatch: boolean;
+};
+
+/**
+ * Pure activation-gate computation — extracted out of `getPaymentsConfig()`
+ * so the exact cross-environment safety logic can be unit-tested directly,
+ * for every credential/mode/environment combination, without touching the
+ * database or environment variables. `getPaymentsConfig()` below is the only
+ * caller; nothing about the formula changed by extracting it.
+ *
+ * Cross-environment safety: a mode mismatch, a live key outside genuine
+ * Vercel Production, or a TEST key inside genuine Vercel Production, all
+ * hard-disable online payments (belt and braces alongside the master
+ * switch). `isProdEnv` must come from `isVercelProductionEnvironment()` —
+ * never `NODE_ENV` — which is what actually distinguishes Production from
+ * Preview; see that function's own doc comment.
+ *
+ * Production activation must be a deliberate LIVE-key choice — a TEST key
+ * must never activate online payment in genuine Production, regardless of
+ * what payments.mode says (a shared StoreSetting that alone cannot express
+ * "on for Preview, off for Production" — see the configuration-hygiene
+ * audit). This is the fix for the confirmed risk: adding a Production
+ * PAYMONGO_SECRET_KEY (even a TEST one) must never silently go live.
+ */
+export function computePaymentActivationGates(input: {
+  onlineSetting: boolean;
+  hasSecretKey: boolean;
+  hasWebhookSecret: boolean;
+  detectedMode: PaymentsMode | "unknown";
+  mode: PaymentsMode;
+  isProdEnv: boolean;
+}): PaymentActivationGates {
+  const keyDisagrees = input.detectedMode !== "unknown" && input.detectedMode !== input.mode;
+  const liveKeyOutsideProd = input.detectedMode === "live" && !input.isProdEnv;
+  const testKeyInProd = input.isProdEnv && input.detectedMode === "test";
+  const modeMismatch = keyDisagrees || liveKeyOutsideProd || testKeyInProd;
+
+  const sessionsEnabled = input.onlineSetting && input.hasSecretKey && !modeMismatch;
+
+  return {
+    sessionsEnabled,
+    onlinePaymentEnabled: sessionsEnabled && input.hasWebhookSecret,
+    modeMismatch,
+  };
+}
+
 export async function getPaymentsConfig(): Promise<PaymentsConfig> {
   const hasSecretKey = envPresent("PAYMONGO_SECRET_KEY");
   const hasWebhookSecret = envPresent("PAYMONGO_WEBHOOK_SECRET");
   const detectedMode = detectKeyMode(process.env.PAYMONGO_SECRET_KEY);
+  const isProdEnv = isVercelProductionEnvironment();
 
   const { onlineSetting, holdForReview, mode, enabledMethods, settingsReadFailed } =
     applyPaymentSettingRows(await readPaymentSettings());
 
-  // Cross-environment safety: a mode mismatch, or a live key outside production,
-  // hard-disables online payments (belt and braces alongside the master switch).
-  const keyDisagrees = detectedMode !== "unknown" && detectedMode !== mode;
-  const liveKeyOutsideProd = detectedMode === "live" && process.env.NODE_ENV !== "production";
-  const modeMismatch = keyDisagrees || liveKeyOutsideProd;
-
-  const sessionsEnabled = onlineSetting && hasSecretKey && !modeMismatch;
+  const { sessionsEnabled, onlinePaymentEnabled, modeMismatch } = computePaymentActivationGates({
+    onlineSetting,
+    hasSecretKey,
+    hasWebhookSecret,
+    detectedMode,
+    mode,
+    isProdEnv,
+  });
 
   return {
     sessionsEnabled,
-    onlinePaymentEnabled: sessionsEnabled && hasWebhookSecret,
+    onlinePaymentEnabled,
     holdForReview,
     mode,
     detectedMode,

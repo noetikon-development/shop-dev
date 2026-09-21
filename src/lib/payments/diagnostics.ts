@@ -1,5 +1,5 @@
 import "server-only";
-import { getPaymentsConfig } from "@/lib/payments/config";
+import { getPaymentsConfig, isVercelProductionEnvironment } from "@/lib/payments/config";
 
 /**
  * PayMongo configuration diagnostics (Phase 6A).
@@ -54,10 +54,13 @@ export async function getPaymongoDiagnostics(): Promise<PaymongoDiagnostics> {
     if (!c.hasSecretKey) missing.push("PAYMONGO_SECRET_KEY");
     if (!c.hasWebhookSecret) missing.push("PAYMONGO_WEBHOOK_SECRET");
     if (c.modeMismatch) {
+      const isProdEnv = isVercelProductionEnvironment();
       summary =
-        c.detectedMode === "live" && process.env.NODE_ENV !== "production"
-          ? "Disabled — a live key is configured outside production."
-          : `Disabled — key mode (${c.detectedMode}) does not match the payments.mode setting (${c.mode}).`;
+        isProdEnv && c.detectedMode === "test"
+          ? "Disabled — a TEST key is configured in Production. Production activation requires a LIVE key and payments.mode=live."
+          : c.detectedMode === "live" && !isProdEnv
+            ? "Disabled — a live key is configured outside Production."
+            : `Disabled — key mode (${c.detectedMode}) does not match the payments.mode setting (${c.mode}).`;
     } else if (missing.length) {
       summary = `Disabled — awaiting ${missing.join(" + ")}.`;
     } else {
