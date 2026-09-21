@@ -145,15 +145,17 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
 
   // Touch swipe on the main image (mobile/tablet). Only start/end coordinates
   // are read — touchmove is never intercepted and nothing calls
-  // preventDefault, so native vertical scrolling and pinch-zoom are completely
-  // unaffected. A gesture only navigates when it's clearly horizontal and past
-  // SWIPE_THRESHOLD_PX, so an ordinary tap (on the image or the wishlist
-  // button layered over it) never gets misread as a swipe. Operates on
-  // whichever `galleryImages` group is currently resolved, so a swipe right
-  // after selecting a colour navigates within that colour's images only.
-  // Stops at the first/last image (no wrap) — dots/thumbnails have never had a
-  // next/prev concept to be consistent with, so this follows the more common,
-  // less disorienting convention for a short image set.
+  // preventDefault. `touch-pan-y` on the container (below) tells the browser
+  // the vertical axis is still its own to scroll natively, so the horizontal
+  // gesture can be claimed without fighting page scroll. A gesture only
+  // navigates when it's clearly horizontal and past SWIPE_THRESHOLD_PX, so an
+  // ordinary tap (on the image or the wishlist button layered over it) never
+  // gets misread as a swipe. Operates on whichever `galleryImages` group is
+  // currently resolved, so a swipe right after selecting a colour navigates
+  // within that colour's images only. Stops at the first/last image (no wrap)
+  // — dots/thumbnails have never had a next/prev concept to be consistent
+  // with, so this follows the more common, less disorienting convention for a
+  // short image set.
   const SWIPE_THRESHOLD_PX = 40;
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -170,6 +172,13 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
     if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
     const direction = dx < 0 ? 1 : -1;
     setActiveImage((i) => Math.max(0, Math.min(galleryImages.length - 1, i + direction)));
+  };
+  // The browser can cancel an in-progress touch (e.g. it decides the gesture
+  // is a scroll, or an interruption like a system alert) — clear the same
+  // state handleTouchEnd would have, so a stale start point never leaks into
+  // the next gesture.
+  const handleTouchCancel = () => {
+    touchStart.current = null;
   };
 
   async function addToBag() {
@@ -233,9 +242,10 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
           )}
 
           <div
-            className="relative flex-1 overflow-hidden rounded-lg bg-surface-sunken"
+            className="relative flex-1 touch-pan-y overflow-hidden rounded-lg bg-surface-sunken"
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchCancel}
           >
             <div
               className="aspect-square"
