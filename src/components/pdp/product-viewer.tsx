@@ -109,6 +109,14 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const colourValueId = colourOption ? selected[colourOption.id] : undefined;
   const colourName = colourOption?.values.find((v) => v.id === colourValueId)?.value;
 
+  // Shared by the swatch buttons and the swipe-to-colour gesture below, so
+  // there is exactly one place that changes the selected colour.
+  const selectColour = (valueId: string) => {
+    if (!colourOption) return;
+    setSelected((s) => ({ ...s, [colourOption.id]: valueId }));
+    setActiveImage(0);
+  };
+
   // Gallery = the images EXPLICITLY assigned to the selected colour
   // (ProductImage.optionValueId — the source of truth). If that colour has no
   // images, fall back to the product-level images (optionValueId === null); if
@@ -150,12 +158,23 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   // gesture can be claimed without fighting page scroll. A gesture only
   // navigates when it's clearly horizontal and past SWIPE_THRESHOLD_PX, so an
   // ordinary tap (on the image or the wishlist button layered over it) never
-  // gets misread as a swipe. Operates on whichever `galleryImages` group is
-  // currently resolved, so a swipe right after selecting a colour navigates
-  // within that colour's images only. Stops at the first/last image (no wrap)
-  // — dots/thumbnails have never had a next/prev concept to be consistent
+  // gets misread as a swipe. Stops at the first/last item (no wrap) — neither
+  // images nor colours have ever had a next/prev concept to be consistent
   // with, so this follows the more common, less disorienting convention for a
-  // short image set.
+  // short set.
+  //
+  // Two things can advance on a swipe, decided fresh each gesture from the
+  // CURRENT `galleryImages` (never the raw ProductImage count):
+  //   - 2+ images in the selected colour's resolved gallery → step the image,
+  //     exactly as before. A colour with its own multi-image gallery is never
+  //     reachable by swipe-to-colour, by construction of this branch.
+  //   - otherwise, with a colour option that has 2+ values → step to the
+  //     next/previous colour in `colourOption.values` (its existing
+  //     sortOrder — never re-sorted, never filtered by availability, so
+  //     swipe reaches exactly the same colours the swatches do) via the same
+  //     `selectColour` the swatch buttons call — one place changes colour.
+  //   - otherwise (no colour option, or only one colour, or already the only
+  //     image) — the gesture does nothing.
   const SWIPE_THRESHOLD_PX = 40;
   const touchStart = useRef<{ x: number; y: number } | null>(null);
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -165,13 +184,19 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
   const handleTouchEnd = (e: React.TouchEvent) => {
     const start = touchStart.current;
     touchStart.current = null;
-    if (!start || galleryImages.length < 2) return;
+    if (!start) return;
     const t = e.changedTouches[0];
     const dx = t.clientX - start.x;
     const dy = t.clientY - start.y;
     if (Math.abs(dx) < SWIPE_THRESHOLD_PX || Math.abs(dx) < Math.abs(dy)) return;
     const direction = dx < 0 ? 1 : -1;
-    setActiveImage((i) => Math.max(0, Math.min(galleryImages.length - 1, i + direction)));
+    if (galleryImages.length >= 2) {
+      setActiveImage((i) => Math.max(0, Math.min(galleryImages.length - 1, i + direction)));
+    } else if (colourOption && colourOption.values.length >= 2) {
+      const currentIndex = colourOption.values.findIndex((v) => v.id === colourValueId);
+      const nextIndex = Math.max(0, Math.min(colourOption.values.length - 1, currentIndex + direction));
+      if (nextIndex !== currentIndex) selectColour(colourOption.values[nextIndex].id);
+    }
   };
   // The browser can cancel an in-progress touch (e.g. it decides the gesture
   // is a scroll, or an interruption like a system alert) — clear the same
@@ -357,10 +382,7 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
                 return (
                   <button
                     key={v.id}
-                    onClick={() => {
-                      setSelected((s) => ({ ...s, [colourOption.id]: v.id }));
-                      setActiveImage(0);
-                    }}
+                    onClick={() => selectColour(v.id)}
                     aria-label={available ? v.value : `${v.value} — out of stock`}
                     aria-pressed={active}
                     title={available ? v.value : `${v.value} — out of stock`}
