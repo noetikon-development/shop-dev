@@ -113,12 +113,15 @@ export function ProductBadges({
           <span
             key={b}
             className={cn(
-              // Font size as an arbitrary length (≈ --text-meta, 13px), not a
-              // `text-*` scale token: `meta.className` carries a `text-<colour>`
-              // class and tailwind-merge would otherwise drop a same-prefix
-              // `text-micro`/`text-meta` as a conflict. Keeps the merch badge
-              // refined and secondary to the image / name / price.
-              "rounded-sm px-2 py-0.5 text-[0.8125rem] font-semibold uppercase tracking-wider",
+              // Font size as an arbitrary length (≈ --text-micro, 11px — the
+              // scale `globals.css` documents for merch badges), not a `text-*`
+              // scale token: `meta.className` carries a `text-<colour>` class
+              // and tailwind-merge would otherwise drop a same-prefix
+              // `text-micro`/`text-meta` as a conflict. Compact on purpose so
+              // BESTSELLER (the longest label) doesn't dominate the card image
+              // — `rounded-sm` (not bare `rounded`) per the storefront radius
+              // rule below.
+              "rounded-sm px-1.5 py-[1px] text-[0.6875rem] font-semibold uppercase tracking-wider leading-4",
               meta.className,
             )}
           >
