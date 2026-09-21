@@ -280,6 +280,16 @@ model Product {
   freeShipping Boolean @default(false)
   featured     Boolean @default(false) // admin-controlled; drives future "featured products" merchandising
   weightGrams  Int     @default(500)
+  // Carrier-integration prerequisite (Phase 9F-47 foundation) — PACKED
+  // SHIPPING dimensions (the box a carrier would pick up), NOT the bare
+  // product's own physical dimensions. Centimeters, matching PH carrier
+  // convention. Deliberately NULL with no placeholder default (unlike
+  // `weightGrams`) until a real packed measurement is supplied — nothing
+  // reads these yet. Product-level (not Variant-level), mirroring
+  // `weightGrams`'s existing placement: box size does not vary by colour.
+  lengthCm     Int?
+  widthCm      Int?
+  heightCm     Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -892,6 +902,10 @@ model ReturnRequest {
   user          User?          @relation(fields: [userId], references: [id], onDelete: SetNull)
   items         ReturnItem[]
   paymentRefund PaymentRefund?
+  // Carrier-integration prerequisite (Phase 9F-47 foundation) — back-relation
+  // only, for a future RETURN-direction Shipment. Empty for every row today;
+  // no return-shipment workflow exists yet.
+  shipments     Shipment[]
   // At most one non-terminal return per order is enforced by a partial unique
   // index added in supabase/migrations/20260829140100_rls_and_grants.sql:
   //   CREATE UNIQUE INDEX "return_one_open_per_order" ON "ReturnRequest"("orderId")
@@ -1295,6 +1309,15 @@ model Seller {
   // by the return-routing snapshot in `approveReturnAction`. Never rendered on
   // the public storefront.
   returnAddress      Json?
+  // Carrier-integration prerequisite (Phase 9F-47 foundation) — structured
+  // FORWARD-shipment pickup/origin address, same shape as `returnAddress`:
+  // { recipient, phone, line1, line2?, barangay?, city, province, postalCode,
+  // country }. Nullable — no seller has one yet, and nothing reads or writes
+  // this column until the carrier-provider phase ships. One default origin
+  // only; a multi-warehouse model is a later, separate addition if ever
+  // needed. Intended to join the same MODERATED profile bundle as
+  // `returnAddress` once a UI exists for it (not built in this phase).
+  originAddress      Json?
   socialLinks        Json?
   notifyEmail        String?
   contentStatus      String    @default("DRAFT") // DRAFT | PENDING | APPROVED
@@ -1648,11 +1671,11 @@ model SellerOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  order      Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  seller     Seller            @relation(fields: [sellerId], references: [id])
-  items      OrderItem[]
-  shipments  Shipment[]
-  settlement SellerSettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  order          Order             @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  seller         Seller            @relation(fields: [sellerId], references: [id])
+  items          OrderItem[]
+  shipments      Shipment[]
+  settlement     SellerSettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
   // Required opposite side of PaymentRefund.sellerOrder (Prisma relations are
   // declared on both models). Virtual — Prisma computes this from
   // PaymentRefund.sellerOrderId; it adds NO column/table to SellerOrder at the
@@ -1753,12 +1776,28 @@ model Shipment {
   lastCarrierStatusAt  DateTime? // when the carrier reported it
   metadata             Json? // provider-specific extras; NEVER business-critical
 
+  // Carrier-integration prerequisite (Phase 9F-47 foundation) — distinguishes
+  // an outbound shipment from a customer return leg. Defaulted to "FORWARD"
+  // so every existing row (and every row created by today's unchanged
+  // `saveSellerShipment` flow) behaves EXACTLY as before this column existed.
+  // `returnRequestId` is NULL for every FORWARD shipment; a future RETURN
+  // shipment would set it to the ReturnRequest it fulfils. Nothing reads or
+  // writes either column yet — no return-shipment workflow ships in this
+  // phase, and `sellerOrderId` above stays required even for a future RETURN
+  // row (the return leg still belongs to the SellerOrder whose goods are
+  // coming back).
+  direction       String  @default("FORWARD") // FORWARD | RETURN
+  returnRequestId String?
+
   sellerOrder    SellerOrder     @relation(fields: [sellerOrderId], references: [id], onDelete: Cascade)
+  returnRequest  ReturnRequest?  @relation(fields: [returnRequestId], references: [id], onDelete: SetNull)
   shipmentEvents ShipmentEvent[]
 
   @@index([sellerOrderId])
   @@index([status])
   @@index([carrier])
+  @@index([direction])
+  @@index([returnRequestId])
 }
 
 // 9F-47B — carrier / aggregator status callbacks. Mirrors `WebhookEvent` (the
