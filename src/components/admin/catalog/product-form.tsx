@@ -27,6 +27,10 @@ type Existing = {
   price: number;
   compareAtPrice: number | null;
   weightGrams: number;
+  /** Packed shipping dimensions (the box/mailer as it ships), NOT the product's own size. Data only. */
+  lengthCm: number | null;
+  widthCm: number | null;
+  heightCm: number | null;
   defaultSku?: string | null;
   variantCount: number;
   /** Informational content shown on the storefront. JSON strings; not editable here. */
@@ -245,6 +249,50 @@ export function ProductForm({
           </label>
         </div>
         <input type="hidden" name="weightGrams" value={product?.weightGrams ?? 500} />
+      </section>
+
+      <section className="space-y-4">
+        <h2 className="text-sm font-semibold text-ink">Package dimensions</h2>
+        <p className="text-xs text-ink-faint">
+          The dimensions of the packed shipment — the box or mailer as it ships, not the bare
+          product. Optional; preparation data for future carrier rate and label support only, not
+          used anywhere yet.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-3">
+          <FormField label="Package Length (cm)" htmlFor="p-length" error={fe.lengthCm}>
+            <input
+              id="p-length"
+              name="lengthCm"
+              inputMode="numeric"
+              defaultValue={product?.lengthCm ?? ""}
+              disabled={disabled}
+              className="field text-sm"
+              placeholder="—"
+            />
+          </FormField>
+          <FormField label="Package Width (cm)" htmlFor="p-width" error={fe.widthCm}>
+            <input
+              id="p-width"
+              name="widthCm"
+              inputMode="numeric"
+              defaultValue={product?.widthCm ?? ""}
+              disabled={disabled}
+              className="field text-sm"
+              placeholder="—"
+            />
+          </FormField>
+          <FormField label="Package Height (cm)" htmlFor="p-height" error={fe.heightCm}>
+            <input
+              id="p-height"
+              name="heightCm"
+              inputMode="numeric"
+              defaultValue={product?.heightCm ?? ""}
+              disabled={disabled}
+              className="field text-sm"
+              placeholder="—"
+            />
+          </FormField>
+        </div>
       </section>
 
       {isEdit && (() => {

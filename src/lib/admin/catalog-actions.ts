@@ -15,6 +15,7 @@ import {
   productOptionsSchema,
   pesosToCentavos,
   formBool,
+  parseOptionalDimension,
   PRODUCT_STATUSES,
   OFFER_CONDITIONS,
   parseSpecsText,
@@ -77,6 +78,10 @@ function readProductForm(formData: FormData) {
     price: pesosToCentavos(formData.get("price")) ?? NaN,
     compareAtPrice: rawCompare === null || Number.isNaN(rawCompare) ? null : rawCompare,
     weightGrams: Number(formData.get("weightGrams") ?? 500) || 500,
+    // Packed shipping dimensions — data only, never defaulted (null = not supplied).
+    lengthCm: parseOptionalDimension(formData.get("lengthCm")),
+    widthCm: parseOptionalDimension(formData.get("widthCm")),
+    heightCm: parseOptionalDimension(formData.get("heightCm")),
   };
 }
 
@@ -143,6 +148,9 @@ export async function createProduct(
         price: data.price,
         compareAtPrice: data.compareAtPrice ?? null,
         weightGrams: data.weightGrams ?? 500,
+        lengthCm: data.lengthCm ?? null,
+        widthCm: data.widthCm ?? null,
+        heightCm: data.heightCm ?? null,
       },
     });
     productId = product.id;
@@ -231,6 +239,9 @@ export async function updateProduct(
           price: data.price,
           compareAtPrice: data.compareAtPrice ?? null,
           weightGrams: data.weightGrams ?? 500,
+          lengthCm: data.lengthCm ?? null,
+          widthCm: data.widthCm ?? null,
+          heightCm: data.heightCm ?? null,
           // Informational marketing content — never affects price/SKU/stock/variants.
           ...(content ? { specs: content.specs, highlights: content.highlights, care: content.care } : {}),
         },

@@ -39,6 +39,18 @@ export const priceSchema = z
   .min(0, "Amount can’t be negative")
   .max(10_000_000_00, "Amount is too large");
 
+/**
+ * A packed shipping dimension (length/width/height, cm): optional, whole
+ * numbers only, must be greater than 0 when supplied. No arbitrary maximum —
+ * no existing Axiaro convention establishes one for physical dimensions.
+ */
+export const dimensionCmSchema = z
+  .number("Enter a whole number of centimetres")
+  .int("Must be a whole number")
+  .positive("Must be greater than 0")
+  .nullable()
+  .optional();
+
 export const skuSchema = z
   .string()
   .trim()
@@ -64,6 +76,14 @@ const productBase = z.object({
   price: priceSchema,
   compareAtPrice: priceSchema.nullable().optional(),
   weightGrams: z.number().int().min(0).max(1_000_000).optional(),
+  /**
+   * Packed shipping dimensions (the box/mailer as it ships), NOT the bare
+   * product's own size. Data only — no carrier, rate, or label logic reads
+   * these yet. `null` = not supplied; never defaulted, unlike weightGrams.
+   */
+  lengthCm: dimensionCmSchema,
+  widthCm: dimensionCmSchema,
+  heightCm: dimensionCmSchema,
 });
 
 const compareAtRule = {
@@ -149,6 +169,17 @@ export function pesosToCentavos(raw: FormDataEntryValue | null): number | null {
 
 export function formBool(raw: FormDataEntryValue | null): boolean {
   return raw === "on" || raw === "true" || raw === "1";
+}
+
+/**
+ * Blank/missing → `null` (field left empty, no dimension supplied — never
+ * defaulted). Anything else is passed through as a `Number(...)` for
+ * `dimensionCmSchema` to validate (so non-numeric text becomes `NaN` and is
+ * rejected by `.int()`, not silently coerced).
+ */
+export function parseOptionalDimension(raw: FormDataEntryValue | null): number | null {
+  if (raw == null || String(raw).trim() === "") return null;
+  return Number(raw);
 }
 
 // ---------------------------------------------------------------------------
