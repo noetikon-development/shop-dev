@@ -35,12 +35,17 @@ export const NAV_SPECIAL_SLUGS = ["new", "sale", "all"] as const;
  *
  * Used as the storefront fallback when the `nav.primary` ContentBlock is
  * absent / unpublished / unreadable / empty, and offered in the admin editor
- * as the "reset to defaults" starting point. It mirrors the pre-5C hardcoded
- * header exactly:
+ * as the "reset to defaults" starting point. It mirrors the current live
+ * header:
  *   New In · Living · Bedroom · Kitchen & Dining · Textiles · Lighting ·
- *   Decor · Wardrobe · Bags & Accessories · Sale
+ *   Decor · Wardrobe · Bags & Accessories · Footwear · Sale
  * Category items carry a blank label so they follow `Category.name`; their
  * dropdowns are derived from the category's sub-categories.
+ *
+ * "Footwear" is a real, populated top-level `Category` (Sneakers, Loafers &
+ * Flats, Boots, Sandals) that predates this list but was never added to it —
+ * confirmed via the marketplace-navigation audit. Its inclusion here is a
+ * catalog-accuracy fix, not a new/invented category.
  */
 export const NAV_DEFAULTS: NavData = {
   items: [
@@ -53,6 +58,7 @@ export const NAV_DEFAULTS: NavData = {
     { label: "", categorySlug: "decor", href: "", enabled: true, children: [] },
     { label: "", categorySlug: "wardrobe", href: "", enabled: true, children: [] },
     { label: "", categorySlug: "bags-accessories", href: "", enabled: true, children: [] },
+    { label: "", categorySlug: "footwear", href: "", enabled: true, children: [] },
     { label: "Sale", categorySlug: "sale", href: "", enabled: true, children: [] },
   ],
   utility: [
