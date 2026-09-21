@@ -64,6 +64,7 @@
     "test:9f54-paymongo": "node --env-file=.env --conditions=react-server --import tsx scripts/test-9f54-paymongo.ts",
     "test:thumb-opt": "node --conditions=react-server --import tsx scripts/test-thumb-opt.ts",
     "reconcile:payments": "node --env-file=.env --import tsx scripts/reconcile-payments.ts",
+    "test:reconciliation-job": "node --env-file=.env --conditions=react-server --import tsx scripts/test-reconciliation-job.ts",
     "db:migrate:9f54": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260910180000_webhookevent_payload.sql",
     "db:migrate:seller-onboarding-p1": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260914200000_seller_onboarding_foundation.sql",
     "db:migrate:seller-verification-p1": "node --env-file=.env scripts/apply-sql.mjs supabase/migrations/20260915100000_seller_verification_foundation.sql",

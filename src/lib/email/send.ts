@@ -124,7 +124,10 @@ export type EmailType =
   // 9F-60 — customer notification for a multi-seller PARTIAL cancellation (one
   // seller's items cancelled, the rest of the order unaffected). Distinct from
   // order_cancelled, which claims the WHOLE order was cancelled.
-  | "order_partially_cancelled";
+  | "order_partially_cancelled"
+  // Automated reconciliation scheduling/alerting — Ops alert for a WARN/FAIL
+  // scheduled reconciliation run. Never sent for a clean PASS.
+  | "reconciliation_alert_ops";
 
 export type DispatchInput = {
   type: EmailType;

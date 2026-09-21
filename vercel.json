@@ -5,6 +5,10 @@
     {
       "path": "/api/cron/seller-order-sla",
       "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/reconciliation",
+      "schedule": "30 9 * * *"
     }
   ]
 }

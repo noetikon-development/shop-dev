@@ -55,7 +55,7 @@ import {
   renderSellerVerificationApproved,
   renderSellerVerificationRejected,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
@@ -4696,4 +4696,53 @@ export async function sendPasswordReset(params: {
         firstName: params.firstName ?? null,
       }),
   );
+}
+
+/**
+ * Automated reconciliation scheduling/alerting — Ops alert for a WARN/FAIL
+ * scheduled reconciliation run. Deduplicated per calendar day: the caller
+ * supplies `dateKey` (YYYY-MM-DD, UTC) and it becomes the idempotency key
+ * `RECONCILE_ALERT:<dateKey>`, so the same day's condition raises at most one
+ * alert regardless of how many times the cron route is invoked or retried —
+ * `dispatchEmail`'s own UNIQUE-constraint-backed dedup (see `renderAndDispatch`
+ * above) handles this without any extra bookkeeping here. Never sent for a
+ * clean PASS — the caller only invokes this for WARN/FAIL.
+ */
+export async function sendReconciliationAlertOps(params: {
+  status: "WARN" | "FAIL";
+  runAt: Date;
+  dateKey: string;
+  payments: { pass: number; warn: number; fail: number };
+  marketplace: { pass: number; warn: number; fail: number };
+  details: string[];
+  truncatedCount: number;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    return renderAndDispatch(
+      {
+        type: "reconciliation_alert_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `RECONCILE_ALERT:${params.dateKey}`,
+        client: params.client,
+      },
+      () =>
+        renderReconciliationAlertOps({
+          brand,
+          siteUrl,
+          status: params.status,
+          runAt: params.runAt,
+          payments: params.payments,
+          marketplace: params.marketplace,
+          details: params.details,
+          truncatedCount: params.truncatedCount,
+          auditUrl: `${siteUrl}/admin/audit`,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendReconciliationAlertOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
 }

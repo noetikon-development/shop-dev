@@ -468,3 +468,62 @@ export function renderSellerProductRequestResubmittedOps(d: {
     ]),
   };
 }
+
+/**
+ * Ops alert — the scheduled reconciliation job (`reconciliation-job.ts`)
+ * reported WARN or FAIL for its daily run. Never sent for a clean PASS.
+ * `details` are the check modules' own non-PASS lines (already prefixed with
+ * which check they came from), capped by the caller before this is called.
+ */
+export function renderReconciliationAlertOps(d: {
+  brand: string;
+  siteUrl: string;
+  status: "WARN" | "FAIL";
+  runAt: Date;
+  payments: { pass: number; warn: number; fail: number };
+  marketplace: { pass: number; warn: number; fail: number };
+  details: string[];
+  truncatedCount: number;
+  auditUrl: string;
+}) {
+  const when = `${d.runAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Reconciliation ${d.status} — ${when}`;
+  const rows =
+    kvRow("Status", d.status) +
+    kvRow("Run at", when) +
+    kvRow("Payments", `${d.payments.pass} pass · ${d.payments.warn} warn · ${d.payments.fail} fail`) +
+    kvRow("Marketplace", `${d.marketplace.pass} pass · ${d.marketplace.warn} warn · ${d.marketplace.fail} fail`, { last: true });
+  const detailParagraphs = d.details.map((line) => paragraph(line)).join("");
+  const truncatedNote =
+    d.truncatedCount > 0
+      ? paragraph(`…and ${d.truncatedCount} more line(s) — see the full run record in the admin audit log.`)
+      : "";
+  const body = `
+    ${heading("Reconciliation requires review")}
+    ${paragraph(`Axiaro's scheduled reconciliation reported ${d.status} for its ${when} run.`)}
+    ${infoBox(rows)}
+    ${detailParagraphs}
+    ${truncatedNote}
+    ${button("Open the audit log", d.auditUrl)}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "Reconciliation requires review",
+      ``,
+      `Axiaro's scheduled reconciliation reported ${d.status} for its ${when} run.`,
+      ``,
+      `Status: ${d.status}`,
+      `Run at: ${when}`,
+      `Payments: ${d.payments.pass} pass · ${d.payments.warn} warn · ${d.payments.fail} fail`,
+      `Marketplace: ${d.marketplace.pass} pass · ${d.marketplace.warn} warn · ${d.marketplace.fail} fail`,
+      ``,
+      ...d.details,
+      ...(d.truncatedCount > 0 ? [`…and ${d.truncatedCount} more line(s) — see the full run record in the admin audit log.`] : []),
+      ``,
+      `Open the audit log: ${d.auditUrl}`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}
