@@ -83,3 +83,13 @@ writing to this file.
   precursor work on this same branch (About page / marketplace positioning
   copy) was promoted at commit `be7545d`, `dpl_HVv4SPq2yTBCpazTLdQ7uUz17f42`,
   immediately prior to this entry.
+
+### 2026-09-21 — automated deployment via deploy-production.mjs
+
+- Environment: Production
+- Domain: axiaro.shop
+- Commit: `d9e7d7cab91d9032954d3c991c0741ca86ca78c6`
+- Deployment ID: `dpl_DqLE7GCG2UiArcLo7nVZamVp3suQ`
+- Status: READY
+- Deployment URL: https://shop-n9tkzzvbe-noetikon-technologies.vercel.app
+- Notes: Deployed via scripts/deploy-production.mjs.
