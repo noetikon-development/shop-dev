@@ -93,3 +93,13 @@ writing to this file.
 - Status: READY
 - Deployment URL: https://shop-n9tkzzvbe-noetikon-technologies.vercel.app
 - Notes: Deployed via scripts/deploy-production.mjs.
+
+### 2026-09-21 — automated deployment via deploy-production.mjs
+
+- Environment: Production
+- Domain: axiaro.shop
+- Commit: `1359f7e239f804d1bb694dcaa97646f6ccda68c5`
+- Deployment ID: `dpl_GdhAJXUz1wDp5HrrJeEDfcSVxEkB`
+- Status: READY
+- Deployment URL: https://shop-96w2odzw3-noetikon-technologies.vercel.app
+- Notes: Deployed via scripts/deploy-production.mjs.
