@@ -275,31 +275,6 @@ export function ProductViewer({ product }: { product: ProductDetailView }) {
             </button>
           </div>
         </div>
-
-        {galleryImages.length > 1 && (
-          <div
-            className="mt-3 flex justify-center gap-1 sm:hidden"
-            role="group"
-            aria-label={`${product.name} — image navigation`}
-          >
-            {galleryImages.map((img, i) => (
-              <button
-                key={img.url + i}
-                onClick={() => setActiveImage(i)}
-                className="tap flex items-center justify-center"
-                aria-label={`Show ${product.name} image ${i + 1} of ${galleryImages.length}`}
-                aria-pressed={activeImage === i}
-              >
-                <span
-                  className={cn(
-                    "block h-1.5 rounded-full transition-all",
-                    activeImage === i ? "w-5 bg-ink" : "w-1.5 bg-line-strong",
-                  )}
-                />
-              </button>
-            ))}
-          </div>
-        )}
       </div>
 
       {/* Purchase panel */}
