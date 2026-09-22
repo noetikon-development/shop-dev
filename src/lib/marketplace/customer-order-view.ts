@@ -18,6 +18,11 @@ export type CustomerOrderSellerOrder = {
   sellerName: string;
   sellerType: string;
   status: string;
+  // Store Pickup order-confirmation display (9F-49 confirmation-page step).
+  // The historical, frozen-at-order-time pickup location for THIS SellerOrder
+  // — never the live PickupLocation row. NULL for non-PICKUP orders.
+  pickupLocationId?: string | null;
+  pickupLocationSnapshot?: unknown;
   shipments: {
     carrier: string | null;
     carrierName: string | null;

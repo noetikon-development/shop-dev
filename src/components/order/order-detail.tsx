@@ -10,11 +10,51 @@ import { orderStatusTone } from "@/lib/orders/status";
 import { courierLabel, isSafeTrackingUrl, isStorePickupCode } from "@/lib/orders/couriers";
 import { conditionLabel, isNoteworthyCondition } from "@/lib/seller/format";
 import { formatPrice, formatDate, discountPercent } from "@/lib/utils";
+import { countryName } from "@/lib/countries";
 import { groupOrderItemsBySeller, type CustomerOrderSellerOrder } from "@/lib/marketplace/customer-order-view";
 import { sellerOrderStatusLabel, sellerOrderStatusTone } from "@/lib/marketplace/seller-order-status";
 import type { OrderView } from "@/lib/data";
 
 type OrderItemRow = NonNullable<OrderView>["items"][number];
+
+// Store Pickup order-confirmation display (9F-49 confirmation-page step).
+// Shape mirrors exactly what checkout.ts's createOrderFromCart freezes onto
+// SellerOrder.pickupLocationSnapshot at order time — server-written, not
+// customer input, so a light presence check (not full re-validation) is
+// enough here. `recipient` exists in the stored snapshot but is deliberately
+// NOT surfaced on this card — it's the store's own internal contact, not
+// customer-relevant to "where do I go".
+type PickupLocationSnapshot = {
+  name: string;
+  line1: string;
+  line2: string | null;
+  barangay: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  phone: string;
+  instructions: string | null;
+};
+
+function asPickupLocationSnapshot(v: unknown): PickupLocationSnapshot | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.name !== "string" || typeof o.line1 !== "string") return null;
+  const str = (k: string) => (typeof o[k] === "string" ? (o[k] as string) : null);
+  return {
+    name: o.name,
+    line1: o.line1,
+    line2: str("line2"),
+    barangay: str("barangay"),
+    city: str("city") ?? "",
+    province: str("province") ?? "",
+    postalCode: str("postalCode") ?? "",
+    country: str("country") ?? "",
+    phone: str("phone") ?? "",
+    instructions: str("instructions"),
+  };
+}
 
 export function OrderDetail({
   order,
@@ -44,8 +84,20 @@ export function OrderDetail({
         : order.paymentStatus === "PENDING"
           ? onlinePayable
             ? "Payment pending"
-            : "Pay on delivery"
+            : pickup
+              ? "Pay in cash when you collect your order."
+              : "Pay on delivery"
           : "Unpaid";
+
+  // Store Pickup order-confirmation display (9F-49). Single-seller placement
+  // only (exactly one SellerOrder) — the multi-seller path below renders its
+  // own per-SellerOrder snapshot inside SellerItemGroup instead, so two
+  // different sellers' snapshots (once seller-owned pickup locations exist)
+  // can never be merged into one card.
+  const singleSellerPickupSnapshot =
+    order.sellerOrders.length === 1
+      ? asPickupLocationSnapshot(order.sellerOrders[0]?.pickupLocationSnapshot)
+      : null;
 
   // Multi-seller presentation (customer order UI phase): a genuinely
   // multi-seller order (more than one SellerOrder) is grouped so each
@@ -187,8 +239,12 @@ export function OrderDetail({
           </div>
         )}
 
+        {pickup && singleSellerPickupSnapshot && (
+          <PickupLocationCard snapshot={singleSellerPickupSnapshot} />
+        )}
+
         <div className="card-surface p-5 text-sm">
-          <h3 className="font-medium">{pickup ? "Pickup contact" : "Delivery address"}</h3>
+          <h3 className="font-medium">{pickup ? "Your details" : "Delivery address"}</h3>
           <SnapshotAddress a={addr} />
 
           {billing && (
@@ -275,6 +331,11 @@ function SellerItemGroup({
   const ship = sellerOrder.shipments[0];
   const hasShipmentInfo = Boolean(ship?.carrier || ship?.trackingNumber || ship?.shippedAt || ship?.deliveredAt);
   const trackingLink = ship?.trackingUrl && isSafeTrackingUrl(ship.trackingUrl) ? ship.trackingUrl : null;
+  // Multi-seller Store Pickup (9F-49): THIS seller's own frozen snapshot only
+  // — never another SellerOrder's. Deliberately per-group, not hoisted to the
+  // page level, so two sellers' pickup locations (once seller-owned pickup
+  // locations exist) can never be merged into one shared display.
+  const pickupSnapshot = asPickupLocationSnapshot(sellerOrder.pickupLocationSnapshot);
 
   return (
     <div className="card-surface p-5">
@@ -297,6 +358,33 @@ function SellerItemGroup({
           <ItemRow key={it.id} it={it} />
         ))}
       </ul>
+      {pickupSnapshot && (
+        <div className="mt-4 rounded-sm border border-line p-3 text-sm">
+          <h3 className="font-medium text-ink-soft">Pickup location</h3>
+          <address className="mt-1 not-italic text-ink-soft">
+            {pickupSnapshot.name}
+            <br />
+            {pickupSnapshot.line1}
+            {pickupSnapshot.line2 ? (
+              <>
+                <br />
+                {pickupSnapshot.line2}
+              </>
+            ) : null}
+            <br />
+            {[pickupSnapshot.barangay, pickupSnapshot.city, pickupSnapshot.province, pickupSnapshot.postalCode]
+              .filter(Boolean)
+              .join(", ")}
+            <br />
+            {countryName(pickupSnapshot.country)}
+            <br />
+            {pickupSnapshot.phone}
+          </address>
+          {pickupSnapshot.instructions && (
+            <p className="mt-2 text-ink-faint">{pickupSnapshot.instructions}</p>
+          )}
+        </div>
+      )}
       {hasShipmentInfo && (
         <div className="mt-4 rounded-sm border border-line p-3 text-sm">
           <h3 className="flex items-center gap-1.5 font-medium text-ink-soft">
@@ -368,5 +456,39 @@ function SnapshotAddress({ a }: { a: Record<string, string> }) {
       <br />
       {a.phone}
     </address>
+  );
+}
+
+/** Store Pickup order-confirmation card (9F-49). Renders the FROZEN
+ *  `SellerOrder.pickupLocationSnapshot` — never the live `PickupLocation` row
+ *  — so a later CMS edit or deactivation of the location never changes what
+ *  an already-placed order shows the customer. No internal id is displayed;
+ *  `recipient` is intentionally omitted (the store's own contact, not
+ *  customer-relevant here). Mirrors `SnapshotAddress`'s exact address layout. */
+function PickupLocationCard({ snapshot }: { snapshot: PickupLocationSnapshot }) {
+  return (
+    <div className="card-surface p-5 text-sm">
+      <h3 className="font-medium">Pickup location</h3>
+      <address className="mt-2 not-italic text-ink-soft">
+        {snapshot.name}
+        <br />
+        {snapshot.line1}
+        {snapshot.line2 ? (
+          <>
+            <br />
+            {snapshot.line2}
+          </>
+        ) : null}
+        <br />
+        {[snapshot.barangay, snapshot.city, snapshot.province, snapshot.postalCode].filter(Boolean).join(", ")}
+        <br />
+        {countryName(snapshot.country)}
+        <br />
+        {snapshot.phone}
+      </address>
+      {snapshot.instructions && (
+        <p className="mt-3 text-ink-faint">{snapshot.instructions}</p>
+      )}
+    </div>
   );
 }

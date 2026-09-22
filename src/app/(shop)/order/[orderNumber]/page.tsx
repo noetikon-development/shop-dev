@@ -6,6 +6,7 @@ import { getCurrentUser } from "@/lib/auth";
 import { getOrderByNumber } from "@/lib/data";
 import { prisma } from "@/lib/prisma";
 import { getPaymentsConfig } from "@/lib/payments/config";
+import { isStorePickupCode } from "@/lib/orders/couriers";
 import { OrderDetail } from "@/components/order/order-detail";
 import { CompletePaymentButton } from "@/components/order/complete-payment-button";
 import { buttonClasses } from "@/components/ui/button";
@@ -34,6 +35,7 @@ export default async function OrderConfirmationPage({
   const config = await getPaymentsConfig();
   const awaitingPayment = order.status === "PENDING_PAYMENT";
   const isPaid = order.paymentStatus === "PAID" || order.status === "PAID";
+  const pickup = isStorePickupCode(order.shippingMethodCode);
 
   // Offer "Complete payment" only when the customer has actually started an
   // online payment (an active Payment row) or bounced back from a cancel — not
@@ -83,7 +85,9 @@ export default async function OrderConfirmationPage({
         </p>
         <p className="mt-1 text-meta text-ink-faint">
           Order total: {formatPrice(order.grandTotal)}
-          {awaitingPayment && !onlinePayable && " · pay on delivery"}
+          {awaitingPayment &&
+            !onlinePayable &&
+            (pickup ? " · pay in cash when you collect your order" : " · pay on delivery")}
         </p>
 
         {returnedFromPayment && !isPaid && (

@@ -1219,6 +1219,13 @@ export async function getOrderByNumber(orderNumber: string) {
           sellerType: true,
           status: true,
           sellerName: true,
+          // Store Pickup order-confirmation display (9F-49 confirmation-page
+          // step). The historical, customer-facing pickup location — frozen at
+          // order time, never the live PickupLocation row. NULL for a
+          // non-PICKUP SellerOrder or a PICKUP one placed before this field
+          // existed. No seller-financial field is exposed here either way.
+          pickupLocationId: true,
+          pickupLocationSnapshot: true,
           shipments: {
             select: { carrier: true, carrierName: true, trackingNumber: true, trackingUrl: true, shippedAt: true, deliveredAt: true },
           },
