@@ -63,6 +63,13 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       summary.pickupLocations[0] ??
       null)
     : null;
+  // COD copy — pickup-aware. Payment behaviour, Order.paymentMethod, and the
+  // COD-selectable-or-not logic (showPayChoice / goOnline) are unchanged; this
+  // only swaps the description text based on the chosen shipping method.
+  const codPayDescription =
+    shippingMethod?.code === "PICKUP"
+      ? "Pay in cash when you collect your order."
+      : "Pay when your order is delivered.";
   const discount = summary.discountTotal;
   const total = Math.max(0, summary.subtotal - discount + (shippingMethod?.effectiveRate ?? 0));
 
@@ -304,9 +311,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               >
                 <span className="min-w-0 flex-1">
                   <span className="block text-sm font-medium">Pay on delivery</span>
-                  <span className="block text-meta text-ink-faint">
-                    Place your order now — pay when it arrives.
-                  </span>
+                  <span className="block text-meta text-ink-faint">{codPayDescription}</span>
                 </span>
               </RadioCard>
               <RadioCard
@@ -346,9 +351,7 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
           ) : (
             <div className="rounded-sm bg-surface-sunken px-3 py-2.5 text-sm">
               <span className="block font-medium text-ink">Cash on Delivery (COD)</span>
-              <span className="block text-meta text-ink-faint">
-                Pay when your order is delivered.
-              </span>
+              <span className="block text-meta text-ink-faint">{codPayDescription}</span>
             </div>
           )}
           <Field label="Order note" className="mt-4">
