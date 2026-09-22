@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { requirePermission } from "@/lib/admin/rbac";
 import { listShippingMethods } from "@/lib/admin/shipping";
+import { listAxiaroPickupLocations } from "@/lib/admin/pickup-locations";
 import { getSupportedShippingCountries, getFreeShippingThreshold } from "@/lib/shipping";
 import { PageHeader, Card } from "@/components/admin/ui";
 import { ShippingMethods } from "@/components/admin/shipping/shipping-methods";
+import { PickupLocations } from "@/components/admin/shipping/pickup-locations";
 import { formatPrice } from "@/lib/utils";
 import { countryName } from "@/lib/countries";
 
@@ -13,8 +15,9 @@ export default async function AdminShippingPage() {
   const admin = await requirePermission("view_shipping");
   const canManage = admin.isSuperAdmin || admin.permissions.has("manage_shipping");
 
-  const [methods, countries, freeThreshold] = await Promise.all([
+  const [methods, pickupLocations, countries, freeThreshold] = await Promise.all([
     listShippingMethods(),
+    listAxiaroPickupLocations(),
     getSupportedShippingCountries(),
     getFreeShippingThreshold(),
   ]);
@@ -48,6 +51,15 @@ export default async function AdminShippingPage() {
       </Card>
 
       <ShippingMethods methods={methods} canManage={canManage} />
+
+      <div className="mt-8">
+        <h2 className="mb-1 text-sm font-semibold">Pickup locations</h2>
+        <p className="mb-4 text-xs text-ink-faint">
+          Axiaro-owned Store Pickup locations. Not yet shown at checkout — the PICKUP method still
+          uses its own description until this is connected in a later step.
+        </p>
+        <PickupLocations locations={pickupLocations} canManage={canManage} />
+      </div>
     </div>
   );
 }
