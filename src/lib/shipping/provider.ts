@@ -18,6 +18,37 @@
  * columns stay NULL until a real provider ships.
  */
 
+/**
+ * A postal address a real (non-manual) provider needs to book a pickup or
+ * delivery. Same field shape as `SellerOriginAddress` / `SellerReturnAddress`
+ * (`@/lib/marketplace/types`) so a caller can pass one through directly.
+ * `lat`/`lng` are optional here because MANUAL never needs them, but a
+ * provider that books a real courier (Lalamove) requires both — see its
+ * `quote`/`createShipment` for the resulting validation error when absent.
+ */
+export type ShipmentAddress = {
+  recipient: string;
+  phone: string;
+  line1: string;
+  line2?: string | null;
+  barangay?: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  lat?: string;
+  lng?: string;
+};
+
+/** Package data a real provider needs for a rate quote / capacity check. */
+export type ShipmentPackage = {
+  weightGrams?: number | null;
+  lengthCm?: number | null;
+  widthCm?: number | null;
+  heightCm?: number | null;
+  description?: string | null;
+};
+
 /** What the caller knows before a shipment exists — the seller's form input. */
 export type ShipmentDraft = {
   sellerOrderId: string;
@@ -26,6 +57,18 @@ export type ShipmentDraft = {
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   note?: string | null;
+  /**
+   * Real-provider fields (Phase 9F-48 — Lalamove). All optional: MANUAL
+   * ignores them entirely (it only ever reads the 5 fields above via
+   * `Pick<ShipmentDraft, ...>`), so adding these here cannot change MANUAL's
+   * behaviour or any existing caller's payload shape.
+   */
+  direction?: "FORWARD" | "RETURN";
+  origin?: ShipmentAddress;
+  destination?: ShipmentAddress;
+  package?: ShipmentPackage;
+  /** Provider-specific service/vehicle hint (e.g. Lalamove's serviceType). */
+  serviceType?: string;
 };
 
 /** Normalised, validated shipment fields ready to persist on `Shipment`. */

@@ -11,13 +11,17 @@
  * no provider is registered, no `SHIPPING_*` env vars exist), so production
  * always resolves to MANUAL and the existing manual workflow is untouched.
  *
- * 9F-47D registers the first real provider in `PROVIDERS` below. Nothing here
- * enables the switch or reads a credential value.
+ * 9F-48 registers the first real provider (Lalamove) in `PROVIDERS` below.
+ * Registering it here does NOT enable it: Production has no
+ * `SHIPPING_LALAMOVE_API_KEY` env var, so `providerCredentialsPresent()`
+ * keeps `resolveShippingProvider()` on MANUAL regardless of the
+ * `shipping.integrationEnabled` StoreSetting value.
  */
 import "server-only";
 import { prisma } from "@/lib/prisma";
 import type { ShippingProvider } from "@/lib/shipping/provider";
 import { manualShippingProvider } from "@/lib/shipping/providers/manual";
+import { lalamoveShippingProvider } from "@/lib/shipping/providers/lalamove";
 
 export type ShippingMode = "test" | "live";
 
@@ -30,10 +34,27 @@ export type ShippingConfig = {
 };
 
 /**
- * Known real providers. Empty until 9F-47D. A key here maps a
- * `shipping.provider` setting value to its `ShippingProvider` instance.
+ * Known real providers. A key here maps a `shipping.provider` setting value
+ * to its `ShippingProvider` instance. Presence here alone does NOT enable a
+ * provider — see `getShippingConfig()`'s three-way gate.
  */
-const PROVIDERS: Record<string, ShippingProvider> = {};
+const PROVIDERS: Record<string, ShippingProvider> = {
+  LALAMOVE: lalamoveShippingProvider,
+};
+
+/**
+ * Resolve a provider by its stable `code` (e.g. `"LALAMOVE"`), independent of
+ * the `shipping.integrationEnabled` gate. Used by the webhook route: a
+ * provider must be able to verify/parse a webhook it previously received even
+ * if new-shipment creation through it is currently disabled — this is normal
+ * webhook-architecture behaviour, not a bypass of the enabled-gate (which
+ * only governs *new* shipment creation via `resolveShippingProvider()`).
+ * Returns `null` for an unknown code — never MANUAL as a fallback here, since
+ * a webhook route must know definitively whether it can verify a signature.
+ */
+export function getProviderByCode(code: string): ShippingProvider | null {
+  return PROVIDERS[code.toUpperCase()] ?? null;
+}
 
 /** True when the named provider's API key is set in the server environment. */
 function providerCredentialsPresent(provider: string): boolean {
