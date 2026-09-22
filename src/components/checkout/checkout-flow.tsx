@@ -32,6 +32,9 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
   const [methodId, setMethodId] = useState<string | null>(
     summary.shippingMethods[0]?.id ?? null,
   );
+  const [pickupLocationId, setPickupLocationId] = useState<string | null>(
+    summary.pickupLocations[0]?.id ?? null,
+  );
   // "cod" is the default when both channels are offered (preserves prior flow).
   const [payChoice, setPayChoice] = useState<"cod" | "online">(
     payment.online && !payment.cod ? "online" : "cod",
@@ -50,6 +53,16 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       null,
     [summary.shippingMethods, methodId],
   );
+  // Selection is required only when the chosen method is PICKUP AND at least
+  // one active Axiaro-owned location exists — the zero-location legacy
+  // fallback (ShippingMethod.description alone) never requires one.
+  const showPickupLocationPicker =
+    shippingMethod?.code === "PICKUP" && summary.pickupLocations.length > 0;
+  const selectedPickupLocation = showPickupLocationPicker
+    ? (summary.pickupLocations.find((l) => l.id === pickupLocationId) ??
+      summary.pickupLocations[0] ??
+      null)
+    : null;
   const discount = summary.discountTotal;
   const total = Math.max(0, summary.subtotal - discount + (shippingMethod?.effectiveRate ?? 0));
 
@@ -118,11 +131,16 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
       setError("Choose a delivery method.");
       return;
     }
+    if (showPickupLocationPicker && !pickupLocationId) {
+      setError("Choose a pickup location.");
+      return;
+    }
     setSubmitting(true);
     const res = await placeOrder({
       shippingAddressId: shippingId,
       billingAddressId: (sameForBilling ? shippingId : billingId) as string,
       shippingMethodId: methodId,
+      pickupLocationId: showPickupLocationPicker ? (pickupLocationId ?? undefined) : undefined,
       note,
     });
 
@@ -241,6 +259,37 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               </RadioCard>
             ))}
           </div>
+
+          {showPickupLocationPicker && (
+            <div className="mt-4 space-y-2.5 border-t border-line pt-4">
+              <p className="text-meta font-medium text-ink-soft">Choose a pickup location</p>
+              {summary.pickupLocations.map((l) => (
+                <RadioCard
+                  key={l.id}
+                  name="pickup-location"
+                  value={l.id}
+                  checked={pickupLocationId === l.id}
+                  onSelect={() => setPickupLocationId(l.id)}
+                  align="start"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block font-medium">{l.name}</span>
+                    <span className="mt-0.5 block text-meta text-ink-soft">
+                      {l.line1}
+                      {l.line2 ? `, ${l.line2}` : ""}
+                      <br />
+                      {[l.barangay, l.city, l.province, l.postalCode].filter(Boolean).join(", ")}
+                      <br />
+                      {countryName(l.country)} · {l.phone}
+                    </span>
+                    {l.instructions && (
+                      <span className="mt-1 block text-meta text-ink-faint">{l.instructions}</span>
+                    )}
+                  </span>
+                </RadioCard>
+              ))}
+            </div>
+          )}
         </Section>
 
         <Section step={4} icon={<Lock size={15} />} title="Payment">
@@ -381,6 +430,12 @@ export function CheckoutFlow({ data }: { data: CheckoutData }) {
               <p className="font-medium">Review &amp; confirm</p>
               <ReviewLine label="Ship to" addr={shipAddr} />
               <ReviewLine label="Bill to" addr={billAddr} />
+              {selectedPickupLocation && (
+                <p className="text-ink-soft">
+                  <span className="text-ink-faint">Pickup at: </span>
+                  {selectedPickupLocation.name}
+                </p>
+              )}
               <p className="text-ink-soft">
                 {summary.itemCount} item{summary.itemCount === 1 ? "" : "s"} ·{" "}
                 {shippingMethod?.name} ·{" "}

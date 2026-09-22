@@ -27,7 +27,9 @@ import {
   isSupportedShippingCurrency,
   resolveActiveShippingMethod,
   effectiveShippingFee,
+  getActivePickupLocations,
   type ShippingMethodDTO,
+  type PickupLocationDTO,
 } from "@/lib/shipping";
 
 /**
@@ -129,6 +131,13 @@ export type CheckoutSummary = {
   subtotal: number;
   freeShippingThreshold: number;
   shippingMethods: CheckoutShippingMethod[];
+  /**
+   * Active, Axiaro-owned pickup locations (Phase 9F-49 checkout step). Only
+   * relevant when the customer selects the PICKUP method — the client shows a
+   * location picker only then. Empty array = the legacy fallback: the PICKUP
+   * method's own `description` stands alone, no location selection required.
+   */
+  pickupLocations: PickupLocationDTO[];
   coupon: CheckoutCoupon | null;
   discountTotal: number;
   pricesChanged: boolean;
@@ -177,10 +186,11 @@ export async function getCheckoutData(): Promise<CheckoutData> {
     };
   }
 
-  const [cart, addresses, methods, freeThreshold, paymentsConfig] = await Promise.all([
+  const [cart, addresses, methods, pickupLocations, freeThreshold, paymentsConfig] = await Promise.all([
     loadCart(),
     getCustomerAddresses(),
     getActiveShippingMethods(),
+    getActivePickupLocations(),
     getFreeShippingThreshold(),
     getPaymentsConfig(),
   ]);
@@ -243,6 +253,7 @@ export async function getCheckoutData(): Promise<CheckoutData> {
       subtotal,
       freeShippingThreshold: freeThreshold,
       shippingMethods: withEffectiveRates(methods, subtotal, freeThreshold),
+      pickupLocations,
       coupon,
       discountTotal,
       pricesChanged: lines.some((l) => l.priceChanged),
@@ -266,6 +277,7 @@ async function emptySummary(): Promise<CheckoutSummary> {
     subtotal: 0,
     freeShippingThreshold: freeThreshold,
     shippingMethods: withEffectiveRates(methods, 0, freeThreshold),
+    pickupLocations: [],
     coupon: null,
     discountTotal: 0,
     pricesChanged: false,
@@ -281,6 +293,14 @@ export type PlaceOrderInput = {
   shippingAddressId: string;
   billingAddressId: string;
   shippingMethodId: string;
+  /**
+   * Required only when the chosen method is PICKUP AND at least one active
+   * Axiaro-owned PickupLocation exists — re-validated server-side against
+   * `getActivePickupLocations()` (never trusted as a bare id). Ignored for
+   * every other method, and ignored when no active locations exist (the
+   * legacy ShippingMethod.description fallback applies instead).
+   */
+  pickupLocationId?: string | null;
   note?: string;
 };
 
@@ -434,6 +454,33 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
   if (!isSupportedShippingCurrency(method.currency)) {
     return { ok: false, code: "SHIPPING", error: "That delivery method can’t be used right now." };
   }
+
+  // Pickup location (Phase 9F-49 checkout step) — Axiaro-owned only, loaded
+  // fresh from the DB. The browser never supplies an address; it only names an
+  // id, and that id is only ever accepted if it's a match inside the SAME
+  // active+Axiaro-owned set `getActivePickupLocations()` returns (never a bare
+  // existence check on the id alone) — this rules out inactive, nonexistent,
+  // seller-owned, or otherwise out-of-set locations by construction. Only
+  // relevant when `method.code === "PICKUP"`; ignored for every other method.
+  let pickupLocation: PickupLocationDTO | null = null;
+  if (method.code === "PICKUP") {
+    const activeLocations = await getActivePickupLocations();
+    if (activeLocations.length > 0) {
+      // At least one location exists — a selection is required, and it must
+      // still be in the active/Axiaro-owned set at THIS moment (not just when
+      // the page loaded).
+      pickupLocation = input.pickupLocationId
+        ? (activeLocations.find((l) => l.id === input.pickupLocationId) ?? null)
+        : null;
+      if (!pickupLocation) {
+        return { ok: false, code: "SHIPPING", error: "Choose a pickup location to continue." };
+      }
+    }
+    // else: zero active locations exist — the legacy fallback. PICKUP proceeds
+    // exactly as it always has (ShippingMethod.description stands alone);
+    // pickupLocation stays null and nothing is required of the customer.
+  }
+
   const note = (input.note ?? "").trim().slice(0, 500);
 
   // 1. The customer's live ACTIVE cart.
@@ -888,6 +935,41 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
       //     Every OrderItem is created immediately after its own seller's
       //     SellerOrder, in the SAME loop iteration, and linked by the just-
       //     created `sellerOrder.id` — never by array position or `[0]`.
+      // Pickup-location snapshot (Phase 9F-49 checkout step) — the exact
+      // customer-facing fields, frozen at order time so a later CMS edit to
+      // the PickupLocation row never changes an already-placed order. Built
+      // once outside the loop: `pickupLocation` was already resolved (and, if
+      // required, validated) above, before this transaction opened.
+      //
+      // PHASE-1 SCOPE, DELIBERATE: the SAME snapshot is written onto EVERY
+      // SellerOrder below — there is no per-seller pickup-location UI today
+      // (checkout has exactly one flat cart display and one order-wide method
+      // choice; `shippingMethodCode`/`shippingMethodName` already replicate
+      // identically across every SellerOrder the same way). This is safe FOR
+      // THIS PHASE because every selectable location is Axiaro-owned
+      // (`sellerId: null`) — there is exactly one pool, equally applicable
+      // regardless of which seller a line belongs to. It is NOT safe to keep
+      // once seller-owned pickup locations exist: a cart mixing sellers with
+      // DIFFERENT applicable locations will need real per-SellerOrder
+      // selection UI (a seller-grouped checkout section) that does not exist
+      // yet. Do not extend this replication pattern to seller-owned locations
+      // without building that UI first.
+      const pickupLocationSnapshot = pickupLocation
+        ? {
+            name: pickupLocation.name,
+            recipient: pickupLocation.recipient,
+            phone: pickupLocation.phone,
+            line1: pickupLocation.line1,
+            line2: pickupLocation.line2,
+            barangay: pickupLocation.barangay,
+            city: pickupLocation.city,
+            province: pickupLocation.province,
+            postalCode: pickupLocation.postalCode,
+            country: pickupLocation.country,
+            instructions: pickupLocation.instructions,
+          }
+        : null;
+
       const createdSellerOrderIds: { sellerId: string; sellerOrderId: string; sellerType: string }[] = [];
       for (const group of sellerGroupList) {
         // 9F-39B: resolve the commission rate for THIS seller. FIRST_PARTY → 0;
@@ -918,6 +1000,12 @@ export async function createOrderFromCart(input: PlaceOrderInput): Promise<Place
             shippingFee: sellerShippingFee,
             platformShippingSubsidy: 0,
             freeShippingApplied,
+            ...(pickupLocation
+              ? {
+                  pickupLocationId: pickupLocation.id,
+                  pickupLocationSnapshot: pickupLocationSnapshot as Prisma.InputJsonValue,
+                }
+              : {}),
             merchandiseSubtotal: group.merchandiseSubtotal,
             discountAllocated: sellerDiscountAllocated,
             discountFundedBy: "PLATFORM",

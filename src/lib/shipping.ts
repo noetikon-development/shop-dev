@@ -1,7 +1,9 @@
 import "server-only";
-import type { ShippingMethod } from "@prisma/client";
+import type { Prisma, ShippingMethod } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getStoreSettings } from "@/lib/admin/settings";
+
+type Client = Prisma.TransactionClient | typeof prisma;
 
 /**
  * Shipping foundation (Step 11).
@@ -84,4 +86,75 @@ export function effectiveShippingFee(
 ): number {
   if (freeThreshold > 0 && subtotal >= freeThreshold) return 0;
   return Math.max(0, rate);
+}
+
+// ---------------------------------------------------------------------------
+// Store Pickup locations (Phase 9F-49 checkout step) — Axiaro-owned only.
+//
+// Customer-facing sibling of the admin CMS (`src/lib/admin/pickup-locations.ts`):
+// same `sellerId: null` scoping, but filtered to `active: true` as well, since
+// checkout must only ever offer a location the admin has actually turned on.
+// Seller-owned pickup locations are a later, separate feature — this module
+// never reads or exposes one.
+// ---------------------------------------------------------------------------
+
+export type PickupLocationDTO = {
+  id: string;
+  name: string;
+  recipient: string;
+  phone: string;
+  line1: string;
+  line2: string | null;
+  barangay: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  instructions: string | null;
+};
+
+function toPickupLocationDTO(row: {
+  id: string;
+  name: string;
+  recipient: string;
+  phone: string;
+  line1: string;
+  line2: string | null;
+  barangay: string | null;
+  city: string;
+  province: string;
+  postalCode: string;
+  country: string;
+  instructions: string | null;
+}): PickupLocationDTO {
+  return {
+    id: row.id,
+    name: row.name,
+    recipient: row.recipient,
+    phone: row.phone,
+    line1: row.line1,
+    line2: row.line2,
+    barangay: row.barangay,
+    city: row.city,
+    province: row.province,
+    postalCode: row.postalCode,
+    country: row.country,
+    instructions: row.instructions,
+  };
+}
+
+/**
+ * Active, Axiaro-owned pickup locations — the exact set checkout may offer or
+ * accept an id from. Optional `client` (defaults to the global `prisma`)
+ * mirrors `resolveReturnDestination`'s pattern elsewhere in this codebase —
+ * lets a caller pass a `$transaction` client so tests can exercise this
+ * against rolled-back fixtures instead of real rows. `checkout.ts` never
+ * passes one, so its behaviour is unchanged.
+ */
+export async function getActivePickupLocations(client: Client = prisma): Promise<PickupLocationDTO[]> {
+  const rows = await client.pickupLocation.findMany({
+    where: { sellerId: null, active: true },
+    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
+  });
+  return rows.map(toPickupLocationDTO);
 }

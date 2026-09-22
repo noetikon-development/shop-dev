@@ -25,6 +25,9 @@ const placeSchema = z.object({
   shippingAddressId: z.string().min(1).max(64),
   billingAddressId: z.string().min(1).max(64),
   shippingMethodId: z.string().min(1).max(64),
+  // Only meaningful when the chosen method is PICKUP; re-validated server-side
+  // against the live active/Axiaro-owned set in createOrderFromCart.
+  pickupLocationId: z.string().min(1).max(64).optional(),
   note: z.string().max(500).optional(),
 });
 
