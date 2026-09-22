@@ -1355,10 +1355,53 @@ model Seller {
   // written to by any code path. See SellerVerification below.
   sellerVerifications SellerVerification[]
 
+  // Store Pickup location foundation (Phase 9F-49 schema step). Back-relation
+  // only — no PickupLocation row exists yet, no UI reads/writes this. RESTRICT
+  // on the FK side (see PickupLocation.seller below): a seller that owns any
+  // pickup location cannot be hard-deleted while it exists.
+  pickupLocations PickupLocation[]
+
   @@index([type])
   @@index([status])
   @@index([contentStatus])
   @@index([applicantUserId])
+}
+
+// Store Pickup location (Phase 9F-49 schema step — foundation only, no UI,
+// no records populated yet). `sellerId = NULL` = an Axiaro-owned / global
+// pickup point (today's single "Batangas City" location, still expressed only
+// via ShippingMethod.description until a later phase migrates it here);
+// `sellerId` set = a THIRD_PARTY seller's own pickup point. Same address-field
+// shape as `Seller.originAddress` / `Seller.returnAddress` by convention, but
+// its own JSON-free, directly-queryable columns (a location needs to be
+// listed/filtered, unlike an address blob). No lat/lng yet — added later only
+// if an actual requirement (e.g. a real Lalamove pickup-stop use) appears.
+model PickupLocation {
+  id       String  @id @default(cuid())
+  sellerId String?
+
+  name         String
+  recipient    String
+  phone        String
+  line1        String
+  line2        String?
+  barangay     String?
+  city         String
+  province     String
+  postalCode   String
+  country      String
+  instructions String?
+  active       Boolean @default(true)
+  sortOrder    Int     @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  seller       Seller?       @relation(fields: [sellerId], references: [id], onDelete: Restrict)
+  sellerOrders SellerOrder[]
+
+  @@index([sellerId])
+  @@index([active])
 }
 
 // Membership of an application User in a Seller, with a seller-scoped role.
@@ -1642,6 +1685,18 @@ model SellerOrder {
   // is NOT recomputed from today's threshold (9E-3C-1 §9).
   freeShippingApplied     Boolean?
 
+  // Store Pickup location foundation (Phase 9F-49 schema step). SellerOrder is
+  // the authoritative level (not Order) because a multi-seller order may need
+  // a different pickup location per seller. Both nullable/additive — nothing
+  // writes them yet (checkout still offers one store-wide PICKUP method with
+  // no location selection). `pickupLocationSnapshot` mirrors the
+  // Order.shippingAddress / ReturnRequest.returnDestination pattern: once a
+  // real selection flow exists, it freezes the location's name + address at
+  // order time so a later edit or deletion of the PickupLocation row never
+  // changes an already-placed order.
+  pickupLocationId       String?
+  pickupLocationSnapshot Json?
+
   // Money (centavos).
   merchandiseSubtotal Int    @default(0) // Σ OrderItem.lineTotal, pre-discount
   discountAllocated   Int    @default(0) // this seller's slice of the order coupon
@@ -1676,6 +1731,7 @@ model SellerOrder {
   items          OrderItem[]
   shipments      Shipment[]
   settlement     SellerSettlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
+  pickupLocation PickupLocation?   @relation(fields: [pickupLocationId], references: [id], onDelete: SetNull)
   // Required opposite side of PaymentRefund.sellerOrder (Prisma relations are
   // declared on both models). Virtual — Prisma computes this from
   // PaymentRefund.sellerOrderId; it adds NO column/table to SellerOrder at the
@@ -1689,6 +1745,7 @@ model SellerOrder {
   @@index([status])
   @@index([settlementStatus])
   @@index([settlementId])
+  @@index([pickupLocationId])
 }
 
 // Bookkeeping-only seller payout record (Phase 9F-8e). NOT a real transfer:
