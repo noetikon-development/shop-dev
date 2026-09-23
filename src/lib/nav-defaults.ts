@@ -14,7 +14,10 @@ export type NavActionState = { ok?: boolean; error?: string };
 export const NAV_UTILITY_ROUTES: Record<NavUtilityKey, string> = {
   track: "/track",
   promotions: "/promotions",
-  "all-categories": "/c/all",
+  // The full category-tree discovery page (9F-navigation-audit follow-up) —
+  // distinct from `/c/all`, which is the "All products" flat catalogue
+  // listing and keeps its own, unchanged meaning.
+  "all-categories": "/categories",
 };
 
 export const NAV_UTILITY_LABELS: Record<NavUtilityKey, string> = {
