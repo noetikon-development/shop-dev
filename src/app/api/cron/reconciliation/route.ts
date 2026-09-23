@@ -59,7 +59,12 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const result = await runReconciliationJob();
+    // Explicit "CRON" — the bearer-token check above is proof this caller is
+    // authorized, never proof of what actually triggered the request (a
+    // test script or curl call with the correct secret is indistinguishable
+    // from Vercel Cron at the HTTP layer), so the source is always supplied
+    // explicitly here, not inferred from the auth having succeeded.
+    const result = await runReconciliationJob(undefined, "CRON");
     return Response.json({
       ok: true,
       status: result.status,

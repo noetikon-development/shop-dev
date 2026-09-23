@@ -8,11 +8,15 @@
  * pattern as scripts/test-9f43b.ts. The one exception, by design, is the
  * final CRON AUTH case (D4: a valid Bearer token must actually invoke the
  * real job): that calls the route's real GET handler against the real
- * `prisma` singleton, exactly as Vercel Cron would. Its only write is the ONE
- * AdminAuditLog row the task explicitly sanctions as an acceptable
- * Production write (a log record, not business data) — isolation checks
- * below account for that single +1 row rather than pretending it didn't
- * happen.
+ * `prisma` singleton, exactly as Vercel Cron would. Its only writes are ONE
+ * AdminAuditLog row and (this task's addition) ONE ReconciliationRun row —
+ * both log records, not business data — isolation checks below account for
+ * those +1 rows rather than pretending they didn't happen.
+ *
+ * Also covers the execution-record tracking foundation added alongside the
+ * reconciliation job (src/lib/marketplace/reconciliation-run.ts): the
+ * RUNNING -> PASS/WARN/FAIL/ERROR lifecycle, CRON vs MANUAL invocation
+ * source, and the CLI scripts' own MANUAL-source wiring.
  *
  *   node --env-file=.env --conditions=react-server --import tsx scripts/test-reconciliation-job.ts
  */
@@ -82,7 +86,11 @@ function staticTests() {
   ok("route · requires Authorization: Bearer <CRON_SECRET>", /Authorization/.test(route) && /Bearer \$\{secret\}/.test(route));
   ok("route · unauthorized → 401", /status: 401/.test(route));
   ok("route · POST → 405", /export async function POST[\s\S]{0,120}status: 405/.test(route));
-  ok("route · calls runReconciliationJob", /runReconciliationJob\(\)/.test(route));
+  ok("route · calls runReconciliationJob with explicit CRON source", /runReconciliationJob\(undefined, "CRON"\)/.test(route));
+  ok(
+    "route · CRON source is a literal, never derived from the secret/auth check",
+    !/runReconciliationJob\([^)]*secret[^)]*\)/i.test(route),
+  );
   ok("route · logs failures with console.error", /console\.error\("\[cron\] reconciliation failed"/.test(route));
   ok(
     "route · catch block sends a failure alert before returning 500 (error still logged, not swallowed)",
@@ -119,6 +127,37 @@ function staticTests() {
   ok("CLI · reconcile:payments still exits 1 only on fail>0", /if \(result\.fail > 0\) process\.exitCode = 1/.test(cliPayments));
   ok("CLI · reconcile:marketplace still calls runMarketplaceReconciliation", /runMarketplaceReconciliation\(prisma\)/.test(cliMarketplace));
   ok("CLI · reconcile:marketplace still exits 1 only on fail>0", /if \(result\.fail > 0\) process\.exitCode = 1/.test(cliMarketplace));
+
+  // ── Execution-record tracking (this task's addition) ─────────────────────
+  const reconciliationRun = read("src/lib/marketplace/reconciliation-run.ts");
+
+  ok(
+    "reconciliation-run.ts · NOT server-only (importable from plain-Node CLI scripts)",
+    !/import\s+"server-only"/.test(reconciliationRun),
+  );
+  ok(
+    "job · creates the RUNNING execution record BEFORE either reconciliation check runs",
+    (() => {
+      const startIdx = job.indexOf("startReconciliationRun(");
+      const paymentsIdx = job.indexOf("runPaymentsReconciliation(");
+      return startIdx !== -1 && paymentsIdx !== -1 && startIdx < paymentsIdx;
+    })(),
+  );
+  ok(
+    "job · a thrown check error calls failReconciliationRun before rethrowing (not swallowed)",
+    /catch \(err\) \{[\s\S]{0,400}failReconciliationRun\(executionRunId, err, client\)[\s\S]{0,40}throw err;/.test(job),
+  );
+  ok(
+    "job · a completed run calls completeReconciliationRun with the computed status",
+    /completeReconciliationRun\(executionRunId, status, client\)/.test(job),
+  );
+  ok(
+    "job · invocationSource defaults to MANUAL, only the route overrides it to CRON",
+    /invocationSource: ReconciliationInvocationSource = "MANUAL"/.test(job),
+  );
+
+  ok("CLI · reconcile:payments creates a MANUAL execution record", /startReconciliationRun\("MANUAL", prisma\)/.test(cliPayments));
+  ok("CLI · reconcile:marketplace creates a MANUAL execution record", /startReconciliationRun\("MANUAL", prisma\)/.test(cliMarketplace));
 }
 
 /** Pure, no-I/O tests for sanitizeReconciliationError + the failure-alert
@@ -190,6 +229,7 @@ async function dbTests() {
   const orderBefore = await prisma.order.count();
   const paymentBefore = await prisma.payment.count();
   const auditBefore = await prisma.adminAuditLog.count();
+  const reconRunBefore = await prisma.reconciliationRun.count();
 
   try {
     await prisma.$transaction(async (tx) => {
@@ -201,6 +241,13 @@ async function dbTests() {
       const auditRowA = await tx.adminAuditLog.findFirst({ where: { action: "reconciliation.run" }, orderBy: { createdAt: "desc" } });
       ok("A · audit row action is reconciliation.run with a PASS summary", !!auditRowA && /PASS/.test(auditRowA.summary ?? ""));
       ok("A · no alert sent for a clean PASS", a.alertSent === false && a.alertDeduped === false);
+
+      // ── Execution-record tracking (this task's addition) ────────────────
+      ok("A · runReconciliationJob(tx) with no invocationSource arg defaults to MANUAL", !!a.executionRunId);
+      const runRowA = await tx.reconciliationRun.findUnique({ where: { id: a.executionRunId! } });
+      ok("A · execution record invocationSource defaults to MANUAL", runRowA?.invocationSource === "MANUAL");
+      ok("A · execution record transitions RUNNING -> PASS with completedAt set", runRowA?.status === "PASS" && runRowA.completedAt !== null);
+      ok("A · execution record startedAt is set and precedes completedAt", !!runRowA?.startedAt && runRowA.completedAt! >= runRowA.startedAt);
 
       // ── B — WARN: a stale AWAITING_PAYMENT Payment (rule 1) ──────────────
       const orderB = await seedOrder(tx, "b");
@@ -215,6 +262,8 @@ async function dbTests() {
       const b = await runReconciliationJob(tx);
       ok("B · WARN run reports status WARN", b.status === "WARN", JSON.stringify({ p: b.payments, m: b.marketplace.fail }));
       ok("B · payments check recorded the WARN", b.payments.warn > 0);
+      const runRowB = await tx.reconciliationRun.findUnique({ where: { id: b.executionRunId! } });
+      ok("B · execution record transitions RUNNING -> WARN with completedAt set", runRowB?.status === "WARN" && runRowB.completedAt !== null);
 
       // ── C — FAIL: Payment.amount != Order.grandTotal (rule 4) ───────────
       const orderC = await seedOrder(tx, "c");
@@ -230,6 +279,60 @@ async function dbTests() {
       const c = await runReconciliationJob(tx);
       ok("C · FAIL run reports status FAIL", c.status === "FAIL", JSON.stringify({ p: c.payments, m: c.marketplace.fail }));
       ok("C · payments check recorded a FAIL (amount mismatch)", c.payments.fail > 0);
+      const runRowC = await tx.reconciliationRun.findUnique({ where: { id: c.executionRunId! } });
+      ok("C · execution record transitions RUNNING -> FAIL with completedAt set", runRowC?.status === "FAIL" && runRowC.completedAt !== null);
+
+      // ── Explicit CRON invocation source (distinct from the MANUAL default
+      //    exercised by A/B/C above). By this point B's and C's drift
+      //    fixtures are still present in this SAME ongoing transaction (nothing
+      //    is rolled back between sub-scenarios), so this run's status is
+      //    FAIL — same as C's — not the clean PASS scenario A saw; only the
+      //    invocationSource distinction is what this scenario is testing. ──
+      const cronRun = await runReconciliationJob(tx, "CRON");
+      ok("G · explicit CRON invocationSource still produces a valid completed status", ["PASS", "WARN", "FAIL"].includes(cronRun.status));
+      const runRowCron = await tx.reconciliationRun.findUnique({ where: { id: cronRun.executionRunId! } });
+      ok("G · execution record invocationSource is CRON when explicitly passed", runRowCron?.invocationSource === "CRON");
+      ok("G · CRON and MANUAL sources coexist as distinct rows (not merged/overwritten)", runRowCron?.id !== runRowA?.id);
+
+      // ── Hard execution failure — a check function throws before any
+      //    PASS/WARN/FAIL result exists. Simulated via a Proxy that makes
+      //    ONE property access throw, exactly like a real DB/connectivity
+      //    error would surface — no fixture data is corrupted, and nothing
+      //    outside this single poisoned property is affected. ──────────────
+      // `runPaymentsReconciliation` runs FIRST inside runReconciliationJob and
+      // its very first statement is `prisma.payment.findMany(...)` — trapping
+      // `.payment` guarantees the throw fires immediately, before any other
+      // query, unlike a deeper/conditional property that might not be
+      // reached depending on fixture shape.
+      const poisoned = new Proxy(tx, {
+        get(target, prop, receiver) {
+          if (prop === "payment") throw new Error("simulated hard failure: payment table unreachable");
+          return Reflect.get(target, prop, receiver);
+        },
+      }) as unknown as Tx;
+      const auditCountBeforeH = await tx.adminAuditLog.count({ where: { action: "reconciliation.run" } });
+      let hardFailureThrew = false;
+      try {
+        await runReconciliationJob(poisoned, "CRON");
+      } catch {
+        hardFailureThrew = true;
+      }
+      ok("H · a hard check failure still propagates (not swallowed by execution tracking)", hardFailureThrew);
+      const errorRow = await tx.reconciliationRun.findFirst({
+        where: { invocationSource: "CRON", status: "ERROR" },
+        orderBy: { startedAt: "desc" },
+      });
+      ok("H · execution record marked ERROR with completedAt set", !!errorRow && errorRow.completedAt !== null);
+      ok(
+        "H · stored error is sanitized/truncated (no raw stack trace, reasonable length)",
+        !!errorRow?.error && !errorRow.error.includes("\n    at ") && errorRow.error.length <= 401,
+      );
+      ok("H · stored error message reflects the actual failure, not a generic placeholder", errorRow?.error === "simulated hard failure: payment table unreachable");
+      const auditCountAfterH = await tx.adminAuditLog.count({ where: { action: "reconciliation.run" } });
+      ok(
+        "H · no AdminAuditLog row was written for the hard-failure attempt (writeAudit is never reached)",
+        auditCountAfterH === auditCountBeforeH,
+      );
 
       // ── Alert dedup contract — direct calls with distinct fake dateKeys so
       //    each scenario's alert isn't deduped by an EARLIER scenario's alert
@@ -322,6 +425,7 @@ async function dbTests() {
   ok("isolation · Order count unchanged after rollback", (await prisma.order.count()) === orderBefore);
   ok("isolation · Payment count unchanged after rollback", (await prisma.payment.count()) === paymentBefore);
   ok("isolation · AdminAuditLog count unchanged after rollback (pre-D4 baseline)", (await prisma.adminAuditLog.count()) === auditBefore);
+  ok("isolation · ReconciliationRun count unchanged after rollback", (await prisma.reconciliationRun.count()) === reconRunBefore);
 }
 
 async function cronAuthTests() {
@@ -343,13 +447,25 @@ async function cronAuthTests() {
 
     // D4 — valid bearer token → the route actually invokes the real job
     // against the real `prisma` singleton (the route has no DI seam for a
-    // test transaction). This is the ONE sanctioned real write in this test:
-    // exactly one new AdminAuditLog row (a log record, not business data).
+    // test transaction). This is the sanctioned real write in this test:
+    // exactly one new AdminAuditLog row AND (this task's addition) exactly
+    // one new ReconciliationRun row — both are log records, not business
+    // data, same class of write already accepted for the AdminAuditLog row.
     const auditBeforeD4 = await prisma.adminAuditLog.count();
+    const reconRunBeforeD4 = await prisma.reconciliationRun.count();
     const r4 = await cronGet(req({ Authorization: "Bearer test-secret-value" }));
     const body = (await r4.json()) as { ok: boolean; status?: string; auditLogId?: string | null };
     ok("D4 · valid bearer token → 200 and the job actually ran", r4.status === 200 && body.ok === true && ["PASS", "WARN", "FAIL"].includes(body.status ?? ""));
     ok("D4 · exactly one new (real) AdminAuditLog row was written", (await prisma.adminAuditLog.count()) === auditBeforeD4 + 1);
+    ok("D4 · exactly one new (real) ReconciliationRun row was written", (await prisma.reconciliationRun.count()) === reconRunBeforeD4 + 1);
+    const realCronRun = await prisma.reconciliationRun.findFirst({
+      where: { invocationSource: "CRON" },
+      orderBy: { startedAt: "desc" },
+    });
+    ok(
+      "D4 · the real execution record has invocationSource CRON and a completed status",
+      realCronRun?.invocationSource === "CRON" && ["PASS", "WARN", "FAIL"].includes(realCronRun?.status ?? ""),
+    );
   } finally {
     if (savedSecret === undefined) delete process.env.CRON_SECRET;
     else process.env.CRON_SECRET = savedSecret;

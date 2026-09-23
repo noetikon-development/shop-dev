@@ -1066,6 +1066,29 @@ model WebhookEvent {
   @@index([receivedAt])
 }
 
+// Reconciliation execution/attempt tracking — durable evidence that a
+// reconciliation invocation (scheduled or manual) actually STARTED, distinct
+// from AdminAuditLog's `reconciliation.run` row, which is only ever written
+// for a COMPLETED run (PASS/WARN/FAIL) and never for a hard execution
+// failure that throws before that point. Foundation for a future stale-run /
+// cron-health watchdog — this table alone does not implement one.
+// `invocationSource` is always explicitly supplied by the caller (CRON from
+// the scheduled route, MANUAL from a CLI script) — never inferred from
+// CRON_SECRET or any other implicit signal. `error`, when present, is always
+// pre-sanitized/truncated by the caller (see sanitizeReconciliationError) —
+// never a raw stack trace, header, or credential.
+model ReconciliationRun {
+  id               String    @id @default(cuid())
+  status           String    @default("RUNNING") // RUNNING | PASS | WARN | FAIL | ERROR
+  invocationSource String // CRON | MANUAL
+  startedAt        DateTime  @default(now())
+  completedAt      DateTime?
+  error            String? // sanitized + truncated only; see sanitizeReconciliationError
+
+  @@index([invocationSource, startedAt])
+  @@index([status])
+}
+
 // ----------------------------------------------------------------------------
 // Transactional email delivery log (Step 17)
 //

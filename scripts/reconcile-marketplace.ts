@@ -36,15 +36,32 @@
  */
 import { PrismaClient } from "@prisma/client";
 import { runMarketplaceReconciliation } from "../src/lib/marketplace/reconcile-marketplace-core";
+import {
+  startReconciliationRun,
+  completeReconciliationRun,
+  failReconciliationRun,
+} from "../src/lib/marketplace/reconciliation-run";
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
-runMarketplaceReconciliation(prisma)
-  .then((result) => {
+// Execution-record tracking only — reconciliation logic/output/exit-code
+// below is otherwise byte-identical to before this was added. This is a
+// single-check CLI run, so its ReconciliationRun status reflects only THIS
+// check's own pass/warn/fail (not the combined payments+marketplace status
+// the scheduled job records).
+async function main() {
+  const runId = await startReconciliationRun("MANUAL", prisma);
+  try {
+    const result = await runMarketplaceReconciliation(prisma);
+    await completeReconciliationRun(runId, result.fail > 0 ? "FAIL" : result.warn > 0 ? "WARN" : "PASS", prisma);
     if (result.fail > 0) process.exitCode = 1;
-  })
-  .catch((e) => {
+  } catch (e) {
+    await failReconciliationRun(runId, e, prisma);
     console.error(e);
     process.exitCode = 1;
-  })
-  .finally(() => prisma.$disconnect());
+  } finally {
+    await prisma.$disconnect();
+  }
+}
+
+main();

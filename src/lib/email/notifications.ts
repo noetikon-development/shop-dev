@@ -86,6 +86,7 @@ import {
 } from "@/lib/marketplace/return-destination";
 import { createHash } from "node:crypto";
 import { maskEmail, setEmailFooterContext, peso } from "@/lib/email/html";
+import { sanitizeReconciliationError } from "@/lib/marketplace/reconciliation-run";
 
 /** Account-security notices go from a no-reply address, not the orders inbox. */
 const SECURITY_FROM = "no-reply@axiaro.shop";
@@ -4757,22 +4758,11 @@ export async function sendReconciliationAlertOps(params: {
   }
 }
 
-/** Strips known secret-shaped substrings (credentialed URLs, bearer tokens,
- *  API-key-looking tokens, secret/token/apikey query params) from a caught
- *  error's message before it is ever placed into an outbound email. Reads
- *  only `Error.message` — never `.stack`, never the original request/headers
- *  — so there is no path for a raw Authorization header or connection string
- *  to reach this alert. Exported for direct unit testing. */
-export function sanitizeReconciliationError(err: unknown): string {
-  const raw = err instanceof Error ? err.message : String(err);
-  const MAX_LEN = 400;
-  const redacted = raw
-    .replace(/(\w+:\/\/)[^\s@/]+:[^\s@/]+@/g, "$1***:***@")
-    .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***")
-    .replace(/\b(sk|pk)_(live|test)_[A-Za-z0-9]+/g, "$1_$2_***")
-    .replace(/([?&](?:password|apikey|api_key|token|secret)=)[^&\s]+/gi, "$1***");
-  return redacted.length > MAX_LEN ? `${redacted.slice(0, MAX_LEN)}…` : redacted;
-}
+// sanitizeReconciliationError now lives in reconciliation-run.ts (it needs to
+// be importable from plain-Node CLI scripts, which cannot import a
+// "server-only" module) — re-exported here so every existing import of it
+// from this file keeps working unchanged.
+export { sanitizeReconciliationError } from "@/lib/marketplace/reconciliation-run";
 
 /**
  * Ops alert — the scheduled reconciliation job itself threw before producing

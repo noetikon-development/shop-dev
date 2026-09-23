@@ -21,6 +21,12 @@ import { runMarketplaceReconciliation } from "./reconcile-marketplace-core";
 import { writeAudit } from "@/lib/admin/audit";
 import { sendReconciliationAlertOps } from "@/lib/email/notifications";
 import type { ReconciliationCheckResult } from "./reconciliation-types";
+import {
+  startReconciliationRun,
+  completeReconciliationRun,
+  failReconciliationRun,
+  type ReconciliationInvocationSource,
+} from "./reconciliation-run";
 
 type Client = Prisma.TransactionClient | PrismaClient;
 
@@ -32,6 +38,11 @@ export type ReconciliationJobResult = {
   payments: ReconciliationCheckResult;
   marketplace: ReconciliationCheckResult;
   auditLogId: string | null;
+  /** The ReconciliationRun execution-tracking row for this attempt (see
+   *  reconciliation-run.ts) — foundation for a future stale-run watchdog,
+   *  distinct from auditLogId above. Null only if that row itself failed to
+   *  write (best-effort, like writeAudit). */
+  executionRunId: string | null;
   alertSent: boolean;
   alertDeduped: boolean;
 };
@@ -42,11 +53,26 @@ function nonPassLines(result: ReconciliationCheckResult): string[] {
   return result.lines.filter((l) => l.level !== "PASS").map((l) => `[${result.name}] [${l.level}] ${l.message}`);
 }
 
-export async function runReconciliationJob(client: Client = prisma): Promise<ReconciliationJobResult> {
+export async function runReconciliationJob(
+  client: Client = prisma,
+  invocationSource: ReconciliationInvocationSource = "MANUAL",
+): Promise<ReconciliationJobResult> {
   const runAt = new Date();
+  const executionRunId = await startReconciliationRun(invocationSource, client);
 
-  const payments = await runPaymentsReconciliation(client);
-  const marketplace = await runMarketplaceReconciliation(client);
+  let payments: ReconciliationCheckResult;
+  let marketplace: ReconciliationCheckResult;
+  try {
+    payments = await runPaymentsReconciliation(client);
+    marketplace = await runMarketplaceReconciliation(client);
+  } catch (err) {
+    // Hard execution failure — no PASS/WARN/FAIL result exists. Mark the
+    // execution record ERROR, then rethrow unchanged so the caller's own
+    // error handling (route.ts: console.error + sendReconciliationFailureAlertOps
+    // + HTTP 500) fires exactly as it did before this record existed.
+    await failReconciliationRun(executionRunId, err, client);
+    throw err;
+  }
 
   const status: ReconciliationOverallStatus =
     payments.fail > 0 || marketplace.fail > 0
@@ -54,6 +80,8 @@ export async function runReconciliationJob(client: Client = prisma): Promise<Rec
       : payments.warn > 0 || marketplace.warn > 0
         ? "WARN"
         : "PASS";
+
+  await completeReconciliationRun(executionRunId, status, client);
 
   const allDetails = [...nonPassLines(payments), ...nonPassLines(marketplace)];
 
@@ -106,6 +134,7 @@ export async function runReconciliationJob(client: Client = prisma): Promise<Rec
     payments,
     marketplace,
     auditLogId,
+    executionRunId,
     alertSent,
     alertDeduped,
   };
