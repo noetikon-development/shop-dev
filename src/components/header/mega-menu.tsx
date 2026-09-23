@@ -34,12 +34,31 @@ export function MegaMenu({ nav }: { nav: ResolvedNav }) {
   };
   const shownKey = open ? activeKey : null;
 
+  // Keeps a keyboard-focused item inside view within the nav's own scroll
+  // box (below) — without it, Tab can land on an item that's scrolled
+  // outside the visible area with no visual indication focus moved there.
+  const scrollFocusedIntoView = (e: React.FocusEvent<HTMLElement>) => {
+    e.target.scrollIntoView({ inline: "nearest", block: "nearest" });
+  };
+
   return (
     <nav
       ref={contentRef}
       aria-label="Primary"
-      className="-ml-2 hidden min-w-0 items-center xl:flex"
+      // Overflow containment (9F-navigation-audit follow-up): a curated
+      // nav.primary list long enough to exceed the space this row shares
+      // with UtilityLinks (which is shrink-0 and never gives up width) used
+      // to bleed rightward with no containment at all, overlapping the
+      // utility links and, at a large enough item count, pushing the whole
+      // page into horizontal scroll. min-w-0 lets this flex child actually
+      // shrink to its allotted space; overflow-x-auto then keeps any content
+      // still wider than that INSIDE this element's own scroll box, so
+      // growth is contained here and can never reach the utility links or
+      // the page body. Every item remains reachable via horizontal scroll
+      // (trackpad/shift+wheel/touch) — nothing is hidden or removed.
+      className="-ml-2 hidden min-w-0 items-center overflow-x-auto xl:flex"
       onMouseLeave={closePanel}
+      onFocus={scrollFocusedIntoView}
     >
       {nav.items.map((item) => {
         const current = isCurrent(pathname, item.href);
