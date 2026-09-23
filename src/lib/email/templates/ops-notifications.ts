@@ -527,3 +527,56 @@ export function renderReconciliationAlertOps(d: {
     ]),
   };
 }
+
+/**
+ * Ops alert — the scheduled reconciliation job itself failed to complete (an
+ * exception was thrown before either check finished), so no PASS/WARN/FAIL
+ * result exists and no `AdminAuditLog` row was written for this run. Distinct
+ * from `renderReconciliationAlertOps`, which reports a COMPLETED run that
+ * found a WARN/FAIL business-data issue — this alert exists so an operator
+ * also learns when reconciliation did not run at all, not only when it found
+ * something wrong. `errorMessage` must already be sanitized by the caller
+ * (no secrets, no stack trace) before reaching this template.
+ */
+export function renderReconciliationFailureAlertOps(d: {
+  brand: string;
+  siteUrl: string;
+  failedAt: Date;
+  route: string;
+  errorMessage: string;
+}) {
+  const when = `${d.failedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Reconciliation job FAILED to run — ${when}`;
+  const rows =
+    kvRow("Failed at", when) +
+    kvRow("Job", "Scheduled reconciliation") +
+    kvRow("Route", d.route, { last: true });
+  const body = `
+    ${heading("Reconciliation did not complete")}
+    ${paragraph(
+      `Axiaro's scheduled reconciliation job failed to run to completion at ${when}. This is a job execution failure, not a detected reconciliation mismatch — the checks did not finish, so no result was produced for today's run.`,
+    )}
+    ${infoBox(rows)}
+    ${paragraph(`Error: ${d.errorMessage}`)}
+    ${paragraph("Investigate the job, the database connection, and the Vercel function logs for this route.")}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "Reconciliation did not complete",
+      ``,
+      `Axiaro's scheduled reconciliation job failed to run to completion at ${when}.`,
+      `This is a job execution failure, not a detected reconciliation mismatch — the checks did not finish, so no result was produced for today's run.`,
+      ``,
+      `Failed at: ${when}`,
+      `Job: Scheduled reconciliation`,
+      `Route: ${d.route}`,
+      ``,
+      `Error: ${d.errorMessage}`,
+      ``,
+      `Investigate the job, the database connection, and the Vercel function logs for this route.`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}

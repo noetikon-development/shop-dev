@@ -55,7 +55,7 @@ import {
   renderSellerVerificationApproved,
   renderSellerVerificationRejected,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps, renderReconciliationFailureAlertOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
@@ -4753,6 +4753,67 @@ export async function sendReconciliationAlertOps(params: {
     );
   } catch (err) {
     console.error("[email] sendReconciliationAlertOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/** Strips known secret-shaped substrings (credentialed URLs, bearer tokens,
+ *  API-key-looking tokens, secret/token/apikey query params) from a caught
+ *  error's message before it is ever placed into an outbound email. Reads
+ *  only `Error.message` — never `.stack`, never the original request/headers
+ *  — so there is no path for a raw Authorization header or connection string
+ *  to reach this alert. Exported for direct unit testing. */
+export function sanitizeReconciliationError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const MAX_LEN = 400;
+  const redacted = raw
+    .replace(/(\w+:\/\/)[^\s@/]+:[^\s@/]+@/g, "$1***:***@")
+    .replace(/\bBearer\s+[A-Za-z0-9._-]+/gi, "Bearer ***")
+    .replace(/\b(sk|pk)_(live|test)_[A-Za-z0-9]+/g, "$1_$2_***")
+    .replace(/([?&](?:password|apikey|api_key|token|secret)=)[^&\s]+/gi, "$1***");
+  return redacted.length > MAX_LEN ? `${redacted.slice(0, MAX_LEN)}…` : redacted;
+}
+
+/**
+ * Ops alert — the scheduled reconciliation job itself threw before producing
+ * a PASS/WARN/FAIL result (called from the cron route's `catch` block, see
+ * src/app/api/cron/reconciliation/route.ts). Distinct from
+ * `sendReconciliationAlertOps` (a COMPLETED run reporting WARN/FAIL) — this
+ * fires only on a hard execution failure, so an operator also learns when
+ * reconciliation did not run at all, not only when it found a mismatch.
+ * Deduplicated per calendar day under its OWN idempotency-key prefix
+ * (`RECONCILE_FAILURE_ALERT:`), so it can never collide with, or weaken the
+ * dedup of, the existing `RECONCILE_ALERT:` WARN/FAIL alert.
+ */
+export async function sendReconciliationFailureAlertOps(params: {
+  failedAt: Date;
+  dateKey: string;
+  route: string;
+  error: unknown;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    const errorMessage = sanitizeReconciliationError(params.error);
+    return renderAndDispatch(
+      {
+        type: "reconciliation_failure_alert_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `RECONCILE_FAILURE_ALERT:${params.dateKey}`,
+        client: params.client,
+      },
+      () =>
+        renderReconciliationFailureAlertOps({
+          brand,
+          siteUrl,
+          failedAt: params.failedAt,
+          route: params.route,
+          errorMessage,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendReconciliationFailureAlertOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

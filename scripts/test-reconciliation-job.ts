@@ -19,8 +19,21 @@
 import { readFileSync } from "node:fs";
 import { PrismaClient, type Prisma } from "@prisma/client";
 import { runReconciliationJob } from "../src/lib/marketplace/reconciliation-job";
-import { sendReconciliationAlertOps } from "../src/lib/email/notifications";
+import {
+  sendReconciliationAlertOps,
+  sendReconciliationFailureAlertOps,
+  sanitizeReconciliationError,
+} from "../src/lib/email/notifications";
+import { renderReconciliationFailureAlertOps } from "../src/lib/email/templates/ops-notifications";
 import { GET as cronGet } from "../src/app/api/cron/reconciliation/route";
+
+// This whole file dispatches email through the real sender functions — safe
+// everywhere in this suite (not just the new block below) because
+// getEmailConfig().configured is false under this exact invocation
+// (`--env-file=.env --conditions=react-server`, confirmed read-only before
+// writing these tests): no EMAIL_HOST/EMAIL_USER/EMAIL_PASSWORD are set in
+// .env, so every dispatchEmail() call here resolves to EmailLog status
+// SKIPPED, never a real SMTP attempt.
 
 const prisma = new PrismaClient({ datasourceUrl: process.env.DIRECT_URL || process.env.DATABASE_URL });
 
@@ -63,6 +76,7 @@ function staticTests() {
   const vercelJson = read("vercel.json");
   const cliPayments = read("scripts/reconcile-payments.ts");
   const cliMarketplace = read("scripts/reconcile-marketplace.ts");
+  const sendJson = read("src/lib/email/send.ts");
 
   ok("route · GET fails closed with no CRON_SECRET (503)", /if \(!secret\)[\s\S]{0,80}status: 503/.test(route));
   ok("route · requires Authorization: Bearer <CRON_SECRET>", /Authorization/.test(route) && /Bearer \$\{secret\}/.test(route));
@@ -70,6 +84,18 @@ function staticTests() {
   ok("route · POST → 405", /export async function POST[\s\S]{0,120}status: 405/.test(route));
   ok("route · calls runReconciliationJob", /runReconciliationJob\(\)/.test(route));
   ok("route · logs failures with console.error", /console\.error\("\[cron\] reconciliation failed"/.test(route));
+  ok(
+    "route · catch block sends a failure alert before returning 500 (error still logged, not swallowed)",
+    /catch \(err\)[\s\S]{0,60}console\.error\("\[cron\] reconciliation failed", err\)[\s\S]{0,300}sendReconciliationFailureAlertOps\([\s\S]{0,300}status: 500/.test(
+      route,
+    ),
+  );
+  ok("route · imports sendReconciliationFailureAlertOps from notifications.ts", /import \{ sendReconciliationFailureAlertOps \} from "@\/lib\/email\/notifications"/.test(route));
+
+  ok(
+    "send.ts · EmailType includes reconciliation_failure_alert_ops",
+    /"reconciliation_alert_ops"\s*\n\s*\|\s*"reconciliation_failure_alert_ops"/.test(sendJson),
+  );
 
   ok("vercel.json · seller-order-sla cron unchanged (0 9 * * *)", /"path": "\/api\/cron\/seller-order-sla"[\s\S]{0,40}"schedule": "0 9 \* \* \*"/.test(vercelJson));
   ok("vercel.json · reconciliation cron added at 09:30 UTC", /"path": "\/api\/cron\/reconciliation"[\s\S]{0,40}"schedule": "30 9 \* \* \*"/.test(vercelJson));
@@ -93,6 +119,71 @@ function staticTests() {
   ok("CLI · reconcile:payments still exits 1 only on fail>0", /if \(result\.fail > 0\) process\.exitCode = 1/.test(cliPayments));
   ok("CLI · reconcile:marketplace still calls runMarketplaceReconciliation", /runMarketplaceReconciliation\(prisma\)/.test(cliMarketplace));
   ok("CLI · reconcile:marketplace still exits 1 only on fail>0", /if \(result\.fail > 0\) process\.exitCode = 1/.test(cliMarketplace));
+}
+
+/** Pure, no-I/O tests for sanitizeReconciliationError + the failure-alert
+ *  template — no database, no email dispatch, nothing to roll back. */
+function sanitizerAndTemplateTests() {
+  const pgUrl = "postgresql://myuser:sup3rSecret@db.example.supabase.co:5432/postgres";
+  ok(
+    "sanitize · Postgres connection-string credentials are redacted",
+    !sanitizeReconciliationError(new Error(`connect failed: ${pgUrl}`)).includes("sup3rSecret") &&
+      sanitizeReconciliationError(new Error(`connect failed: ${pgUrl}`)).includes("***:***@"),
+  );
+  ok(
+    "sanitize · a Bearer token is redacted",
+    !sanitizeReconciliationError(new Error("upstream said: Authorization: Bearer abc123.def456-XYZ")).includes(
+      "abc123.def456-XYZ",
+    ),
+  );
+  ok(
+    "sanitize · a PayMongo-style sk_live_/pk_test_ key is redacted",
+    !sanitizeReconciliationError(new Error("bad key sk_live_51H8x9nQwErTyUiOp")).includes("51H8x9nQwErTyUiOp") &&
+      !sanitizeReconciliationError(new Error("bad key pk_test_9zZ8yYwWvVuUtT")).includes("9zZ8yYwWvVuUtT"),
+  );
+  ok(
+    "sanitize · a secret/token/apikey query-string param is redacted",
+    !sanitizeReconciliationError(new Error("GET /x?apikey=abcdef123&other=1 failed")).includes("abcdef123") &&
+      !sanitizeReconciliationError(new Error("GET /x?token=zzz999 failed")).includes("zzz999"),
+  );
+  ok(
+    "sanitize · an ordinary error message passes through unredacted (no over-redaction)",
+    sanitizeReconciliationError(new Error("connect ECONNREFUSED 127.0.0.1:5432")) ===
+      "connect ECONNREFUSED 127.0.0.1:5432",
+  );
+  ok(
+    "sanitize · a long message is truncated with an ellipsis",
+    sanitizeReconciliationError(new Error("x".repeat(1000))).length <= 401 &&
+      sanitizeReconciliationError(new Error("x".repeat(1000))).endsWith("…"),
+  );
+  ok(
+    "sanitize · a non-Error thrown value (e.g. a string) does not crash and returns a string",
+    typeof sanitizeReconciliationError("plain string throw") === "string",
+  );
+  ok(
+    "sanitize · never reads .stack (a stack-only marker never appears in the output)",
+    (() => {
+      const e = new Error("boom");
+      e.stack = "boom\n    at STACK_ONLY_MARKER (file.ts:1:1)";
+      return !sanitizeReconciliationError(e).includes("STACK_ONLY_MARKER");
+    })(),
+  );
+
+  const rendered = renderReconciliationFailureAlertOps({
+    brand: "Axiaro",
+    siteUrl: "https://axiaro.shop",
+    failedAt: new Date("2026-09-23T09:30:00Z"),
+    route: "GET /api/cron/reconciliation",
+    errorMessage: "connect ECONNREFUSED 127.0.0.1:5432",
+  });
+  ok("template · subject clearly states the job FAILED to run", /FAILED to run/.test(rendered.subject));
+  ok(
+    "template · text explicitly distinguishes execution failure from a detected mismatch",
+    /job execution failure, not a detected reconciliation mismatch/.test(rendered.text),
+  );
+  ok("template · text tells the operator to investigate job/database/Vercel logs", /Investigate the job, the database connection, and the Vercel function logs/.test(rendered.text));
+  ok("template · includes the (already-sanitized) error message", rendered.text.includes("connect ECONNREFUSED 127.0.0.1:5432"));
+  ok("template · html mirrors the same FAILED wording", /did not complete/.test(rendered.html) && /Reconciliation job FAILED to run/.test(rendered.html));
 }
 
 async function dbTests() {
@@ -175,6 +266,53 @@ async function dbTests() {
       });
       ok("D-alert · repeating the SAME FAIL dateKey is deduped too", r4.ok === true && r4.deduped === true);
 
+      // ── Failure-alert dedup contract — mirrors the D-alert block above
+      //    exactly, under the failure alert's OWN idempotency-key prefix
+      //    (RECONCILE_FAILURE_ALERT:), so it can be proven independent of the
+      //    existing RECONCILE_ALERT: dedup rather than merely assumed.
+      const failureKey = "2099-06-03";
+      const f1 = await sendReconciliationFailureAlertOps({
+        failedAt: new Date(), dateKey: failureKey, route: "GET /api/cron/reconciliation",
+        error: new Error("simulated DB timeout"), client: tx,
+      });
+      ok("E-failure-alert · first failure alert for a fresh dateKey is not deduped", f1.ok === true && !f1.deduped);
+      ok(
+        "E-failure-alert · exactly one EmailLog row exists under RECONCILE_FAILURE_ALERT:",
+        (await tx.emailLog.count({ where: { idempotencyKey: `RECONCILE_FAILURE_ALERT:${failureKey}` } })) === 1,
+      );
+      const f2 = await sendReconciliationFailureAlertOps({
+        failedAt: new Date(), dateKey: failureKey, route: "GET /api/cron/reconciliation",
+        error: new Error("simulated DB timeout"), client: tx,
+      });
+      ok("E-failure-alert · a second call with the SAME dateKey is deduped", f2.ok === true && f2.deduped === true);
+      ok(
+        "E-failure-alert · still exactly one EmailLog row for that key (no duplicate)",
+        (await tx.emailLog.count({ where: { idempotencyKey: `RECONCILE_FAILURE_ALERT:${failureKey}` } })) === 1,
+      );
+
+      // ── Independence from the existing WARN/FAIL alert dedup — the SAME
+      //    calendar dateKey must not collide across the two alert kinds; each
+      //    gets its own EmailLog row under its own key prefix.
+      const sharedDateKey = "2099-06-04";
+      const warnAlert = await sendReconciliationAlertOps({
+        status: "WARN", runAt: new Date(), dateKey: sharedDateKey,
+        payments: { pass: 1, warn: 1, fail: 0 }, marketplace: { pass: 1, warn: 0, fail: 0 },
+        details: ["[payments] [WARN] test line"], truncatedCount: 0, client: tx,
+      });
+      const failureAlert = await sendReconciliationFailureAlertOps({
+        failedAt: new Date(), dateKey: sharedDateKey, route: "GET /api/cron/reconciliation",
+        error: new Error("simulated crash"), client: tx,
+      });
+      ok(
+        "E-failure-alert · a WARN/FAIL alert and a failure alert on the SAME calendar day do not collide/dedupe each other",
+        warnAlert.ok === true && !warnAlert.deduped && failureAlert.ok === true && !failureAlert.deduped,
+      );
+      ok(
+        "E-failure-alert · both EmailLog rows exist independently (distinct idempotency keys)",
+        (await tx.emailLog.count({ where: { idempotencyKey: `RECONCILE_ALERT:${sharedDateKey}` } })) === 1 &&
+          (await tx.emailLog.count({ where: { idempotencyKey: `RECONCILE_FAILURE_ALERT:${sharedDateKey}` } })) === 1,
+      );
+
       throw new Rollback();
     }, { timeout: 120_000, maxWait: 15_000 });
   } catch (e) {
@@ -222,6 +360,8 @@ async function main() {
   console.log("\nAutomated reconciliation scheduling/alerting — tests\n");
   console.log("Static wiring");
   staticTests();
+  console.log("\nFailure-alert sanitizer + template (pure, no I/O)");
+  sanitizerAndTemplateTests();
   console.log("\nDatabase (rolled back, except the one sanctioned D4 write below)");
   await dbTests();
   console.log("\nCron auth (D4 performs one real, sanctioned AdminAuditLog write)");

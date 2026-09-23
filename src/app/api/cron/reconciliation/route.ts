@@ -1,4 +1,7 @@
 import { runReconciliationJob } from "@/lib/marketplace/reconciliation-job";
+import { sendReconciliationFailureAlertOps } from "@/lib/email/notifications";
+
+const ROUTE_NAME = "GET /api/cron/reconciliation";
 
 /**
  * Automated reconciliation scheduling/alerting.
@@ -30,6 +33,17 @@ import { runReconciliationJob } from "@/lib/marketplace/reconciliation-job";
  * PaymentRefund / ReturnRequest / Seller / SellerSettlement / Product /
  * inventory row — only an AdminAuditLog row and, on WARN/FAIL, an EmailLog
  * row for the alert.
+ *
+ * Hard execution failure (the try below throws before runReconciliationJob
+ * returns, so no PASS/WARN/FAIL result and no AdminAuditLog row exist for
+ * this run): the catch block still logs to the console AND now also sends a
+ * distinct, deduplicated (per calendar day, its own idempotency-key prefix)
+ * "reconciliation did not complete" ops alert — see
+ * sendReconciliationFailureAlertOps in src/lib/email/notifications.ts. This
+ * never replaces or weakens the existing WARN/FAIL alert; it exists only for
+ * the case that alert can never cover (the job never got that far). The
+ * error is sanitized before it ever leaves this process — see
+ * sanitizeReconciliationError.
  */
 
 export const runtime = "nodejs";
@@ -58,6 +72,13 @@ export async function GET(request: Request): Promise<Response> {
     });
   } catch (err) {
     console.error("[cron] reconciliation failed", err);
+    const failedAt = new Date();
+    await sendReconciliationFailureAlertOps({
+      failedAt,
+      dateKey: failedAt.toISOString().slice(0, 10),
+      route: ROUTE_NAME,
+      error: err,
+    });
     return Response.json({ ok: false, error: "reconciliation_failed" }, { status: 500 });
   }
 }

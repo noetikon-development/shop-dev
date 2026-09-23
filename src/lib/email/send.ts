@@ -127,7 +127,8 @@ export type EmailType =
   | "order_partially_cancelled"
   // Automated reconciliation scheduling/alerting — Ops alert for a WARN/FAIL
   // scheduled reconciliation run. Never sent for a clean PASS.
-  | "reconciliation_alert_ops";
+  | "reconciliation_alert_ops"
+  | "reconciliation_failure_alert_ops";
 
 export type DispatchInput = {
   type: EmailType;
