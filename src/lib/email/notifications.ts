@@ -515,6 +515,12 @@ export async function sendEmailFailureAlertOps(
 const ORDER_INCLUDE = {
   items: { orderBy: { id: "asc" } as const },
   user: { select: { name: true } },
+  // Store Pickup confirmation-email display (9F-49 email step). Phase-1
+  // assumption: only Axiaro-owned, order-wide pickup locations exist today,
+  // so checkout.ts writes the SAME resolved location onto every SellerOrder —
+  // reading sellerOrders[0]'s snapshot is safe. Revisit if seller-owned or
+  // per-seller pickup locations are ever introduced.
+  sellerOrders: { select: { pickupLocationId: true, pickupLocationSnapshot: true } },
 } as const;
 
 /**
@@ -602,6 +608,10 @@ export async function sendOrderConfirmation(
           // order is auto-confirmed to PROCESSING but is still collected on
           // delivery.
           payOnDelivery: isPayOnDeliveryOrder(order),
+          pickup: isStorePickupCode(order.shippingMethodCode),
+          // Phase-1 assumption (see ORDER_INCLUDE above): any one SellerOrder's
+          // snapshot is representative of the whole order today.
+          pickupLocationSnapshot: order.sellerOrders[0]?.pickupLocationSnapshot ?? null,
         }),
     );
   } catch (err) {
