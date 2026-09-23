@@ -170,6 +170,144 @@ retention, recovery-point availability, and restore capability are all
 unavailable in this environment. This also says nothing about Supabase
 Storage — no Storage backup capability is verified or claimed.
 
+### Supabase Backup/PITR Verification — 2026-09-23
+
+A follow-up read-only audit, performed 2026-09-23, re-checked the same
+PostgreSQL system views and added two checks the 2026-09-17 pass did not
+run (`SHOW archive_mode`, `SHOW archive_command`). No Supabase Dashboard or
+Management API access was available for this audit either — the same
+limitation as 2026-09-17.
+
+**A. Production database identity — VERIFIED**
+
+- Supabase project ref: `lccwdwsmidjdjhrzjixr` (confirmed independently via
+  `supabase/config.toml`'s `project_id` and the `lccwdwsmidjdjhrzjixr.supabase.co`
+  Storage URLs the live site actually serves).
+- Database: `postgres`.
+- PostgreSQL version: `17.6`.
+- Preview, Production, and local development currently share this single
+  database — already documented above (§B); re-confirmed, not independently
+  re-verified, in this pass.
+
+**B. Infrastructure-level WAL evidence — VERIFIED**
+
+- `archive_mode = on`.
+- `archive_command = '/usr/bin/admin-mgr wal-push %p >> /var/log/wal-g/wal-push.log 2>&1'`
+  — continuous archiving via **WAL-G**.
+- `pg_stat_archiver.archived_count` has increased from 2,834 (2026-09-17) to
+  approximately 3,022 (2026-09-23) — archiving is ongoing, not a one-time or
+  stalled process.
+- `pg_stat_archiver.failed_count = 0` in both the 2026-09-17 and 2026-09-23
+  checks — no observed archiver failures.
+
+**WAL archiving activity is infrastructure-level evidence and does not by
+itself establish customer-facing backup/PITR entitlement, enablement,
+retention, or restore capability.** Do not read the items above as evidence
+that PITR is enabled, that a specific restore point exists, or that a
+restore would succeed.
+
+**C. Backup/PITR items requiring Dashboard access**
+
+| Item | Status |
+| --- | --- |
+| Production Supabase plan/tier | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| Automated backup schedule | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| Backup retention window | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| PITR availability (plan entitlement) | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| PITR enabled/disabled status | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| PITR retention/recovery window | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| Earliest restorable point | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+| Documented/supported restore mechanism | **NOT VERIFIED** — Supabase Dashboard/Management API access required. |
+
+**D. Recovery mechanisms — current state**
+
+- **Vercel application rollback/deployment** is available (§E), but is a
+  fresh build from a chosen commit — **not an instant rollback**.
+- **No verified database restore procedure exists** — neither a Supabase-side
+  one (blocked on dashboard access, table above) nor a repository-side one.
+- **`npm run db:dump-seed` (`scripts/dump-seed-sql.mjs`) is NOT a
+  disaster-recovery backup.** It intentionally excludes all
+  transactional/business data — its own source comment lists `User, Address,
+  Order*, Review, WishlistItem, UserRole, AdminInvite, AdminAuditLog` as
+  deliberately excluded — and only snapshots catalogue/reference tables
+  (`Category, Product, ProductImage, ProductOption, ProductOptionValue,
+  Variant, VariantOptionValue, Inventory, Coupon, StoreSetting,
+  ShippingMethod, ContentPage, ContentBlock, Permission, Role,
+  RolePermission`) for local-dev seeding. It provides no recovery path for
+  orders, payments, sellers, or users.
+- **No `db:backup` or `db:restore` script exists** in `package.json` —
+  confirmed directly against the full script list.
+- **No CI/CD pipeline or scheduled job** referencing a database backup was
+  found anywhere in this repository.
+- **No verified Supabase Storage backup/recovery mechanism exists** for the
+  `media` or `seller-verification` buckets (see §H, unchanged).
+
+**E. RPO / RTO**
+
+**RPO: NOT VERIFIED.**
+**RTO: NOT VERIFIED.**
+
+- WAL archiving activity does not, by itself, establish this project's
+  actual recoverable window — it shows continuous data capture is
+  *occurring*, not what window is *restorable* on this plan.
+- No restore has ever been performed or timed against this project, so no
+  RTO can be estimated from experience.
+- No dashboard-confirmed retention or restore capability is available to
+  derive either figure from. Do not substitute an assumed or
+  industry-typical number for either value.
+
+**F. Recovery-readiness gaps**
+
+1. No Supabase Dashboard/Management API access is available from this
+   environment or any prior audit — every backup/PITR-specific fact (plan,
+   retention, enabled/disabled status, earliest restorable point) is
+   unverifiable from here and requires someone with dashboard access.
+2. No database restore has ever been tested — even if a backup/PITR
+   capability turns out to be enabled, RTO remains unknown until one is
+   tested.
+3. No real transactional-data backup tooling exists in this repository —
+   `db:dump-seed` is the only dump-like script, and it is scoped to
+   demo/catalogue data only (see D above).
+4. `db:dump-seed`'s name could cause a future operator to mistake it for a
+   backup mechanism during an actual incident; it is not one.
+5. No verified Supabase Storage backup/recovery procedure exists for the
+   `media` or `seller-verification` buckets.
+6. The existing schema/migration rebuild process (§J) — no
+   `_prisma_migrations` tracking table, manual `supabase/migrations/*.sql`
+   application in filename order — has limitations that compound the risk
+   of a from-scratch rebuild during a real disaster, independent of whether
+   the underlying *data* can be restored.
+
+**G. Required follow-up information (outstanding, requires Supabase Dashboard access)**
+
+The following remain outstanding and require an operator with authorized
+Supabase Dashboard access to check directly — **do not fabricate values for
+any of these fields**:
+
+- Production Supabase plan/tier
+- Automated backup configuration and schedule
+- Backup retention window
+- Whether PITR is enabled for this project
+- PITR retention/recovery window, if enabled
+- Earliest currently restorable point, if any
+- The actual, dashboard-supported restore workflow (steps, expected
+  duration, who can trigger it)
+
+**H. Recommended future restore test (not executed)**
+
+Once the items in **G** are confirmed, this project should run a **controlled
+restore test in a non-Production environment** (a separate Supabase project,
+or a project-branching/point-in-time-preview feature if the confirmed plan
+supports one) to:
+
+- validate that a restore actually succeeds end-to-end,
+- measure the real time required (establishing an evidence-based RTO), and
+- validate the recovery procedure documented in this runbook actually works
+  as written, rather than remaining a paper procedure.
+
+This test is **recommended, not performed**. No restore of any kind was
+executed as part of writing this section.
+
 ## G. Database Recovery
 
 Decision process:
