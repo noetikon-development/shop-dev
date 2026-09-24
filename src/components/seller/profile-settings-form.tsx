@@ -195,6 +195,12 @@ export function ProfileSettingsForm({
                 ))}
               </Select>
             </FormField>
+            <FormField label="Latitude (optional)" htmlFor="originAddress.lat">
+              <input id="originAddress.lat" name="originAddress.lat" maxLength={20} defaultValue={oa?.lat ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Longitude (optional)" htmlFor="originAddress.lng">
+              <input id="originAddress.lng" name="originAddress.lng" maxLength={20} defaultValue={oa?.lng ?? ""} className="field text-sm" />
+            </FormField>
           </div>
         </fieldset>
 

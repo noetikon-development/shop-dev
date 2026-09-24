@@ -28,9 +28,16 @@ export const SELLER_ORIGIN_ADDRESS_FIELDS = [
   "postalCode",
   "country",
   "phone",
+  "lat",
+  "lng",
 ] as const;
 
 const REQUIRED_ADDRESS_FIELDS = ["recipient", "line1", "city", "province", "postalCode", "country", "phone"] as const;
+
+/** A plain decimal number, optionally signed — never scientific notation. */
+function isNumericString(raw: string): boolean {
+  return /^-?\d+(\.\d+)?$/.test(raw);
+}
 
 export type SellerOriginAddressValidation =
   | { ok: true; value: SellerOriginAddress | null }
@@ -55,6 +62,8 @@ export function validateSellerOriginAddress(raw: Record<string, unknown>): Selle
     postalCode: field("postalCode"),
     country: field("country").toUpperCase(),
     phone: field("phone"),
+    lat: field("lat"),
+    lng: field("lng"),
   };
 
   const anyFilled = SELLER_ORIGIN_ADDRESS_FIELDS.some((k) => parts[k] !== "");
@@ -78,6 +87,15 @@ export function validateSellerOriginAddress(raw: Record<string, unknown>): Selle
   }
   if (parts.phone.length > 30) return { ok: false, error: "Pickup address — the phone number is too long." };
 
+  // Coordinates are optional and never geocoded — a seller pastes them in
+  // manually (e.g. from a map link) for a future real-carrier pickup booking.
+  if (parts.lat !== "" && (!isNumericString(parts.lat) || Number(parts.lat) < -90 || Number(parts.lat) > 90)) {
+    return { ok: false, error: "Pickup address — latitude must be a number between -90 and 90." };
+  }
+  if (parts.lng !== "" && (!isNumericString(parts.lng) || Number(parts.lng) < -180 || Number(parts.lng) > 180)) {
+    return { ok: false, error: "Pickup address — longitude must be a number between -180 and 180." };
+  }
+
   return {
     ok: true,
     value: {
@@ -90,6 +108,8 @@ export function validateSellerOriginAddress(raw: Record<string, unknown>): Selle
       postalCode: parts.postalCode,
       country: parts.country,
       phone: parts.phone,
+      lat: parts.lat || null,
+      lng: parts.lng || null,
     },
   };
 }
@@ -126,6 +146,8 @@ export function parseSellerOriginAddress(raw: Prisma.JsonValue | null | undefine
     postalCode: s("postalCode"),
     country: s("country"),
     phone: s("phone"),
+    lat: s("lat") || null,
+    lng: s("lng") || null,
   };
 }
 

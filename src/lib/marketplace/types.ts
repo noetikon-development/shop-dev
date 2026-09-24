@@ -40,6 +40,10 @@ export type SellerReturnAddress = {
  * `SellerReturnAddress`, deliberately a distinct type: this is where a carrier
  * would collect a forward shipment FROM, not where a customer sends a return
  * TO. Part of the moderated profile bundle. DATA ONLY — nothing reads it yet.
+ *
+ * `lat`/`lng` are optional, manually-supplied coordinates (never geocoded by
+ * Axiaro) — a future real-provider pickup booking (e.g. Lalamove) requires
+ * them, but nothing reads them yet.
  */
 export type SellerOriginAddress = {
   recipient: string;
@@ -51,6 +55,8 @@ export type SellerOriginAddress = {
   postalCode: string;
   country: string;
   phone: string;
+  lat?: string | null;
+  lng?: string | null;
 };
 
 /** The seller-editable, MODERATED store-profile bundle. */

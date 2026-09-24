@@ -71,6 +71,66 @@ function pureTests() {
     validateSellerOriginAddress !== (validateSellerReturnAddress as unknown));
 }
 
+// ── coordinates (lat/lng) — optional, manual, never geocoded ────────────
+function coordinateTests() {
+  console.log("\n── coordinates — lat/lng validation / parse round-trip ──");
+
+  ok("coord · an address with no lat/lng remains valid, both null",
+    (() => {
+      const r = validateSellerOriginAddress(ADDR);
+      return r.ok && r.value != null && r.value.lat === null && r.value.lng === null;
+    })());
+
+  ok("coord · valid lat/lng are accepted and returned as-is",
+    (() => {
+      const r = validateSellerOriginAddress({ ...ADDR, lat: "13.7565", lng: "121.0583" });
+      return r.ok && r.value?.lat === "13.7565" && r.value?.lng === "121.0583";
+    })());
+
+  ok("coord · a negative, in-range lat/lng pair is accepted",
+    (() => {
+      const r = validateSellerOriginAddress({ ...ADDR, lat: "-33.8688", lng: "-70.6483" });
+      return r.ok && r.value?.lat === "-33.8688" && r.value?.lng === "-70.6483";
+    })());
+
+  ok("coord · non-numeric latitude is rejected",
+    !validateSellerOriginAddress({ ...ADDR, lat: "not-a-number", lng: "121.0583" }).ok);
+
+  ok("coord · non-numeric longitude is rejected",
+    !validateSellerOriginAddress({ ...ADDR, lat: "13.7565", lng: "not-a-number" }).ok);
+
+  ok("coord · latitude outside -90..90 is rejected (91)",
+    !validateSellerOriginAddress({ ...ADDR, lat: "91", lng: "121.0583" }).ok);
+  ok("coord · latitude outside -90..90 is rejected (-91)",
+    !validateSellerOriginAddress({ ...ADDR, lat: "-91", lng: "121.0583" }).ok);
+
+  ok("coord · longitude outside -180..180 is rejected (181)",
+    !validateSellerOriginAddress({ ...ADDR, lat: "13.7565", lng: "181" }).ok);
+  ok("coord · longitude outside -180..180 is rejected (-181)",
+    !validateSellerOriginAddress({ ...ADDR, lat: "13.7565", lng: "-181" }).ok);
+
+  ok("coord · boundary values -90/90 and -180/180 are accepted",
+    validateSellerOriginAddress({ ...ADDR, lat: "90", lng: "180" }).ok &&
+    validateSellerOriginAddress({ ...ADDR, lat: "-90", lng: "-180" }).ok);
+
+  ok("coord · lat/lng error messages are pickup-address-specific",
+    /Pickup address — latitude/.test((validateSellerOriginAddress({ ...ADDR, lat: "999" }) as { error: string }).error) &&
+    /Pickup address — longitude/.test((validateSellerOriginAddress({ ...ADDR, lat: "13.7565", lng: "999" }) as { error: string }).error));
+
+  ok("coord · parseSellerOriginAddress round-trips lat/lng from a stored blob",
+    (() => {
+      const stored = { ...ADDR, lat: "13.7565", lng: "121.0583" };
+      const p = parseSellerOriginAddress(stored);
+      return p?.lat === "13.7565" && p?.lng === "121.0583";
+    })());
+
+  ok("coord · parseSellerOriginAddress returns null lat/lng when the stored blob has none",
+    (() => {
+      const p = parseSellerOriginAddress(ADDR);
+      return p?.lat === null && p?.lng === null;
+    })());
+}
+
 // ── DB (transactional — rolls back, nothing persists) ──────────────────
 async function dbTests() {
   console.log("\n── DB (transaction rolls back — no persisted writes) ──");
@@ -156,6 +216,7 @@ async function prodTests() {
 async function main() {
   console.log("\nSeller pickup / origin address — data-only field\n");
   pureTests();
+  coordinateTests();
   await dbTests();
   await prodTests();
   console.log(`\n${pass} passed, ${fail} failed\n`);
