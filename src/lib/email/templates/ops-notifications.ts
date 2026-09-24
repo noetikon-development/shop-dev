@@ -638,3 +638,68 @@ export function renderReconciliationStaleRunAlertOps(d: {
     ]),
   };
 }
+
+/**
+ * Phase 9F-48 step 5 — a Lalamove webhook normalized to EXCEPTION (the
+ * carrier reported CANCELED, REJECTED, or EXPIRED). Informational only: the
+ * subject and body always name the ACTUAL raw carrier status, never a generic
+ * "shipment exception" message that would hide which of the three occurred.
+ */
+export function renderLalamoveShipmentExceptionOps(d: {
+  brand: string;
+  siteUrl: string;
+  provider: string;
+  rawStatus: string;
+  orderNumber: string;
+  orderId: string;
+  sellerOrderId: string;
+  shipmentId: string;
+  externalShipmentId: string | null;
+  providerEventId: string;
+  occurredAt: Date;
+}) {
+  const occurred = `${d.occurredAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `${d.provider} shipment ${d.rawStatus} — order ${d.orderNumber}`;
+  const rows =
+    kvRow("Order", d.orderNumber) +
+    kvRow("Carrier", d.provider) +
+    kvRow("Carrier status", d.rawStatus) +
+    kvRow("Axiaro normalized status", "EXCEPTION") +
+    kvRow("Order ID", d.orderId) +
+    kvRow("SellerOrder ID", d.sellerOrderId) +
+    kvRow("Shipment ID", d.shipmentId) +
+    kvRow("External shipment ID", d.externalShipmentId ?? "—") +
+    kvRow("Provider event ID", d.providerEventId) +
+    kvRow("Occurred", occurred, { last: true });
+  const body = `
+    ${heading("Carrier shipment exception")}
+    ${paragraph(
+      `${d.provider} reported the shipment for order ${d.orderNumber} as ${d.rawStatus}. No automatic change has been made to the shipment, seller order, or order status — this requires operator review.`,
+    )}
+    ${infoBox(rows)}
+    ${paragraph("Owner: Axiaro Platform Operations. Decide whether to cancel, rebook with the carrier, contact the seller, or otherwise intervene.")}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "Carrier shipment exception",
+      ``,
+      `${d.provider} reported the shipment for order ${d.orderNumber} as ${d.rawStatus}. No automatic change has been made to the shipment, seller order, or order status — this requires operator review.`,
+      ``,
+      `Order: ${d.orderNumber}`,
+      `Carrier: ${d.provider}`,
+      `Carrier status: ${d.rawStatus}`,
+      `Axiaro normalized status: EXCEPTION`,
+      `Order ID: ${d.orderId}`,
+      `SellerOrder ID: ${d.sellerOrderId}`,
+      `Shipment ID: ${d.shipmentId}`,
+      `External shipment ID: ${d.externalShipmentId ?? "—"}`,
+      `Provider event ID: ${d.providerEventId}`,
+      `Occurred: ${occurred}`,
+      ``,
+      `Owner: Axiaro Platform Operations. Decide whether to cancel, rebook with the carrier, contact the seller, or otherwise intervene.`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}

@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { getProviderByCode } from "@/lib/shipping/registry";
 import { advanceSellerOrderStatusFromWebhook } from "@/lib/marketplace/seller-order-repository";
+import { sendLalamoveShipmentExceptionOps } from "@/lib/email/notifications";
 
 /**
  * Provider-agnostic shipping-webhook processing (Phase 9F-48, Lalamove first).
@@ -11,20 +12,27 @@ import { advanceSellerOrderStatusFromWebhook } from "@/lib/marketplace/seller-or
  * raw body, hand it here with the `provider` path segment, translate the
  * result to a status code — same split as `processPaymongoWebhook`.
  *
- * Sequence, unchanged in shape from before this phase, now with one more
- * step at the end: verify → parse → dedupe by `(provider, providerEventId)`
+ * Sequence, unchanged in shape from before this phase, now with two more
+ * steps at the end: verify → parse → dedupe by `(provider, providerEventId)`
  * → if a matching `Shipment` row exists, record a `ShipmentEvent` and update
  * `Shipment.lastCarrierStatus` / `lastCarrierStatusAt` → NORMAL-STATUS CASCADE
- * (Phase 9F-48 step 4). The cascade only ever calls the EXISTING
- * `SellerOrder`/`Shipment`/`Order` transition authority
- * (`advanceSellerOrderStatusFromWebhook`, which shares its guarded core with
- * the seller-facing `advanceSellerOrderStatus`) — this module never writes a
- * `SellerOrder.status`/`Shipment.status`/`Order.status` column itself.
+ * (Phase 9F-48 step 4) → EXCEPTION OPS ALERT (Phase 9F-48 step 5). The normal
+ * cascade only ever calls the EXISTING `SellerOrder`/`Shipment`/`Order`
+ * transition authority (`advanceSellerOrderStatusFromWebhook`, which shares
+ * its guarded core with the seller-facing `advanceSellerOrderStatus`) — this
+ * module never writes a `SellerOrder.status`/`Shipment.status`/`Order.status`
+ * column itself.
  *
- * CANCELED / REJECTED / EXPIRED (`normStatus === "EXCEPTION"`) are explicitly
- * OUT OF SCOPE for this phase: the event is recorded exactly as before, but no
- * cascade is attempted for them — that is a separate, not-yet-built
- * ops-alerting task.
+ * CANCELED / REJECTED / EXPIRED (`normStatus === "EXCEPTION"`) never trigger a
+ * cascade — no automatic `Shipment`/`SellerOrder`/`Order` status change is
+ * ever made for them. Instead, one deduplicated, informational
+ * `sendLalamoveShipmentExceptionOps()` alert is raised so a human operator can
+ * decide whether to cancel, rebook, contact the seller, or otherwise
+ * intervene. The alert is sent AFTER the record-and-cascade transaction
+ * commits (same post-commit, best-effort discipline as the rollup audit in
+ * `advanceSellerOrderStatus`/`advanceSellerOrderStatusFromWebhook`) — email
+ * delivery never throws (`renderAndDispatch` catches everything), so it can
+ * never turn a successfully-processed webhook into a 5xx.
  *
  * In practice this whole path is inert until a real `Shipment.provider =
  * "LALAMOVE"` row exists, which requires `shipping.integrationEnabled = true`
@@ -96,13 +104,18 @@ export async function processShippingWebhook(
 
     const shipment = await client.shipment.findFirst({
       where: { provider: providerCode.toUpperCase(), externalShipmentId: event.externalShipmentId },
-      select: { id: true, status: true, sellerOrderId: true, sellerOrder: { select: { sellerId: true } } },
+      select: {
+        id: true,
+        status: true,
+        sellerOrderId: true,
+        sellerOrder: { select: { sellerId: true, order: { select: { id: true, orderNumber: true } } } },
+      },
     });
     // No matching Axiaro Shipment — expected while the provider is dormant /
     // under test (no LALAMOVE Shipment rows exist yet). Not an error.
     if (!shipment) continue;
 
-    const recordAndCascade = async (tx: Prisma.TransactionClient) => {
+    const recordAndCascade = async (tx: Prisma.TransactionClient): Promise<{ exceptionAlert: boolean }> => {
       await tx.shipmentEvent.create({
         data: {
           shipmentId: shipment.id,
@@ -121,9 +134,17 @@ export async function processShippingWebhook(
         data: { lastCarrierStatus: event.rawStatus, lastCarrierStatusAt: event.occurredAt },
       });
 
+      // CANCELED / REJECTED / EXPIRED — flag for an Ops alert (sent after
+      // this transaction commits, never inside it) and take NO automatic
+      // action. Independent of the terminal-safety check below: an exception
+      // is informational, not a transition attempt, so it's still surfaced
+      // even for an already-DELIVERED Shipment (an operator may still want
+      // to know the carrier later reported something unusual about it).
+      if (event.normStatus === "EXCEPTION") return { exceptionAlert: true };
+
       // Terminal safety: a Shipment already DELIVERED never attempts
       // another transition — the event above is still recorded either way.
-      if (shipment.status === "DELIVERED") return;
+      if (shipment.status === "DELIVERED") return { exceptionAlert: false };
 
       for (const to of cascadeTargetsFor(event.normStatus)) {
         await advanceSellerOrderStatusFromWebhook(tx, {
@@ -140,19 +161,40 @@ export async function processShippingWebhook(
         // this event. Continuing to the next hop (SHIPPED → DELIVERED) is
         // exactly the out-of-order-COMPLETED behaviour this phase requires.
       }
+      return { exceptionAlert: false };
     };
 
     try {
-      if ("$transaction" in client) {
-        await client.$transaction(recordAndCascade);
-      } else {
-        await recordAndCascade(client);
+      const result = "$transaction" in client ? await client.$transaction(recordAndCascade) : await recordAndCascade(client);
+
+      if (result.exceptionAlert) {
+        // Post-commit, best-effort — same discipline as the rollup audit.
+        // `client === prisma` (production) lets the sender fall back to its
+        // own default (a real send); a test-supplied transaction client is
+        // threaded through so the EmailLog write lands in that SAME
+        // transaction and rolls back with everything else, exactly like
+        // `reconciliation-watchdog.ts`'s own `sendReconciliationStaleRunAlertOps` call.
+        const emailClient = client === prisma ? undefined : (client as Prisma.TransactionClient);
+        await sendLalamoveShipmentExceptionOps({
+          provider: event.provider,
+          rawStatus: event.rawStatus,
+          orderId: shipment.sellerOrder.order.id,
+          orderNumber: shipment.sellerOrder.order.orderNumber,
+          sellerOrderId: shipment.sellerOrderId,
+          shipmentId: shipment.id,
+          externalShipmentId: event.externalShipmentId,
+          providerEventId: event.providerEventId,
+          occurredAt: event.occurredAt,
+          client: emailClient,
+        });
       }
     } catch (err) {
       // @@unique([provider, providerEventId]) — Lalamove retries a webhook up
       // to 10x within 24h; a duplicate delivery throws P2002 here. That IS
-      // success (the event was already recorded once, cascade already
-      // attempted then) — never a duplicate row, never a second cascade.
+      // success (the event was already recorded once, cascade/alert already
+      // attempted then) — never a duplicate row, never a second cascade or
+      // a second alert (this catch fires BEFORE the exceptionAlert branch
+      // above is ever reached for a duplicate).
       if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") continue;
       console.error("[shipping/webhook] failed to record ShipmentEvent", err);
     }

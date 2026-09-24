@@ -55,7 +55,7 @@ import {
   renderSellerVerificationApproved,
   renderSellerVerificationRejected,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps, renderReconciliationFailureAlertOps, renderReconciliationStaleRunAlertOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps, renderReconciliationFailureAlertOps, renderReconciliationStaleRunAlertOps, renderLalamoveShipmentExceptionOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
@@ -4851,6 +4851,66 @@ export async function sendReconciliationStaleRunAlertOps(params: {
     );
   } catch (err) {
     console.error("[email] sendReconciliationStaleRunAlertOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Phase 9F-48 step 5 — informational Ops alert for a Lalamove webhook that
+ * normalized to EXCEPTION (carrier-reported CANCELED / REJECTED / EXPIRED).
+ * Same shape as `sendReconciliationStaleRunAlertOps`: every field the caller
+ * already has in hand is passed directly (no DB re-read here), and
+ * `idempotencyKey` is keyed on the carrier's own `providerEventId` — the SAME
+ * id `ShipmentEvent`'s own `@@unique([provider, providerEventId])` dedupes
+ * on — so a duplicate webhook delivery can never raise a second alert for the
+ * same event, independent of (and in addition to) the fact that
+ * `processShippingWebhook` never even reaches this call for a duplicate (the
+ * `ShipmentEvent` create's own unique-constraint violation stops it first).
+ *
+ * Never automatically changes `Shipment.status` / `SellerOrder.status` /
+ * `Order.status` — that decision belongs to a human operator; this function
+ * only ever sends a notification.
+ */
+export async function sendLalamoveShipmentExceptionOps(params: {
+  provider: string;
+  rawStatus: string;
+  orderId: string;
+  orderNumber: string;
+  sellerOrderId: string;
+  shipmentId: string;
+  externalShipmentId: string | null;
+  providerEventId: string;
+  occurredAt: Date;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    return renderAndDispatch(
+      {
+        type: "lalamove_shipment_exception_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `LALAMOVE_EXCEPTION_ALERT:${params.providerEventId}`,
+        orderId: params.orderId,
+        client: params.client,
+      },
+      () =>
+        renderLalamoveShipmentExceptionOps({
+          brand,
+          siteUrl,
+          provider: params.provider,
+          rawStatus: params.rawStatus,
+          orderNumber: params.orderNumber,
+          orderId: params.orderId,
+          sellerOrderId: params.sellerOrderId,
+          shipmentId: params.shipmentId,
+          externalShipmentId: params.externalShipmentId,
+          providerEventId: params.providerEventId,
+          occurredAt: params.occurredAt,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendLalamoveShipmentExceptionOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

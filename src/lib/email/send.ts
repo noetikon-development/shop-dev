@@ -132,7 +132,11 @@ export type EmailType =
   // Stale-run watchdog — a CRON-invoked run left stuck at RUNNING past the
   // stale threshold (the process likely died before either the job's own or
   // the route's catch block could run). Distinct from both alerts above.
-  | "reconciliation_stale_alert_ops";
+  | "reconciliation_stale_alert_ops"
+  // Phase 9F-48 step 5 — a Lalamove webhook normalized to EXCEPTION
+  // (CANCELED / REJECTED / EXPIRED). Informational only: no automatic
+  // Shipment/SellerOrder/Order status change accompanies this alert.
+  | "lalamove_shipment_exception_ops";
 
 export type DispatchInput = {
   type: EmailType;
