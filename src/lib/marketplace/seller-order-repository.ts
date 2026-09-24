@@ -16,7 +16,7 @@ import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { refundRouteForOrder, createAttributedPaymentRefund } from "@/lib/payments/refund";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { resolveShippingProvider } from "@/lib/shipping/registry";
-import type { ShipmentAddress, ShipmentDraft, ShipmentPackage, ProviderOutcome, ShippingProvider } from "@/lib/shipping/provider";
+import type { ShipmentAddress, ShipmentDraft, ShipmentPackage, ProviderOutcome, ShippingProvider, Quote } from "@/lib/shipping/provider";
 import { parseSellerOriginAddress } from "@/lib/marketplace/origin-address";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
@@ -1049,6 +1049,158 @@ function parseOrderShippingAddressSnapshot(raw: string | null | undefined): Reco
 }
 
 /**
+ * Build the non-MANUAL `ShipmentDraft` — the ONE place this logic exists,
+ * shared by `saveSellerShipment()` (quotes THEN books) and
+ * `quoteSellerShipment()` (quotes only, Phase 9F-48 step 6). Behaviourally
+ * identical to the non-MANUAL branch `saveSellerShipment()` had before this
+ * extraction: same ownership/CANCELLED/DELIVERED/CONFLICT checks, same origin
+ * (always `Seller.originAddress`, never caller-supplied), same destination
+ * (supplied coordinates merged onto the `Order.shippingAddress` snapshot),
+ * same `deriveShipmentPackage()` call, same `serviceType`/`direction`
+ * handling. Read-only — does not call `provider.quote()` or
+ * `provider.createShipment()` itself, and creates/updates no row.
+ *
+ * `isEdit` mirrors `Boolean(shipmentId)` in `saveSellerShipment()`: a genuine
+ * CREATE (or a quote, which is never an edit) enforces the CANCELLED/
+ * DELIVERED/"already has a shipment" guards; an edit does not (see the
+ * KNOWN LIMITATION note on `saveSellerShipment()`).
+ */
+async function buildNonManualShipmentDraft(
+  ctx: SellerContext,
+  sellerOrderId: string,
+  input: Pick<ShipmentInput, "carrier" | "carrierName" | "trackingNumber" | "trackingUrl" | "note" | "destination" | "serviceType" | "direction">,
+  provider: ShippingProvider,
+  client: Prisma.TransactionClient | typeof prisma,
+  isEdit: boolean,
+): Promise<{ ok: true; draft: ShipmentDraft } | SellerOrderRepoError> {
+  const owned = await client.sellerOrder.findFirst({
+    where: { id: sellerOrderId, sellerId: ctx.sellerId },
+    select: { status: true, shipments: { select: { id: true } }, order: { select: { shippingAddress: true } } },
+  });
+  if (!owned) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
+  // A real, non-MANUAL booking has a genuine external side effect — unlike
+  // MANUAL's pure-validation call, calling the provider only to then discard
+  // the result inside `run()`'s own guard below would leave an orphaned real
+  // booking with the carrier. Check the exact same conditions `run()` checks
+  // BEFORE calling the provider at all, for a genuine CREATE (or a quote,
+  // which is never an edit) only.
+  if (!isEdit) {
+    if (owned.status === "CANCELLED" || owned.status === "DELIVERED") {
+      return { ok: false, code: "VALIDATION", error: "This order can no longer be edited." };
+    }
+    if (owned.shipments.length > 0) {
+      return { ok: false, code: "CONFLICT", error: "This order already has a shipment — edit that one." };
+    }
+  }
+
+  const seller = await client.seller.findUnique({ where: { id: ctx.sellerId }, select: { originAddress: true } });
+  const origin = parseSellerOriginAddress(seller?.originAddress ?? null);
+  if (!origin?.lat || !origin?.lng) {
+    return { ok: false, code: "VALIDATION", error: "Set your pickup address coordinates in Seller Settings before creating a shipment with this carrier." };
+  }
+
+  const destLat = input.destination?.lat;
+  const destLng = input.destination?.lng;
+  if (!destLat || !destLng) {
+    return { ok: false, code: "VALIDATION", error: "Destination coordinates are required for this carrier." };
+  }
+  if (!input.serviceType) {
+    return { ok: false, code: "VALIDATION", error: "Choose a service type for this carrier." };
+  }
+  if (!provider.quote) {
+    return { ok: false, code: "VALIDATION", error: "This carrier does not support rate quoting." };
+  }
+
+  const pkg = await deriveShipmentPackage(sellerOrderId, client);
+  if (!pkg.ok) return { ok: false, code: "VALIDATION", error: pkg.error };
+
+  const destSnapshot = parseOrderShippingAddressSnapshot(owned.order.shippingAddress);
+  const destination: ShipmentAddress = {
+    recipient: destSnapshot.recipient ?? "",
+    phone: destSnapshot.phone ?? "",
+    line1: destSnapshot.line1 ?? "",
+    line2: destSnapshot.line2 ?? null,
+    barangay: destSnapshot.barangay ?? null,
+    city: destSnapshot.city ?? "",
+    province: destSnapshot.province ?? "",
+    postalCode: destSnapshot.postalCode ?? "",
+    country: destSnapshot.country ?? "",
+    ...input.destination,
+    lat: destLat,
+    lng: destLng,
+  };
+
+  const draft: ShipmentDraft = {
+    sellerOrderId,
+    carrier: input.carrier,
+    carrierName: input.carrierName ?? null,
+    trackingNumber: input.trackingNumber ?? null,
+    trackingUrl: input.trackingUrl ?? null,
+    note: input.note ?? null,
+    direction: input.direction ?? "FORWARD",
+    origin: {
+      recipient: origin.recipient,
+      phone: origin.phone,
+      line1: origin.line1,
+      line2: origin.line2,
+      barangay: origin.barangay,
+      city: origin.city,
+      province: origin.province,
+      postalCode: origin.postalCode,
+      country: origin.country,
+      lat: origin.lat,
+      lng: origin.lng,
+    },
+    destination,
+    package: pkg.value,
+    serviceType: input.serviceType,
+  };
+
+  return { ok: true, draft };
+}
+
+/**
+ * Quote-only, Phase 9F-48 step 6 — the smallest safe separation needed to let
+ * a seller see a Lalamove rate BEFORE booking. Runs the exact same
+ * preconditions and builds the exact same `ShipmentDraft` as
+ * `saveSellerShipment()`'s non-MANUAL path (via the shared
+ * `buildNonManualShipmentDraft()` helper), then calls `provider.quote()`
+ * ONCE and returns its `Quote[]` unchanged.
+ *
+ * Never calls `provider.createShipment()`. Never creates/updates a
+ * `Shipment`, `SellerOrder`, or `Order` row — every read here uses the plain
+ * `prisma` client (or the test-only `externalTx`, mirroring
+ * `saveSellerShipment()`'s own seam) with no `$transaction` at all, since
+ * nothing is ever written.
+ *
+ * MANUAL: quoting isn't applicable — MANUAL never implements `quote()` and
+ * this function returns a clean `VALIDATION` result without calling it,
+ * exactly like `saveSellerShipment()`'s own "no quote for MANUAL" behaviour.
+ */
+export type QuoteShipmentResult = { ok: true; quotes: Quote[] } | SellerOrderRepoError;
+
+export async function quoteSellerShipment(
+  ctx: SellerContext,
+  sellerOrderId: string,
+  input: Pick<ShipmentInput, "carrier" | "destination" | "serviceType" | "direction">,
+  externalTx?: Prisma.TransactionClient,
+  providerOverride?: ShippingProvider,
+): Promise<QuoteShipmentResult> {
+  const provider = providerOverride ?? (await resolveShippingProvider());
+  if (provider.code === "MANUAL" || !provider.quote) {
+    return { ok: false, code: "VALIDATION", error: "This carrier does not support rate quoting." };
+  }
+
+  const client = externalTx ?? prisma;
+  const built = await buildNonManualShipmentDraft(ctx, sellerOrderId, input, provider, client, false);
+  if (!built.ok) return built;
+
+  const quote = await provider.quote(built.draft);
+  if (!quote.ok) return { ok: false, code: "VALIDATION", error: quote.error };
+  return { ok: true, quotes: quote.value };
+}
+
+/**
  * Create the SellerOrder's shipment, or update it if one already exists. MVP:
  * exactly one shipment per SellerOrder (the schema comment) — a second create is
  * refused. Scoped so a seller can only ever touch a shipment on THEIR own
@@ -1118,101 +1270,23 @@ export async function saveSellerShipment(
       note: outcome.value.note,
     };
   } else {
-    // Non-MANUAL — ownership-scoped read of exactly what's needed to build the
-    // draft (the transaction below re-checks ownership as the authoritative
-    // guard; this read only decides whether we're allowed to call the
-    // provider at all). Reuses `externalTx` (when the caller supplied one) so
-    // these reads see the SAME transaction's own writes — real callers never
-    // pass `externalTx` here today, so this is `prisma` (the global client)
-    // in production, exactly as before; a test can pass a still-open `tx` so
+    // Non-MANUAL — build the draft via the SAME shared helper
+    // `quoteSellerShipment()` uses (Phase 9F-48 step 6 extraction); nothing
+    // about this branch's behaviour changed, only where the logic lives.
+    // Reuses `externalTx` (when the caller supplied one) so these reads see
+    // the SAME transaction's own writes — real callers never pass
+    // `externalTx` here today, so this is `prisma` (the global client) in
+    // production, exactly as before; a test can pass a still-open `tx` so
     // its own rolled-back fixtures are visible to this read without any real
     // commit.
     const client = externalTx ?? prisma;
-    const owned = await client.sellerOrder.findFirst({
-      where: { id: sellerOrderId, sellerId: ctx.sellerId },
-      select: { status: true, shipments: { select: { id: true } }, order: { select: { shippingAddress: true } } },
-    });
-    if (!owned) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
-    // A real, non-MANUAL booking has a genuine external side effect — unlike
-    // MANUAL's pure-validation call, calling the provider only to then discard
-    // the result inside `run()`'s own guard below would leave an orphaned real
-    // booking with the carrier. Check the exact same conditions `run()` checks
-    // BEFORE calling the provider at all, for a genuine CREATE only (an EDIT,
-    // `shipmentId` supplied, is allowed to proceed — see the known-limitation
-    // note above).
-    if (!shipmentId) {
-      if (owned.status === "CANCELLED" || owned.status === "DELIVERED") {
-        return { ok: false, code: "VALIDATION", error: "This order can no longer be edited." };
-      }
-      if (owned.shipments.length > 0) {
-        return { ok: false, code: "CONFLICT", error: "This order already has a shipment — edit that one." };
-      }
-    }
+    const built = await buildNonManualShipmentDraft(ctx, sellerOrderId, input, provider, client, Boolean(shipmentId));
+    if (!built.ok) return built;
+    const { draft } = built;
 
-    const seller = await client.seller.findUnique({ where: { id: ctx.sellerId }, select: { originAddress: true } });
-    const origin = parseSellerOriginAddress(seller?.originAddress ?? null);
-    if (!origin?.lat || !origin?.lng) {
-      return { ok: false, code: "VALIDATION", error: "Set your pickup address coordinates in Seller Settings before creating a shipment with this carrier." };
-    }
-
-    const destLat = input.destination?.lat;
-    const destLng = input.destination?.lng;
-    if (!destLat || !destLng) {
-      return { ok: false, code: "VALIDATION", error: "Destination coordinates are required for this carrier." };
-    }
-    if (!input.serviceType) {
-      return { ok: false, code: "VALIDATION", error: "Choose a service type for this carrier." };
-    }
-    if (!provider.quote) {
-      return { ok: false, code: "VALIDATION", error: "This carrier does not support rate quoting." };
-    }
-
-    const pkg = await deriveShipmentPackage(sellerOrderId, client);
-    if (!pkg.ok) return { ok: false, code: "VALIDATION", error: pkg.error };
-
-    const destSnapshot = parseOrderShippingAddressSnapshot(owned.order.shippingAddress);
-    const destination: ShipmentAddress = {
-      recipient: destSnapshot.recipient ?? "",
-      phone: destSnapshot.phone ?? "",
-      line1: destSnapshot.line1 ?? "",
-      line2: destSnapshot.line2 ?? null,
-      barangay: destSnapshot.barangay ?? null,
-      city: destSnapshot.city ?? "",
-      province: destSnapshot.province ?? "",
-      postalCode: destSnapshot.postalCode ?? "",
-      country: destSnapshot.country ?? "",
-      ...input.destination,
-      lat: destLat,
-      lng: destLng,
-    };
-
-    const draft: ShipmentDraft = {
-      sellerOrderId,
-      carrier: input.carrier,
-      carrierName: input.carrierName ?? null,
-      trackingNumber: input.trackingNumber ?? null,
-      trackingUrl: input.trackingUrl ?? null,
-      note: input.note ?? null,
-      direction: input.direction ?? "FORWARD",
-      origin: {
-        recipient: origin.recipient,
-        phone: origin.phone,
-        line1: origin.line1,
-        line2: origin.line2,
-        barangay: origin.barangay,
-        city: origin.city,
-        province: origin.province,
-        postalCode: origin.postalCode,
-        country: origin.country,
-        lat: origin.lat,
-        lng: origin.lng,
-      },
-      destination,
-      package: pkg.value,
-      serviceType: input.serviceType,
-    };
-
-    const quote = await provider.quote(draft);
+    // `provider.quote` is guaranteed defined here — `buildNonManualShipmentDraft`
+    // already returned an error above if it were missing.
+    const quote = await provider.quote!(draft);
     if (!quote.ok) return { ok: false, code: "VALIDATION", error: quote.error };
 
     const outcome = await provider.createShipment(draft);

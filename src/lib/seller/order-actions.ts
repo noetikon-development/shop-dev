@@ -7,6 +7,7 @@ import { writeAudit } from "@/lib/admin/audit";
 import {
   advanceSellerOrderStatus,
   saveSellerShipment,
+  quoteSellerShipment,
   sellerCancelSellerOrder,
   type SellerOrderRepoError,
 } from "@/lib/marketplace/seller-order-repository";
@@ -367,4 +368,73 @@ export async function saveShipmentAction(
 
   revalidate(d.sellerOrderId);
   return { ok: true, message: d.shipmentId ? "Shipment updated." : "Shipment saved." };
+}
+
+// ---------------------------------------------------------------------------
+// 9F-48 step 6 — quote-only (no booking, no Shipment/SellerOrder/Order write)
+// ---------------------------------------------------------------------------
+
+const shipmentQuoteSchema = z.object({
+  sellerOrderId: z.string().min(1),
+  carrier: z.string().trim().min(1, "Choose a carrier").max(24),
+  serviceType: z.string().trim().min(1, "Choose a service type").max(40),
+  destinationLat: z.string().trim().min(1, "Destination latitude is required").max(20),
+  destinationLng: z.string().trim().min(1, "Destination longitude is required").max(20),
+});
+
+export type ShipmentQuoteActionState = {
+  ok?: boolean;
+  error?: string;
+  fieldErrors?: Record<string, string>;
+  quotes?: {
+    provider: string;
+    service: string;
+    amount: number;
+    currency: string;
+    estimatedDeliveryAt: string | null;
+  }[];
+};
+
+/**
+ * Quote-only action (Phase 9F-48 step 6) — never books, never creates a
+ * `Shipment` row. Dormant until a future UI adds the "Get quote" button and
+ * the service-type/destination-coordinate fields the underlying
+ * `quoteSellerShipment()` requires; nothing calls this action yet.
+ */
+export async function getShipmentQuoteAction(
+  _prev: ShipmentQuoteActionState,
+  formData: FormData,
+): Promise<ShipmentQuoteActionState> {
+  const { ctx } = await requireSellerSessionPermission("manage_seller_fulfillment");
+  const parsed = shipmentQuoteSchema.safeParse({
+    sellerOrderId: formData.get("sellerOrderId"),
+    carrier: formData.get("carrier"),
+    serviceType: formData.get("serviceType"),
+    destinationLat: formData.get("destinationLat"),
+    destinationLng: formData.get("destinationLng"),
+  });
+  if (!parsed.success) {
+    const fieldErrors: Record<string, string> = {};
+    for (const i of parsed.error.issues) fieldErrors[String(i.path[0])] = i.message;
+    return { fieldErrors };
+  }
+  const d = parsed.data;
+
+  const res = await quoteSellerShipment(ctx, d.sellerOrderId, {
+    carrier: d.carrier,
+    serviceType: d.serviceType,
+    destination: { lat: d.destinationLat, lng: d.destinationLng },
+  });
+  if (!res.ok) return { error: res.error };
+
+  return {
+    ok: true,
+    quotes: res.quotes.map((q) => ({
+      provider: q.provider,
+      service: q.service,
+      amount: q.amount,
+      currency: q.currency,
+      estimatedDeliveryAt: q.estimatedDeliveryAt ? q.estimatedDeliveryAt.toISOString() : null,
+    })),
+  };
 }
