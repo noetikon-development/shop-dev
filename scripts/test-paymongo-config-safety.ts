@@ -47,8 +47,10 @@ function unitTests() {
     ok("isVercelProductionEnvironment · VERCEL_ENV=production → true", isVercelProductionEnvironment() === true);
     process.env.VERCEL_ENV = "preview";
     ok("isVercelProductionEnvironment · VERCEL_ENV=preview → false", isVercelProductionEnvironment() === false);
+    process.env.VERCEL_ENV = "development";
+    ok("isVercelProductionEnvironment · VERCEL_ENV=development → false", isVercelProductionEnvironment() === false);
     delete process.env.VERCEL_ENV;
-    ok("isVercelProductionEnvironment · unset (local dev) → false", isVercelProductionEnvironment() === false);
+    ok("isVercelProductionEnvironment · unset (missing VERCEL_ENV) → false", isVercelProductionEnvironment() === false);
   } finally {
     if (saved === undefined) delete process.env.VERCEL_ENV;
     else process.env.VERCEL_ENV = saved;
