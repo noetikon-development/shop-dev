@@ -5,11 +5,53 @@ import { Loader2, Truck, ExternalLink } from "lucide-react";
 import {
   advanceSellerOrderAction,
   saveShipmentAction,
+  getShipmentQuoteAction,
   type SellerOrderActionState,
+  type ShipmentQuoteActionState,
 } from "@/lib/seller/order-actions";
 import { FormField, Select, Modal, notify, usePersistentAction } from "@/components/seller/ui";
 import { sellerOrderStatusLabel, sellerAdvanceLabels } from "@/lib/marketplace/seller-order-status";
 import { COURIERS } from "@/lib/orders/couriers";
+
+/**
+ * Lalamove vehicle/service codes (Phase 9F-48 step 7 — seller UI). Mirrors
+ * the KEYS of `LALAMOVE_PH_VEHICLE_CAPACITY` in
+ * `src/lib/shipping/providers/lalamove.ts` — that module is `server-only`
+ * and cannot be imported into this client component, so the codes are
+ * enumerated here by hand. These are opaque identifiers submitted verbatim
+ * as `serviceType`; no capacity/validation logic is duplicated — that stays
+ * exclusively server-side (`validateCapacity()`, called by `quote()`/
+ * `createShipment()`). Keep in sync if the server-side table ever changes.
+ */
+const LALAMOVE_SERVICE_TYPES: { code: string; label: string }[] = [
+  { code: "MOTORCYCLE", label: "Motorcycle" },
+  { code: "SEDAN", label: "Sedan" },
+  { code: "SEDAN_INTERCITY", label: "Sedan (intercity)" },
+  { code: "MPV", label: "MPV" },
+  { code: "MPV_INTERCITY", label: "MPV (intercity)" },
+  { code: "600KG_MPV", label: "MPV — 600kg" },
+  { code: "600KG_MPV_LD", label: "MPV — 600kg (long distance)" },
+  { code: "VAN", label: "Van" },
+  { code: "VAN_INTERCITY", label: "Van (intercity)" },
+  { code: "TRUCK330", label: "Truck — 330kg" },
+  { code: "VAN1000", label: "Van — 1000kg" },
+  { code: "2000KG_ALUMINUM", label: "Aluminum truck — 2000kg" },
+  { code: "2000KG_ALUMINUM_LD", label: "Aluminum truck — 2000kg (long distance)" },
+  { code: "2000KG_FB", label: "Flatbed truck — 2000kg" },
+  { code: "2000KG_FB_LD", label: "Flatbed truck — 2000kg (long distance)" },
+  { code: "TRUCK550", label: "Truck — 550kg" },
+  { code: "2000KG_OPENTRUCK", label: "Open truck — 2000kg" },
+  { code: "2000KG_OPENTRUCK_LD", label: "Open truck — 2000kg (long distance)" },
+  { code: "3000KG_TRUCK", label: "Truck — 3000kg" },
+  { code: "7000KG_TRUCK", label: "Truck — 7000kg" },
+  { code: "10WHEEL_TRUCK", label: "10-wheel truck" },
+  { code: "LD_10WHEEL_TRUCK", label: "10-wheel truck (long distance)" },
+];
+
+/** A stable fingerprint of the quote-relevant inputs — lets the UI detect when a previously-successful quote no longer matches the current form values. */
+function quoteFingerprint(carrier: string, serviceType: string, destinationLat: string, destinationLng: string): string {
+  return JSON.stringify([carrier, serviceType, destinationLat, destinationLng]);
+}
 
 type ShipmentView = {
   id: string;
@@ -147,7 +189,27 @@ function ShipmentModal({
   shipment: ShipmentView;
 }) {
   const form = usePersistentAction<SellerOrderActionState>(saveShipmentAction, {});
+  const quote = usePersistentAction<ShipmentQuoteActionState>(getShipmentQuoteAction, {});
   const fe = form.state.fieldErrors ?? {};
+
+  // The Lalamove quote/booking flow only ever applies to a genuine CREATE —
+  // editing an existing shipment always keeps today's plain field-editing
+  // behaviour, regardless of that shipment's own carrier (Task 3's own
+  // KNOWN LIMITATION: re-running quote+book on an edit would re-book with
+  // the real provider, so this UI never offers that path).
+  const isEdit = Boolean(shipment);
+  const [carrier, setCarrier] = useState(shipment?.carrier ?? "");
+  const [serviceType, setServiceType] = useState("");
+  const [destinationLat, setDestinationLat] = useState("");
+  const [destinationLng, setDestinationLng] = useState("");
+  // The exact input fingerprint a "Get quote" request was DISPATCHED with —
+  // captured at click time so a mid-flight input edit can never be credited
+  // to whatever quote eventually comes back.
+  const [pendingQuoteKey, setPendingQuoteKey] = useState<string | null>(null);
+  // The fingerprint of the inputs the LAST SUCCESSFUL quote actually covered.
+  const [confirmedQuoteKey, setConfirmedQuoteKey] = useState<string | null>(null);
+
+  const isLalamove = !isEdit && carrier === "LALAMOVE";
 
   useEffect(() => {
     if (form.state.ok) {
@@ -157,13 +219,68 @@ function ShipmentModal({
     if (form.state.error) notify.error(form.state.error);
   }, [form.state, onClose]);
 
+  useEffect(() => {
+    if (quote.state.ok && quote.state.quotes && pendingQuoteKey) {
+      setConfirmedQuoteKey(pendingQuoteKey);
+    }
+    if (quote.state.error) {
+      notify.error(quote.state.error);
+      setConfirmedQuoteKey(null);
+    }
+    // Only react to a NEW quote result, not to every keystroke.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote.state]);
+
+  // Reset all local state whenever the modal closes, so it always starts
+  // clean the next time it opens — mirrors the existing close-on-success
+  // effect above.
+  useEffect(() => {
+    if (!open) {
+      setCarrier(shipment?.carrier ?? "");
+      setServiceType("");
+      setDestinationLat("");
+      setDestinationLng("");
+      setPendingQuoteKey(null);
+      setConfirmedQuoteKey(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const clearQuote = () => setConfirmedQuoteKey(null);
+
+  const currentFingerprint = quoteFingerprint(carrier, serviceType, destinationLat, destinationLng);
+  const quoteValidForCurrentInputs = confirmedQuoteKey !== null && confirmedQuoteKey === currentFingerprint;
+  const displayedQuotes = quoteValidForCurrentInputs ? (quote.state.quotes ?? []) : [];
+
+  const canRequestQuote = Boolean(serviceType) && Boolean(destinationLat) && Boolean(destinationLng) && !quote.pending && !form.pending;
+  const canBook = !isLalamove || (quoteValidForCurrentInputs && !quote.pending && !form.pending);
+
+  const requestQuote = () => {
+    const fd = new FormData();
+    fd.set("sellerOrderId", sellerOrderId);
+    fd.set("carrier", carrier);
+    fd.set("serviceType", serviceType);
+    fd.set("destinationLat", destinationLat);
+    fd.set("destinationLng", destinationLng);
+    setPendingQuoteKey(currentFingerprint);
+    quote.dispatch(fd);
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={shipment ? "Edit shipment" : "Add shipment"} size="sm">
       <form onSubmit={form.onSubmit} className="space-y-3">
         <input type="hidden" name="sellerOrderId" value={sellerOrderId} />
         {shipment && <input type="hidden" name="shipmentId" value={shipment.id} />}
         <FormField label="Carrier" htmlFor="carrier" required error={fe.carrier}>
-          <Select id="carrier" name="carrier" defaultValue={shipment?.carrier ?? ""}>
+          <Select
+            id="carrier"
+            name="carrier"
+            value={carrier}
+            onChange={(e) => {
+              setCarrier(e.target.value);
+              clearQuote();
+            }}
+          >
             <option value="" disabled>
               Choose…
             </option>
@@ -174,28 +291,115 @@ function ShipmentModal({
             ))}
           </Select>
         </FormField>
-        <FormField label="Courier name" htmlFor="carrierName" hint="Required only for “Other”" error={fe.carrierName}>
-          <input id="carrierName" name="carrierName" maxLength={60} defaultValue={shipment?.carrierName ?? ""} className="field text-sm" />
-        </FormField>
-        <FormField label="Tracking number" htmlFor="trackingNumber" error={fe.trackingNumber}>
-          <input
-            id="trackingNumber"
-            name="trackingNumber"
-            maxLength={40}
-            defaultValue={shipment?.trackingNumber ?? ""}
-            className="field text-sm"
-          />
-        </FormField>
-        <FormField label="Tracking link" htmlFor="trackingUrl" hint="Optional — auto-built for most carriers" error={fe.trackingUrl}>
-          <input
-            id="trackingUrl"
-            name="trackingUrl"
-            type="url"
-            maxLength={500}
-            defaultValue={shipment?.trackingUrl ?? ""}
-            className="field text-sm"
-          />
-        </FormField>
+
+        {!isLalamove && (
+          <>
+            <FormField label="Courier name" htmlFor="carrierName" hint="Required only for “Other”" error={fe.carrierName}>
+              <input id="carrierName" name="carrierName" maxLength={60} defaultValue={shipment?.carrierName ?? ""} className="field text-sm" />
+            </FormField>
+            <FormField label="Tracking number" htmlFor="trackingNumber" error={fe.trackingNumber}>
+              <input
+                id="trackingNumber"
+                name="trackingNumber"
+                maxLength={40}
+                defaultValue={shipment?.trackingNumber ?? ""}
+                className="field text-sm"
+              />
+            </FormField>
+            <FormField label="Tracking link" htmlFor="trackingUrl" hint="Optional — auto-built for most carriers" error={fe.trackingUrl}>
+              <input
+                id="trackingUrl"
+                name="trackingUrl"
+                type="url"
+                maxLength={500}
+                defaultValue={shipment?.trackingUrl ?? ""}
+                className="field text-sm"
+              />
+            </FormField>
+          </>
+        )}
+
+        {isLalamove && (
+          <div className="space-y-3 rounded-sm border border-line bg-paper-soft p-3">
+            <FormField label="Service type" htmlFor="serviceType" required>
+              <Select
+                id="serviceType"
+                name="serviceType"
+                value={serviceType}
+                onChange={(e) => {
+                  setServiceType(e.target.value);
+                  clearQuote();
+                }}
+              >
+                <option value="" disabled>
+                  Choose…
+                </option>
+                {LALAMOVE_SERVICE_TYPES.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.label}
+                  </option>
+                ))}
+              </Select>
+            </FormField>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Destination latitude" htmlFor="destinationLat" required>
+                <input
+                  id="destinationLat"
+                  name="destinationLat"
+                  value={destinationLat}
+                  onChange={(e) => {
+                    setDestinationLat(e.target.value);
+                    clearQuote();
+                  }}
+                  maxLength={20}
+                  className="field text-sm"
+                  placeholder="14.5995"
+                />
+              </FormField>
+              <FormField label="Destination longitude" htmlFor="destinationLng" required>
+                <input
+                  id="destinationLng"
+                  name="destinationLng"
+                  value={destinationLng}
+                  onChange={(e) => {
+                    setDestinationLng(e.target.value);
+                    clearQuote();
+                  }}
+                  maxLength={20}
+                  className="field text-sm"
+                  placeholder="120.9842"
+                />
+              </FormField>
+            </div>
+            <p className="text-xs text-ink-faint">
+              Enter the customer's exact delivery coordinates (e.g. from a map link) — not filled in automatically.
+            </p>
+
+            <button
+              type="button"
+              disabled={!canRequestQuote}
+              onClick={requestQuote}
+              className="btn btn-outline py-2 text-sm"
+            >
+              {quote.pending && <Loader2 size={13} className="animate-spin" />}
+              Get quote
+            </button>
+
+            {displayedQuotes.length > 0 && (
+              <div className="space-y-1 rounded-sm bg-paper px-3 py-2 text-sm">
+                {displayedQuotes.map((q, i) => (
+                  <div key={i} className="flex justify-between gap-4">
+                    <span className="text-ink-faint">{q.service}</span>
+                    <span className="font-medium text-ink">
+                      {(q.amount / 100).toLocaleString("en-PH", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} {q.currency}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         <FormField label="Fulfilment note" htmlFor="note" hint="Internal — not shown to the buyer" error={fe.note}>
           <input id="note" name="note" maxLength={300} defaultValue={shipment?.note ?? ""} className="field text-sm" />
         </FormField>
@@ -203,9 +407,9 @@ function ShipmentModal({
           <p className="rounded-sm bg-clay-50 px-3 py-2 text-sm text-clay">{form.state.error}</p>
         )}
         <div className="flex gap-2 pt-1">
-          <button type="submit" disabled={form.pending} className="btn btn-primary py-2 text-sm">
+          <button type="submit" disabled={form.pending || !canBook} className="btn btn-primary py-2 text-sm">
             {form.pending && <Loader2 size={13} className="animate-spin" />}
-            {shipment ? "Save" : "Add shipment"}
+            {shipment ? "Save" : isLalamove ? "Confirm & Book" : "Add shipment"}
           </button>
           <button type="button" onClick={onClose} className="btn btn-ghost py-2 text-sm">
             Cancel
