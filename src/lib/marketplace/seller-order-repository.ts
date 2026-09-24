@@ -405,68 +405,7 @@ export async function advanceSellerOrderStatus(
     return { ok: false, code: "VALIDATION", error: "Unknown status." };
   }
 
-  const run = async (tx: Prisma.TransactionClient): Promise<SellerOrderMutationResult> => {
-    const so = await tx.sellerOrder.findFirst({
-      where: { id: sellerOrderId, sellerId: ctx.sellerId },
-      select: {
-        id: true,
-        status: true,
-        order: { select: { id: true, orderNumber: true, status: true } },
-        shipments: { select: { carrier: true, trackingNumber: true } },
-      },
-    });
-    if (!so) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
-
-    const hasShippableShipment = so.shipments.some((s) => {
-      if (!s.carrier || !isCourierCode(s.carrier)) return false;
-      const def = getCourier(s.carrier);
-      return def?.requiresTracking ? Boolean(s.trackingNumber) : true;
-    });
-
-    if (
-      !canTransitionSellerOrder(so.status, to, {
-        parentOrderStatus: so.order.status,
-        hasShippableShipment,
-      })
-    ) {
-      if (to === "SHIPPED" && !hasShippableShipment) {
-        return { ok: false, code: "VALIDATION", error: "Add a carrier and tracking number before marking this shipped." };
-      }
-      return { ok: false, code: "VALIDATION", error: `Can't move this order from ${so.status} to ${to}.` };
-    }
-
-    // Atomic, status-guarded write.
-    const res = await tx.sellerOrder.updateMany({
-      where: { id: sellerOrderId, sellerId: ctx.sellerId, status: so.status },
-      data: { status: to, updatedAt: new Date() },
-    });
-    if (res.count === 0) return { ok: false, code: "STALE", error: "This order was updated elsewhere — reload and try again." };
-
-    const shipmentStatus = shipmentStatusForSellerOrder(to);
-    if (shipmentStatus) {
-      const stamp =
-        shipmentStatus === "SHIPPED"
-          ? { status: "SHIPPED", shippedAt: new Date() }
-          : { status: "DELIVERED", deliveredAt: new Date() };
-      await tx.shipment.updateMany({ where: { sellerOrderId }, data: stamp });
-    }
-
-    // 9F-12b: once every SellerOrder on this order has reached SHIPPED / DELIVERED,
-    // roll the customer-facing parent Order forward in the same transaction.
-    let parentOrder: ParentOrderRollup | undefined;
-    if (to === "SHIPPED" || to === "DELIVERED") {
-      parentOrder = (await rollUpParentOrder(tx, sellerOrderId, to)) ?? undefined;
-    }
-
-    return {
-      ok: true,
-      status: to,
-      from: so.status as SellerOrderStatus,
-      orderId: so.order.id,
-      orderNumber: so.order.orderNumber,
-      parentOrder,
-    };
-  };
+  const run = (tx: Prisma.TransactionClient) => runSellerOrderTransition(tx, sellerOrderId, ctx.sellerId, to);
 
   try {
     if (externalTx) return await run(externalTx);
@@ -483,6 +422,154 @@ export async function advanceSellerOrderStatus(
     console.error("[seller-order-repository] advanceSellerOrderStatus failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not update the order." };
   }
+}
+
+/**
+ * The shared transition core behind BOTH `advanceSellerOrderStatus` (seller-
+ * driven, session-scoped, above) and `advanceSellerOrderStatusFromWebhook`
+ * (Phase 9F-48, system-driven, below). Every guard, timestamp stamp, and
+ * rollup call lives here exactly once — the two callers differ only in
+ * `sellerIdScope` (an authenticated seller's own id vs. the id already
+ * established by a verified webhook's own Shipment lookup) and in how they
+ * attribute the resulting audit entry. Extracted unchanged from the
+ * pre-9F-48 `advanceSellerOrderStatus` body — same guards, same queries, same
+ * behaviour for the seller-driven caller above.
+ */
+async function runSellerOrderTransition(
+  tx: Prisma.TransactionClient,
+  sellerOrderId: string,
+  sellerIdScope: string,
+  to: SellerOrderStatus,
+): Promise<SellerOrderMutationResult> {
+  const so = await tx.sellerOrder.findFirst({
+    where: { id: sellerOrderId, sellerId: sellerIdScope },
+    select: {
+      id: true,
+      status: true,
+      order: { select: { id: true, orderNumber: true, status: true } },
+      shipments: { select: { carrier: true, trackingNumber: true } },
+    },
+  });
+  if (!so) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
+
+  const hasShippableShipment = so.shipments.some((s) => {
+    if (!s.carrier || !isCourierCode(s.carrier)) return false;
+    const def = getCourier(s.carrier);
+    return def?.requiresTracking ? Boolean(s.trackingNumber) : true;
+  });
+
+  if (
+    !canTransitionSellerOrder(so.status, to, {
+      parentOrderStatus: so.order.status,
+      hasShippableShipment,
+    })
+  ) {
+    if (to === "SHIPPED" && !hasShippableShipment) {
+      return { ok: false, code: "VALIDATION", error: "Add a carrier and tracking number before marking this shipped." };
+    }
+    return { ok: false, code: "VALIDATION", error: `Can't move this order from ${so.status} to ${to}.` };
+  }
+
+  // Atomic, status-guarded write.
+  const res = await tx.sellerOrder.updateMany({
+    where: { id: sellerOrderId, sellerId: sellerIdScope, status: so.status },
+    data: { status: to, updatedAt: new Date() },
+  });
+  if (res.count === 0) return { ok: false, code: "STALE", error: "This order was updated elsewhere — reload and try again." };
+
+  const shipmentStatus = shipmentStatusForSellerOrder(to);
+  if (shipmentStatus) {
+    const stamp =
+      shipmentStatus === "SHIPPED"
+        ? { status: "SHIPPED", shippedAt: new Date() }
+        : { status: "DELIVERED", deliveredAt: new Date() };
+    await tx.shipment.updateMany({ where: { sellerOrderId }, data: stamp });
+  }
+
+  // 9F-12b: once every SellerOrder on this order has reached SHIPPED / DELIVERED,
+  // roll the customer-facing parent Order forward in the same transaction.
+  let parentOrder: ParentOrderRollup | undefined;
+  if (to === "SHIPPED" || to === "DELIVERED") {
+    parentOrder = (await rollUpParentOrder(tx, sellerOrderId, to)) ?? undefined;
+  }
+
+  return {
+    ok: true,
+    status: to,
+    from: so.status as SellerOrderStatus,
+    orderId: so.order.id,
+    orderNumber: so.order.orderNumber,
+    parentOrder,
+  };
+}
+
+/**
+ * The audit entry for a webhook-driven parent-Order rollup (Phase 9F-48) —
+ * the system-caller sibling of `rollupAuditInput`, same `actorUserId: null`
+ * convention already established by `adminCascadeAuditInput`'s payment-webhook
+ * case. Written by `advanceSellerOrderStatusFromWebhook` AFTER its transaction
+ * commits, same best-effort discipline as every other post-commit audit write
+ * in this file.
+ */
+export function webhookCascadeAuditInput(
+  args: { provider: string; sellerOrderId: string },
+  rollup: ParentOrderRollup,
+): AuditInput {
+  const verb = rollup.rolledTo === "SHIPPED" ? "shipped" : "delivered";
+  return {
+    actorUserId: null,
+    action: rollup.rolledTo === "SHIPPED" ? "order.shipped" : "order.delivered",
+    targetType: "order",
+    targetId: rollup.id,
+    summary: `System (${args.provider} webhook) advanced order ${rollup.orderNumber} to ${rollup.rolledTo} — all seller orders ${verb}`,
+    meta: {
+      orderNumber: rollup.orderNumber,
+      to: rollup.rolledTo,
+      trigger: `${args.provider.toLowerCase()}_webhook_cascade`,
+      sellerOrderId: args.sellerOrderId,
+      actorSellerId: null,
+    },
+  };
+}
+
+/**
+ * The webhook-driven sibling of `advanceSellerOrderStatus` (Phase 9F-48) —
+ * calls the SAME `runSellerOrderTransition` core (same `canTransitionSellerOrder`
+ * guard, same Shipment timestamp stamping, same `rollUpParentOrder` call), so a
+ * carrier webhook can never move a SellerOrder anywhere a seller's own UI
+ * action couldn't. No seller session exists here: `sellerIdScope` is the
+ * SellerOrder's own `sellerId`, already established by the caller's verified
+ * `(provider, externalShipmentId)` Shipment lookup — never taken from the
+ * webhook payload itself. `to` MUST already be a declared forward move for the
+ * CURRENT status (`canTransitionSellerOrder` still enforces this); an
+ * out-of-order call for a status the SellerOrder isn't actually in — e.g. a
+ * COMPLETED event arriving while the SellerOrder is still READY_TO_SHIP —
+ * fails this single hop harmlessly (`ok:false`), which is exactly why the
+ * webhook caller (`src/lib/shipping/webhook.ts`) attempts the intermediate
+ * SHIPPED hop first before DELIVERED, never a single leap. This function does
+ * not decide WHICH statuses to attempt or WHEN — that mapping lives in the
+ * webhook module, kept provider-agnostic (`NormalizedEvent.normStatus`), not
+ * duplicated here.
+ *
+ * Always runs inside the caller's own transaction (there is no
+ * "start a fresh transaction" mode, unlike `advanceSellerOrderStatus` — a
+ * webhook-driven transition only ever happens as one step of the larger
+ * verify→parse→dedupe→record-event→cascade sequence, never standalone).
+ */
+export async function advanceSellerOrderStatusFromWebhook(
+  tx: Prisma.TransactionClient,
+  args: { sellerOrderId: string; sellerIdScope: string; to: SellerOrderStatus; provider: string },
+): Promise<SellerOrderMutationResult> {
+  const result = await runSellerOrderTransition(tx, args.sellerOrderId, args.sellerIdScope, args.to);
+  if (result.ok && result.parentOrder) {
+    // Same best-effort, never-poison-the-transition discipline as every other
+    // audit write in this file (`writeAudit` never throws) — written from
+    // INSIDE the still-open transaction (via its own `client` param) so the
+    // event + cascade + audit commit atomically, matching the task's required
+    // verify→parse→dedupe→record→cascade sequence.
+    await writeAudit(webhookCascadeAuditInput({ provider: args.provider, sellerOrderId: args.sellerOrderId }, result.parentOrder), tx);
+  }
+  return result;
 }
 
 // ---------------------------------------------------------------------------
