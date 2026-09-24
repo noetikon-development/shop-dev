@@ -1,6 +1,8 @@
 /**
- * Reconciliation stale-run watchdog — an independent, hourly-scheduled check
- * for a `ReconciliationRun` row that started but never finished. This is the
+ * Reconciliation stale-run watchdog — an independent check, scheduled daily
+ * at 10:30 UTC (one hour after the 09:30 UTC reconciliation cron; the
+ * current Vercel Hobby plan does not permit a sub-daily cron schedule), for
+ * a `ReconciliationRun` row that started but never finished. This is the
  * one gap the job's own execution-failure alert
  * (`sendReconciliationFailureAlertOps`, see reconciliation-job.ts /
  * api/cron/reconciliation/route.ts) cannot cover: that alert only fires from

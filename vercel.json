@@ -12,7 +12,7 @@
     },
     {
       "path": "/api/cron/reconciliation-watchdog",
-      "schedule": "0 * * * *"
+      "schedule": "30 10 * * *"
     }
   ]
 }

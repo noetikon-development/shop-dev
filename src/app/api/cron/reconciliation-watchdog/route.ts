@@ -4,8 +4,11 @@ import { runReconciliationWatchdog } from "@/lib/marketplace/reconciliation-watc
  * Reconciliation stale-run watchdog.
  *
  *   Production URL: https://axiaro.shop/api/cron/reconciliation-watchdog
- *   Schedule:       hourly, 0 * * * * (see vercel.json `crons`) — independent
- *                   of the daily 09:30 UTC reconciliation cron itself.
+ *   Schedule:       daily, 30 10 * * * / 10:30 UTC (see vercel.json `crons`)
+ *                   — one hour after the daily 09:30 UTC reconciliation cron.
+ *                   Daily rather than hourly because the current Vercel
+ *                   Hobby plan does not permit a sub-daily cron schedule;
+ *                   same-day detection is still the intended behavior.
  *
  * Finds CRON-invoked `ReconciliationRun` rows still `RUNNING` more than 30
  * minutes after they started (the process almost certainly died before

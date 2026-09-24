@@ -83,7 +83,7 @@ function staticTests() {
 
   ok("vercel.json · existing daily reconciliation cron unchanged (30 9 * * *)", /"path": "\/api\/cron\/reconciliation"[\s\S]{0,10}"schedule": "30 9 \* \* \*"/.test(vercelJson));
   ok("vercel.json · existing seller-order-sla cron unchanged (0 9 * * *)", /"path": "\/api\/cron\/seller-order-sla"[\s\S]{0,10}"schedule": "0 9 \* \* \*"/.test(vercelJson));
-  ok("vercel.json · new watchdog cron added hourly (0 * * * *)", /"path": "\/api\/cron\/reconciliation-watchdog"[\s\S]{0,10}"schedule": "0 \* \* \* \*"/.test(vercelJson));
+  ok("vercel.json · new watchdog cron added daily at 10:30 UTC (30 10 * * *)", /"path": "\/api\/cron\/reconciliation-watchdog"[\s\S]{0,10}"schedule": "30 10 \* \* \*"/.test(vercelJson));
   ok("vercel.json · exactly three cron entries", (vercelJson.match(/"path":/g) ?? []).length === 3);
 
   ok(
