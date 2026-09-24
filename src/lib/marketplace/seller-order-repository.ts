@@ -16,6 +16,7 @@ import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { refundRouteForOrder, createAttributedPaymentRefund } from "@/lib/payments/refund";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { resolveShippingProvider } from "@/lib/shipping/registry";
+import type { ShipmentPackage, ProviderOutcome } from "@/lib/shipping/provider";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
 
@@ -828,6 +829,85 @@ export async function sellerCancelSellerOrder(
     console.error("[seller-order-repository] sellerCancelSellerOrder failed", err);
     return { ok: false, code: "VALIDATION", error: "Could not cancel the order." };
   }
+}
+
+/**
+ * Derive a generic, provider-agnostic `ShipmentPackage` (weight + dimensions)
+ * from a SellerOrder's own line items — Phase 9F-48 design step 5 (package
+ * derivation), not yet wired into `saveSellerShipment`/`ShipmentInput`.
+ *
+ * Source: `OrderItem.sellerOrderId` → `OrderItem.variant` → `Variant.product`
+ * (there is no direct `OrderItem.productId` relation — see the model comment
+ * — `variant` is the only FK path to `Product.weightGrams`/`lengthCm`/
+ * `widthCm`/`heightCm`).
+ *
+ * Rules (per the approved design, not reinvented here):
+ *   - weight: SUM of `product.weightGrams * item.quantity` across every item.
+ *   - each dimension (length/width/height): the MAXIMUM single value seen
+ *     across the items for that axis — never summed, never multiplied by
+ *     quantity (this is a conservative "biggest single box" proxy, not a
+ *     real packing calculation; a future packing engine is explicitly out of
+ *     scope here).
+ *   - an item with `quantity <= 0` is skipped, mirroring the existing
+ *     convention in `src/lib/orders/cancellation.ts` (`if (it.quantity <= 0)
+ *     continue`) — not an error.
+ *   - a SellerOrder with no shippable items (all filtered out, or none exist)
+ *     is a clean `ok: false` result, never a provider call.
+ *   - an item with no linked `Variant` (so no reachable `Product`), or a
+ *     `Product` missing a required dimension, is a clean, explicit `ok: false`
+ *     error naming the gap — never a guessed/zero-filled value. `weightGrams`
+ *     is a non-nullable column with a schema default, so it is never itself
+ *     "missing"; `lengthCm`/`widthCm`/`heightCm` ARE nullable and are the
+ *     fields this can actually fail on.
+ *
+ * Read-only, deterministic, no side effects — does not create or update any
+ * row. Independent of any specific provider: it returns the same
+ * `ShipmentPackage` shape `ShipmentDraft.package` expects and never imports
+ * a provider implementation (e.g. Lalamove).
+ */
+export async function deriveShipmentPackage(
+  sellerOrderId: string,
+  tx: Prisma.TransactionClient | typeof prisma = prisma,
+): Promise<ProviderOutcome<ShipmentPackage>> {
+  const items = await tx.orderItem.findMany({
+    where: { sellerOrderId, quantity: { gt: 0 } },
+    select: {
+      quantity: true,
+      variant: {
+        select: {
+          product: {
+            select: { name: true, weightGrams: true, lengthCm: true, widthCm: true, heightCm: true },
+          },
+        },
+      },
+    },
+  });
+
+  if (items.length === 0) {
+    return { ok: false, error: "This order has no shippable items to derive a package from." };
+  }
+
+  let weightGrams = 0;
+  let lengthCm: number | null = null;
+  let widthCm: number | null = null;
+  let heightCm: number | null = null;
+
+  for (const item of items) {
+    const product = item.variant?.product;
+    if (!product) {
+      return { ok: false, error: "An item on this order has no linked product/variant — can't determine its package weight or dimensions." };
+    }
+    if (product.lengthCm == null || product.widthCm == null || product.heightCm == null) {
+      return { ok: false, error: `"${product.name}" is missing a package dimension (length/width/height) on record.` };
+    }
+
+    weightGrams += product.weightGrams * item.quantity;
+    lengthCm = lengthCm == null ? product.lengthCm : Math.max(lengthCm, product.lengthCm);
+    widthCm = widthCm == null ? product.widthCm : Math.max(widthCm, product.widthCm);
+    heightCm = heightCm == null ? product.heightCm : Math.max(heightCm, product.heightCm);
+  }
+
+  return { ok: true, value: { weightGrams, lengthCm, widthCm, heightCm, description: null } };
 }
 
 export type ShipmentInput = {
