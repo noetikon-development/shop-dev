@@ -9,6 +9,10 @@
     {
       "path": "/api/cron/reconciliation",
       "schedule": "30 9 * * *"
+    },
+    {
+      "path": "/api/cron/reconciliation-watchdog",
+      "schedule": "0 * * * *"
     }
   ]
 }

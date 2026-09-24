@@ -580,3 +580,61 @@ export function renderReconciliationFailureAlertOps(d: {
     ]),
   };
 }
+
+/**
+ * Ops alert — the hourly stale-run watchdog found a `ReconciliationRun` row
+ * (CRON-invoked only) still `RUNNING` past the stale threshold — the process
+ * that started it almost certainly died before it could reach either the
+ * job's own or the cron route's catch block, so neither of the two alerts
+ * above ever fired for this run. Distinct from both: this is a watchdog
+ * finding, not a job-reported result.
+ */
+export function renderReconciliationStaleRunAlertOps(d: {
+  brand: string;
+  siteUrl: string;
+  reconciliationRunId: string;
+  startedAt: Date;
+  detectedAt: Date;
+  staleThresholdMinutes: number;
+}) {
+  const started = `${d.startedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const detected = `${d.detectedAt.toISOString().slice(0, 16).replace("T", " ")} UTC`;
+  const subject = `Reconciliation run stalled — detected ${detected}`;
+  const rows =
+    kvRow("Run ID", d.reconciliationRunId) +
+    kvRow("Invocation", "CRON") +
+    kvRow("Started", started) +
+    kvRow("Detected", detected) +
+    kvRow("Stale threshold", `${d.staleThresholdMinutes} minutes`, { last: true });
+  const body = `
+    ${heading("Reconciliation run stalled")}
+    ${paragraph(
+      `A scheduled (CRON) reconciliation run started at ${started} but never reached a PASS, WARN, FAIL, or ERROR result. The hourly watchdog detected this at ${detected}, after it exceeded the ${d.staleThresholdMinutes}-minute stale threshold, and has marked the run ERROR.`,
+    )}
+    ${infoBox(rows)}
+    ${paragraph("Owner: Axiaro Platform Operations.")}
+    ${paragraph(
+      "Investigate why the CRON execution terminated before completion (Vercel function logs, timeouts, deploy timing) and confirm the next scheduled reconciliation run completes normally.",
+    )}
+  `;
+  return {
+    subject,
+    html: layout(body, { brand: d.brand, siteUrl: d.siteUrl, previewText: subject, reason: opsReason }),
+    text: textBody([
+      "Reconciliation run stalled",
+      ``,
+      `A scheduled (CRON) reconciliation run started at ${started} but never reached a PASS, WARN, FAIL, or ERROR result. The hourly watchdog detected this at ${detected}, after it exceeded the ${d.staleThresholdMinutes}-minute stale threshold, and has marked the run ERROR.`,
+      ``,
+      `Run ID: ${d.reconciliationRunId}`,
+      `Invocation: CRON`,
+      `Started: ${started}`,
+      `Detected: ${detected}`,
+      `Stale threshold: ${d.staleThresholdMinutes} minutes`,
+      ``,
+      `Owner: Axiaro Platform Operations.`,
+      ``,
+      `Investigate why the CRON execution terminated before completion (Vercel function logs, timeouts, deploy timing) and confirm the next scheduled reconciliation run completes normally.`,
+      ...textFooter(d.brand, d.siteUrl, opsReason),
+    ]),
+  };
+}

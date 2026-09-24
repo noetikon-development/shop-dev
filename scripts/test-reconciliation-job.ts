@@ -107,7 +107,10 @@ function staticTests() {
 
   ok("vercel.json · seller-order-sla cron unchanged (0 9 * * *)", /"path": "\/api\/cron\/seller-order-sla"[\s\S]{0,40}"schedule": "0 9 \* \* \*"/.test(vercelJson));
   ok("vercel.json · reconciliation cron added at 09:30 UTC", /"path": "\/api\/cron\/reconciliation"[\s\S]{0,40}"schedule": "30 9 \* \* \*"/.test(vercelJson));
-  ok("vercel.json · exactly two cron entries", (vercelJson.match(/"path":/g) ?? []).length === 2);
+  ok(
+    "vercel.json · exactly three cron entries (seller-order-sla, reconciliation, reconciliation-watchdog)",
+    (vercelJson.match(/"path":/g) ?? []).length === 3,
+  );
 
   // Precise on purpose: the job's OWN doc comment mentions "reconcile:9e3d" in
   // prose (explaining what it deliberately excludes) — a bare substring check

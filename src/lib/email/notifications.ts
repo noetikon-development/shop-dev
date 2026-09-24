@@ -55,7 +55,7 @@ import {
   renderSellerVerificationApproved,
   renderSellerVerificationRejected,
 } from "@/lib/email/templates/seller-lifecycle";
-import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps, renderReconciliationFailureAlertOps } from "@/lib/email/templates/ops-notifications";
+import { renderOrderReceivedOps, renderReturnRefundInitiatedOps, renderReturnRefundCompletedOps, renderEmailFailureAlertOps, renderSellerOfferPublishedOps, renderSellerOrderCancelledOps, renderSellerOrderAcceptanceOverdueOps, renderSellerProductRequestResubmittedOps, renderSellerAccountSubmittedOps, renderReconciliationAlertOps, renderReconciliationFailureAlertOps, renderReconciliationStaleRunAlertOps } from "@/lib/email/templates/ops-notifications";
 import {
   renderSellerOrderCancelled,
   renderSellerOrderAcceptanceReminder,
@@ -4804,6 +4804,53 @@ export async function sendReconciliationFailureAlertOps(params: {
     );
   } catch (err) {
     console.error("[email] sendReconciliationFailureAlertOps", err);
+    return { ok: false, status: "FAILED", error: "unexpected" };
+  }
+}
+
+/**
+ * Ops alert — the hourly stale-run watchdog
+ * (src/lib/marketplace/reconciliation-watchdog.ts) found a CRON-invoked
+ * `ReconciliationRun` row stuck at RUNNING past the stale threshold and has
+ * just marked it ERROR. Distinct from both `sendReconciliationAlertOps` (a
+ * COMPLETED run reporting WARN/FAIL) and `sendReconciliationFailureAlertOps`
+ * (the job's own try/catch caught an execution failure) — this covers the
+ * one case neither of those can: the process died before either catch block
+ * ever ran. Deduplicated per `reconciliationRunId` (not per calendar day, as
+ * the other two are) under its own idempotency-key prefix
+ * (`RECONCILE_STALE_ALERT:`), so a repeated watchdog pass over an
+ * already-alerted run never sends a duplicate, while a genuinely different
+ * stale run always gets its own alert.
+ */
+export async function sendReconciliationStaleRunAlertOps(params: {
+  reconciliationRunId: string;
+  startedAt: Date;
+  detectedAt: Date;
+  staleThresholdMinutes: number;
+  client?: Prisma.TransactionClient;
+}): Promise<DispatchResult> {
+  try {
+    const [brand, siteUrl, to] = [await getStoreBrand(), getSiteUrl(), await getSupportInboxEmail()];
+    return renderAndDispatch(
+      {
+        type: "reconciliation_stale_alert_ops",
+        to,
+        from: ORDERS_FROM,
+        idempotencyKey: `RECONCILE_STALE_ALERT:${params.reconciliationRunId}`,
+        client: params.client,
+      },
+      () =>
+        renderReconciliationStaleRunAlertOps({
+          brand,
+          siteUrl,
+          reconciliationRunId: params.reconciliationRunId,
+          startedAt: params.startedAt,
+          detectedAt: params.detectedAt,
+          staleThresholdMinutes: params.staleThresholdMinutes,
+        }),
+    );
+  } catch (err) {
+    console.error("[email] sendReconciliationStaleRunAlertOps", err);
     return { ok: false, status: "FAILED", error: "unexpected" };
   }
 }

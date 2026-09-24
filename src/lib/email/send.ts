@@ -128,7 +128,11 @@ export type EmailType =
   // Automated reconciliation scheduling/alerting — Ops alert for a WARN/FAIL
   // scheduled reconciliation run. Never sent for a clean PASS.
   | "reconciliation_alert_ops"
-  | "reconciliation_failure_alert_ops";
+  | "reconciliation_failure_alert_ops"
+  // Stale-run watchdog — a CRON-invoked run left stuck at RUNNING past the
+  // stale threshold (the process likely died before either the job's own or
+  // the route's catch block could run). Distinct from both alerts above.
+  | "reconciliation_stale_alert_ops";
 
 export type DispatchInput = {
   type: EmailType;
