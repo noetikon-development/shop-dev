@@ -1,6 +1,9 @@
 import "server-only";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { slugify } from "@/lib/utils";
+
+type Tx = Prisma.TransactionClient | typeof prisma;
 
 /**
  * Read layer for admin catalog management. Unlike src/lib/data.ts (the
@@ -257,6 +260,32 @@ export async function categorySelectOptions(excludeId?: string) {
   };
   walk(null, 0);
   return out;
+}
+
+/**
+ * True when `proposedParentId` is `categoryId` itself or any descendant of it
+ * at any depth — i.e. assigning it as `categoryId`'s parent would create a
+ * cycle. Walks the ancestor chain *up* from `proposedParentId` via `parentId`
+ * rather than walking down `categoryId`'s subtree, so a single pass (bounded
+ * by tree depth, not tree size) catches a cycle regardless of how deep the
+ * taxonomy grows — not just a direct self/child relationship.
+ */
+export async function categoryWouldCreateCycle(
+  categoryId: string,
+  proposedParentId: string,
+  tx: Tx = prisma,
+): Promise<boolean> {
+  const rows = await tx.category.findMany({ select: { id: true, parentId: true } });
+  const parentOf = new Map(rows.map((c) => [c.id, c.parentId]));
+  const seen = new Set<string>();
+  let cur: string | null = proposedParentId;
+  while (cur) {
+    if (cur === categoryId) return true;
+    if (seen.has(cur)) return false; // pre-existing corruption guard — never loop forever
+    seen.add(cur);
+    cur = parentOf.get(cur) ?? null;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------

@@ -32,6 +32,7 @@ import {
 import {
   generateProductSlug,
   generateCategorySlug,
+  categoryWouldCreateCycle,
   skuInUse,
   generateVariantSku,
 } from "@/lib/admin/catalog";
@@ -670,14 +671,17 @@ export async function updateCategory(
   }
   const data = parsed.data;
 
-  if (data.parentId === id) {
-    return { error: "A category can’t be its own parent.", fieldErrors: { parentId: "Invalid" } };
-  }
   if (data.parentId) {
-    const parent = await prisma.category.findUnique({ where: { id: data.parentId }, select: { parentId: true } });
+    const parent = await prisma.category.findUnique({ where: { id: data.parentId }, select: { id: true } });
     if (!parent) return { error: "That parent category no longer exists.", fieldErrors: { parentId: "Invalid" } };
-    if (parent.parentId === id) {
-      return { error: "That would create a category loop.", fieldErrors: { parentId: "Invalid" } };
+    if (await categoryWouldCreateCycle(id, data.parentId)) {
+      return {
+        error:
+          data.parentId === id
+            ? "A category can’t be its own parent."
+            : "That would create a category loop.",
+        fieldErrors: { parentId: "Invalid" },
+      };
     }
   }
   if (data.slug !== existing.slug) {
