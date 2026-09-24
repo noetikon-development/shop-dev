@@ -16,7 +16,8 @@ import { restoreOfferStock } from "@/lib/marketplace/offer-inventory";
 import { refundRouteForOrder, createAttributedPaymentRefund } from "@/lib/payments/refund";
 import { getPaymentsConfig } from "@/lib/payments/config";
 import { resolveShippingProvider } from "@/lib/shipping/registry";
-import type { ShipmentPackage, ProviderOutcome } from "@/lib/shipping/provider";
+import type { ShipmentAddress, ShipmentDraft, ShipmentPackage, ProviderOutcome, ShippingProvider } from "@/lib/shipping/provider";
+import { parseSellerOriginAddress } from "@/lib/marketplace/origin-address";
 import { writeAudit, type AuditInput } from "@/lib/admin/audit";
 import type { SellerContext } from "@/lib/marketplace/types";
 
@@ -916,9 +917,49 @@ export type ShipmentInput = {
   trackingNumber?: string | null;
   trackingUrl?: string | null;
   note?: string | null;
+  /**
+   * Real-provider fields (Phase 9F-48 backend wiring). All optional and ALL
+   * ignored by the MANUAL provider (it only ever reads the 5 fields above).
+   * Read only when `resolveShippingProvider()` resolves to a non-MANUAL
+   * provider — unreachable in Production/Preview today, since the registry
+   * fails closed to MANUAL with no `shipping.*` StoreSetting rows and no
+   * `SHIPPING_LALAMOVE_API_KEY` in either environment.
+   *
+   * `origin` and `package` are intentionally NEVER read from this input, even
+   * though the type carries them for parity with `ShipmentDraft` — origin is
+   * always the seller's own approved `Seller.originAddress` (a seller must
+   * never be able to supply a different pickup location than what's on their
+   * profile) and package is always `deriveShipmentPackage()`'s own result
+   * (never duplicated here). `destination` is a PARTIAL address: the caller
+   * supplies only what it actually has today (coordinates); every other
+   * destination field is filled in from the order's own `shippingAddress`
+   * snapshot.
+   */
+  origin?: ShipmentAddress;
+  destination?: Partial<ShipmentAddress>;
+  package?: ShipmentPackage;
+  serviceType?: string;
+  direction?: "FORWARD" | "RETURN";
 };
 
 export type SaveShipmentResult = { ok: true; shipmentId: string } | SellerOrderRepoError;
+
+/** Minimal, safe `Order.shippingAddress` JSON-snapshot reader (mirrors `parseAddress` in `admin/orders.ts`, kept file-local — no shared export exists to reuse). */
+function parseOrderShippingAddressSnapshot(raw: string | null | undefined): Record<string, string> {
+  if (!raw) return {};
+  try {
+    const v: unknown = JSON.parse(raw);
+    if (!v || typeof v !== "object") return {};
+    const o = v as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const k of ["recipient", "phone", "line1", "line2", "barangay", "city", "province", "postalCode", "country"]) {
+      if (typeof o[k] === "string") out[k] = o[k] as string;
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 /**
  * Create the SellerOrder's shipment, or update it if one already exists. MVP:
@@ -933,6 +974,27 @@ export type SaveShipmentResult = { ok: true; shipmentId: string } | SellerOrderR
  * one-shipment-per-SellerOrder guard, the ownership checks and the persisted
  * columns are unchanged; the provider-integration columns stay NULL for manual
  * shipments.
+ *
+ * 9F-48 backend wiring: a non-MANUAL provider (e.g. LALAMOVE) takes a
+ * different, ADDITIONAL pre-transaction path — build a full `ShipmentDraft`
+ * (origin from the seller's profile, destination from the order's address
+ * snapshot + supplied coordinates, package from `deriveShipmentPackage()`),
+ * call `provider.quote()`, then `provider.createShipment()` — before ever
+ * touching the database. The MANUAL branch below is byte-identical to before
+ * this phase: a single `createShipment()` call, no quote, no draft-building.
+ * KNOWN LIMITATION, not yet addressed: editing an EXISTING non-MANUAL
+ * shipment (a `shipmentId` is supplied) re-runs this same quote+book flow,
+ * which would re-book with the real provider rather than patch the existing
+ * booking — acceptable only because no non-MANUAL provider can be enabled in
+ * Production/Preview today (see the registry's fail-closed gate); flagged
+ * here for whoever wires up an edit flow before this provider ever activates.
+ *
+ * `providerOverride` is a TEST-ONLY seam, mirroring the existing `externalTx`
+ * pattern in this same function: omitted by every real caller (which always
+ * gets the registry's own `resolveShippingProvider()` result), it exists
+ * solely so a test can exercise the non-MANUAL branch with a fake/stub
+ * `ShippingProvider` — no real provider network call — without needing a
+ * mocking framework or module patching.
  */
 export async function saveSellerShipment(
   ctx: SellerContext,
@@ -940,19 +1002,157 @@ export async function saveSellerShipment(
   input: ShipmentInput,
   shipmentId?: string,
   externalTx?: Prisma.TransactionClient,
+  providerOverride?: ShippingProvider,
 ): Promise<SaveShipmentResult> {
-  const provider = await resolveShippingProvider();
-  const outcome = await provider.createShipment({ sellerOrderId, ...input });
-  if (!outcome.ok) return { ok: false, code: "VALIDATION", error: outcome.error };
-  const resolved = {
-    data: {
+  const provider = providerOverride ?? (await resolveShippingProvider());
+
+  let resolvedData: Record<string, unknown>;
+
+  if (provider.code === "MANUAL") {
+    // Byte-identical to before 9F-48: one validation-only call, no quote, no
+    // draft. Passed explicitly (not `{ sellerOrderId, ...input }`) only
+    // because `ShipmentInput.destination` is now a looser `Partial<...>` than
+    // `ShipmentDraft.destination` — MANUAL never reads any of the new fields
+    // either way, so this changes nothing about what MANUAL sees or does.
+    const outcome = await provider.createShipment({
+      sellerOrderId,
+      carrier: input.carrier,
+      carrierName: input.carrierName,
+      trackingNumber: input.trackingNumber,
+      trackingUrl: input.trackingUrl,
+      note: input.note,
+    });
+    if (!outcome.ok) return { ok: false, code: "VALIDATION", error: outcome.error };
+    resolvedData = {
       carrier: outcome.value.carrier,
       carrierName: outcome.value.carrierName,
       trackingNumber: outcome.value.trackingNumber,
       trackingUrl: outcome.value.trackingUrl,
       note: outcome.value.note,
-    },
-  };
+    };
+  } else {
+    // Non-MANUAL — ownership-scoped read of exactly what's needed to build the
+    // draft (the transaction below re-checks ownership as the authoritative
+    // guard; this read only decides whether we're allowed to call the
+    // provider at all). Reuses `externalTx` (when the caller supplied one) so
+    // these reads see the SAME transaction's own writes — real callers never
+    // pass `externalTx` here today, so this is `prisma` (the global client)
+    // in production, exactly as before; a test can pass a still-open `tx` so
+    // its own rolled-back fixtures are visible to this read without any real
+    // commit.
+    const client = externalTx ?? prisma;
+    const owned = await client.sellerOrder.findFirst({
+      where: { id: sellerOrderId, sellerId: ctx.sellerId },
+      select: { status: true, shipments: { select: { id: true } }, order: { select: { shippingAddress: true } } },
+    });
+    if (!owned) return { ok: false, code: "NOT_FOUND", error: "No such order for this seller." };
+    // A real, non-MANUAL booking has a genuine external side effect — unlike
+    // MANUAL's pure-validation call, calling the provider only to then discard
+    // the result inside `run()`'s own guard below would leave an orphaned real
+    // booking with the carrier. Check the exact same conditions `run()` checks
+    // BEFORE calling the provider at all, for a genuine CREATE only (an EDIT,
+    // `shipmentId` supplied, is allowed to proceed — see the known-limitation
+    // note above).
+    if (!shipmentId) {
+      if (owned.status === "CANCELLED" || owned.status === "DELIVERED") {
+        return { ok: false, code: "VALIDATION", error: "This order can no longer be edited." };
+      }
+      if (owned.shipments.length > 0) {
+        return { ok: false, code: "CONFLICT", error: "This order already has a shipment — edit that one." };
+      }
+    }
+
+    const seller = await client.seller.findUnique({ where: { id: ctx.sellerId }, select: { originAddress: true } });
+    const origin = parseSellerOriginAddress(seller?.originAddress ?? null);
+    if (!origin?.lat || !origin?.lng) {
+      return { ok: false, code: "VALIDATION", error: "Set your pickup address coordinates in Seller Settings before creating a shipment with this carrier." };
+    }
+
+    const destLat = input.destination?.lat;
+    const destLng = input.destination?.lng;
+    if (!destLat || !destLng) {
+      return { ok: false, code: "VALIDATION", error: "Destination coordinates are required for this carrier." };
+    }
+    if (!input.serviceType) {
+      return { ok: false, code: "VALIDATION", error: "Choose a service type for this carrier." };
+    }
+    if (!provider.quote) {
+      return { ok: false, code: "VALIDATION", error: "This carrier does not support rate quoting." };
+    }
+
+    const pkg = await deriveShipmentPackage(sellerOrderId, client);
+    if (!pkg.ok) return { ok: false, code: "VALIDATION", error: pkg.error };
+
+    const destSnapshot = parseOrderShippingAddressSnapshot(owned.order.shippingAddress);
+    const destination: ShipmentAddress = {
+      recipient: destSnapshot.recipient ?? "",
+      phone: destSnapshot.phone ?? "",
+      line1: destSnapshot.line1 ?? "",
+      line2: destSnapshot.line2 ?? null,
+      barangay: destSnapshot.barangay ?? null,
+      city: destSnapshot.city ?? "",
+      province: destSnapshot.province ?? "",
+      postalCode: destSnapshot.postalCode ?? "",
+      country: destSnapshot.country ?? "",
+      ...input.destination,
+      lat: destLat,
+      lng: destLng,
+    };
+
+    const draft: ShipmentDraft = {
+      sellerOrderId,
+      carrier: input.carrier,
+      carrierName: input.carrierName ?? null,
+      trackingNumber: input.trackingNumber ?? null,
+      trackingUrl: input.trackingUrl ?? null,
+      note: input.note ?? null,
+      direction: input.direction ?? "FORWARD",
+      origin: {
+        recipient: origin.recipient,
+        phone: origin.phone,
+        line1: origin.line1,
+        line2: origin.line2,
+        barangay: origin.barangay,
+        city: origin.city,
+        province: origin.province,
+        postalCode: origin.postalCode,
+        country: origin.country,
+        lat: origin.lat,
+        lng: origin.lng,
+      },
+      destination,
+      package: pkg.value,
+      serviceType: input.serviceType,
+    };
+
+    const quote = await provider.quote(draft);
+    if (!quote.ok) return { ok: false, code: "VALIDATION", error: quote.error };
+
+    const outcome = await provider.createShipment(draft);
+    if (!outcome.ok) return { ok: false, code: "VALIDATION", error: outcome.error };
+
+    resolvedData = {
+      carrier: outcome.value.carrier,
+      carrierName: outcome.value.carrierName,
+      trackingNumber: outcome.value.trackingNumber,
+      trackingUrl: outcome.value.trackingUrl,
+      note: outcome.value.note,
+      provider: outcome.value.provider,
+      externalShipmentId: outcome.value.externalShipmentId,
+      externalOrderId: outcome.value.externalOrderId,
+      service: outcome.value.service,
+      labelUrl: outcome.value.labelUrl,
+      shippingCostAmount: outcome.value.shippingCostAmount,
+      shippingCostCurrency: outcome.value.shippingCostCurrency,
+      estimatedDeliveryAt: outcome.value.estimatedDeliveryAt,
+      // `ShipmentResult` carries no `metadata` today — no provider populates
+      // it yet, so there is nothing to persist here but the column's own
+      // default. Written explicitly (not omitted) so the field is visibly
+      // part of this path, ready for a future provider that does set it.
+      metadata: null,
+      direction: draft.direction,
+    };
+  }
 
   const run = async (tx: Prisma.TransactionClient): Promise<SaveShipmentResult> => {
     const so = await tx.sellerOrder.findFirst({
@@ -973,7 +1173,7 @@ export async function saveSellerShipment(
       if (owned.status === "DELIVERED") {
         return { ok: false, code: "VALIDATION", error: "A delivered shipment can't be edited." };
       }
-      await tx.shipment.update({ where: { id: owned.id }, data: resolved.data });
+      await tx.shipment.update({ where: { id: owned.id }, data: resolvedData });
       return { ok: true, shipmentId: owned.id };
     }
 
@@ -981,7 +1181,7 @@ export async function saveSellerShipment(
       return { ok: false, code: "CONFLICT", error: "This order already has a shipment — edit that one." };
     }
     const created = await tx.shipment.create({
-      data: { sellerOrderId, ...resolved.data, status: "PENDING" },
+      data: { sellerOrderId, ...resolvedData, status: "PENDING" },
       select: { id: true },
     });
     return { ok: true, shipmentId: created.id };

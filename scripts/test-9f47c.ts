@@ -131,15 +131,23 @@ async function main() {
 
   // ── F · repository wiring ───────────────────────────────────────────────
   const repo = read("src/lib/marketplace/seller-order-repository.ts");
+  // 9F-48 backend wiring updated these two literal-text checks: `provider` is
+  // now `providerOverride ?? (await resolveShippingProvider())` (a test-only
+  // seam, defaulting to the exact same registry call) and the MANUAL branch's
+  // `resolved.data` was renamed `resolvedData` when a non-MANUAL branch was
+  // added alongside it — the underlying MANUAL behaviour these checks care
+  // about (resolve via the registry, call createShipment, persist the result)
+  // is unchanged, as proven by every runtime assertion in sections G/H below.
   ok("F · saveSellerShipment resolves the provider and calls createShipment",
-    /const provider = await resolveShippingProvider\(\);/.test(repo) &&
-    /const outcome = await provider\.createShipment\(\{ sellerOrderId, \.\.\.input \}\);/.test(repo));
+    /const provider = providerOverride \?\? \(await resolveShippingProvider\(\)\);/.test(repo) &&
+    /if \(provider\.code === "MANUAL"\)/.test(repo) &&
+    /const outcome = await provider\.createShipment\(\{/.test(repo));
   ok("F · the old local resolveShipment function is gone from the repository", !/function resolveShipment\(/.test(repo));
   ok("F · transaction boundary unchanged (still prisma.$transaction(run) / externalTx)",
     /if \(externalTx\) return await run\(externalTx\);/.test(repo) && /return await prisma\.\$transaction\(run\);/.test(repo));
-  ok("F · persisted columns unchanged — create still {...resolved.data, status: \"PENDING\"}, no provider column",
-    /data: \{ sellerOrderId, \.\.\.resolved\.data, status: "PENDING" \}/.test(repo) &&
-    /await tx\.shipment\.update\(\{ where: \{ id: owned\.id \}, data: resolved\.data \}\)/.test(repo));
+  ok("F · persisted columns unchanged — create still {...resolvedData, status: \"PENDING\"}, MANUAL leaves provider column untouched",
+    /data: \{ sellerOrderId, \.\.\.resolvedData, status: "PENDING" \}/.test(repo) &&
+    /await tx\.shipment\.update\(\{ where: \{ id: owned\.id \}, data: resolvedData \}\)/.test(repo));
   ok("F · one-shipment-per-SellerOrder + ownership + edit guards unchanged",
     /This order already has a shipment/.test(repo) && /No such order for this seller\./.test(repo) &&
     /This order can no longer be edited\./.test(repo) && /A delivered shipment can't be edited\./.test(repo));

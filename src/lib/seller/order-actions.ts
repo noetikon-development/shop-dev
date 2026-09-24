@@ -304,6 +304,15 @@ const shipmentSchema = z.object({
   trackingNumber: z.string().trim().max(40).optional().or(z.literal("")),
   trackingUrl: z.string().trim().max(500).optional().or(z.literal("")),
   note: z.string().trim().max(300).optional().or(z.literal("")),
+  // 9F-48 backend wiring — dormant until a real non-MANUAL provider is ever
+  // enabled (the registry fails closed to MANUAL today) and until a future
+  // task adds the corresponding form fields; MANUAL ignores all three.
+  // Deeper validation (numeric range, provider-specific service-type support)
+  // happens in saveSellerShipment()/the provider's own quote(), not here —
+  // this stays a thin pass-through, same as every other field above.
+  serviceType: z.string().trim().max(40).optional().or(z.literal("")),
+  destinationLat: z.string().trim().max(20).optional().or(z.literal("")),
+  destinationLng: z.string().trim().max(20).optional().or(z.literal("")),
 });
 
 export async function saveShipmentAction(
@@ -319,6 +328,9 @@ export async function saveShipmentAction(
     trackingNumber: formData.get("trackingNumber") ?? "",
     trackingUrl: formData.get("trackingUrl") ?? "",
     note: formData.get("note") ?? "",
+    serviceType: formData.get("serviceType") ?? "",
+    destinationLat: formData.get("destinationLat") ?? "",
+    destinationLng: formData.get("destinationLng") ?? "",
   });
   if (!parsed.success) {
     const fieldErrors: Record<string, string> = {};
@@ -337,6 +349,10 @@ export async function saveShipmentAction(
       trackingNumber: d.trackingNumber || null,
       trackingUrl: d.trackingUrl || null,
       note: d.note || null,
+      serviceType: d.serviceType || undefined,
+      ...(d.destinationLat || d.destinationLng
+        ? { destination: { lat: d.destinationLat || undefined, lng: d.destinationLng || undefined } }
+        : {}),
     },
     d.shipmentId || undefined,
   );
