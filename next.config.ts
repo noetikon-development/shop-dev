@@ -30,7 +30,7 @@ const nextConfig: NextConfig = {
     // quota exhausted), breaking every product/category image. Bypassing the
     // optimizer serves the already-compressed source WebP files directly.
     // Revert once the quota/plan issue is resolved.
-    unoptimized: true,
+    unoptimized: false,
     remotePatterns: [
       // Supabase Storage — admin-uploaded media (products, categories, CMS).
       { protocol: "https", hostname: "*.supabase.co", pathname: "/storage/v1/object/public/**" },
