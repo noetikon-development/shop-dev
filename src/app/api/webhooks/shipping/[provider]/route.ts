@@ -40,6 +40,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ pro
     return new Response("payload too large", { status: 413 });
   }
 
+  // Lalamove's Partner Portal "initial connection" check (run when the webhook
+  // URL is saved) sends no body at all and requires a bare 200 before any
+  // signature/complex logic runs (Lalamove's own "Tutorial on Lalamove
+  // Webhook" doc, "Receiving the webhooks" #1: "make sure to send status 200
+  // even when Lalamove doesn't send anything in the body... before any
+  // complex logic"). A genuine signed event always has a non-empty body, so
+  // this can never shadow real webhook verification.
+  if (rawBody.trim().length === 0) {
+    return new Response("ok", { status: 200 });
+  }
+
   const result = await processShippingWebhook(provider, rawBody, { isHttps });
 
   return new Response(result.body, {
